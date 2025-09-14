@@ -77,28 +77,52 @@ class UserSettings:
         return self.get(("color_mode_settings", color_mode, key))
 
     def set_cms(self, color_mode, key, value):
-        return self.set(("color_mode_settings", color_mode, key), value)
-
+        self.set(("color_mode_settings", color_mode, key), value)
 
     def _xml_set(self, key, value):
+        # convert dict key into path query
         if isinstance(key, str):
-            xpath = key
+            find = "./{}".format(key)
+            path = [key]
         elif hasattr(key, '__iter__'):
-            xpath = '/'.join(key)
+            find = "./" + "/".join(key)
+            path = key
+        else:
+            raise KeyError("Invalid Key Type: {}".format(type(key)))
 
-        elem = self.root.find("./" + xpath)
+        elem = self.root.find(find)
         if elem is None:
-            raise Exception("XML path not found: " + xpath) 
+            # recursively create parents up to leaf
+            root_find = './' + '/'.join(path[:-1])
+            elem_parent = self.root.find(root_find) if len(path) > 1 else self.root
 
-        elem.text = str(value)
+            if elem_parent is None:
+                # Create missing parent chain
+                parent = self.root
+                for p in path[:-1]:
+                    e = parent.find('./' + p)
+                    if e is None:
+                        e = ET.SubElement(parent, p)
+                    parent = e
+                elem_parent = parent
+
+            elem = ET.SubElement(elem_parent, path[-1])
+
+        elem.text = value
         self.pending_changes = True
 
     def save_changes(self):
-        if self.pending_changes:
+        if self.pending_changes is True and time.time() - self.last_save > 1:
+            logger.warning("Saving user settings")
+            self.tree.write(self.CONFIG_FILE, encoding='utf-8', xml_declaration=True)
+            self.root = self.tree.getroot()
+            self.xml_to_dict(self.cache, self.root)
+            self.last_save = time.time()
             self.pending_changes = False
 
-            self.tree.write(self.CONFIG_FILE)
-            self.tree = ET.parse(self.CONFIG_FILE)
+    def save_immediately(self):
+        if self.pending_changes:
+            self.tree.write(self.CONFIG_FILE, encoding='utf-8', xml_declaration=True)
             self.root = self.tree.getroot()
             self.xml_to_dict(self.cache, self.root)
             self.last_save = time.time()
@@ -110,6 +134,66 @@ class UserSettings:
         self.xml_to_dict(self.cache, self.root)
         self.pending_reset = True
         self.last_save = time.time()
+
+    # ---- Saved Wi-Fi networks management ----
+    def _ensure_wifi_root(self):
+        wifi_root = self.root.find('wifi_networks')
+        if wifi_root is None:
+            wifi_root = ET.SubElement(self.root, 'wifi_networks')
+            self.pending_changes = True
+        return wifi_root
+
+    def get_saved_wifi_networks(self):
+        nets = []
+        wifi_root = self.root.find('wifi_networks')
+        if wifi_root is None:
+            return nets
+        for net in wifi_root.findall('network'):
+            ssid = (net.get('ssid') or '').strip()
+            pwd = (net.get('password') or '')
+            prio = net.get('priority')
+            try:
+                prio = int(prio) if prio is not None else None
+            except:
+                prio = None
+            nets.append({'ssid': ssid, 'password': pwd, 'priority': prio})
+        nets.sort(key=lambda n: (n['priority'] is None, n['priority'] if n['priority'] is not None else 1_000_000))
+        return nets
+
+    def add_saved_wifi_network(self, ssid, password, priority=None):
+        ssid = str(ssid).strip()
+        password = str(password)
+        wifi_root = self._ensure_wifi_root()
+        for net in wifi_root.findall('network'):
+            if (net.get('ssid') or '').strip() == ssid:
+                net.set('password', password)
+                if priority is not None:
+                    net.set('priority', str(priority))
+                self.pending_changes = True
+                self.save_changes()
+                return
+        net = ET.SubElement(wifi_root, 'network')
+        net.set('ssid', ssid)
+        net.set('password', password)
+        if priority is not None:
+            net.set('priority', str(priority))
+        self.pending_changes = True
+        self.save_changes()
+
+    def remove_saved_wifi_network(self, ssid):
+        ssid = str(ssid).strip()
+        wifi_root = self.root.find('wifi_networks')
+        if wifi_root is None:
+            return False
+        removed = False
+        for net in list(wifi_root.findall('network')):
+            if (net.get('ssid') or '').strip() == ssid:
+                wifi_root.remove(net)
+                removed = True
+        if removed:
+            self.pending_changes = True
+            self.save_changes()
+        return removed
 
     def xml_to_dict(self, dict, node):
         """Recursively convert xml node into dict
@@ -125,34 +209,33 @@ class UserSettings:
 
     def copy_missing(self):
         path = []
-        for event, def_elem in ET.iterparse(self.DEFAULT_CONFIG_FILE, events=("start", "end")):
+        for event, def_elem in ET.iterparse(self.DEFAULT_CONFIG_FILE, events=("start", "end" )):
             if event == 'start':
                 path.append(def_elem.tag)
 
-                # iterparse makes path[0] the root "settings"; skip root
-                if len(path[1:]) == 0:
-                    continue
-
-                # Find element in settings.xml
-                findstr = './' + '/'.join(path[1:])
-                elem = self.root.find(findstr)
-
-                # If element is missing, copy it to the correct location
+                elem = self.root.find('./' + '/'.join(path[1:]))
                 if elem is None:
-                    #ET.dump(def_elem)
+                    # element might exist but be empty -> create text value if text exists
+                    if def_elem.text is not None:
+                        if len(path[1:-1]) == 0:
+                            parent_elem = self.root
+                        else:
+                            parent_find = './' + '/'.join(path[1:-1])
+                            parent_elem = self.root.find(parent_find)
+                        elem = ET.SubElement(parent_elem, def_elem.tag)
+                        elem.text = def_elem.text
+                        self.pending_changes = True
 
-                    # [1: - ignore 'settings' root element
-                    # :-1] - get parent; do not include current (last) element
+            elif event == 'end':
+                elem = self.root.find('./' + '/'.join(path[1:]))
+                if elem is None and len(def_elem) != 0:
                     if len(path[1:-1]) == 0:
                         parent_elem = self.root
                     else:
                         parent_find = './' + '/'.join(path[1:-1])
                         parent_elem = self.root.find(parent_find)
-                    
-                    parent_elem.insert(0, def_elem)     # better indentation preservation when inserting at top, vs append
+                    parent_elem.insert(0, def_elem)
                     self.pending_changes = True
-
-            elif event == 'end':
                 path.pop()
 
         if self.pending_changes:

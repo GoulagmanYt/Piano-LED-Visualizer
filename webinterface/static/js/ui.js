@@ -1533,3 +1533,82 @@ function handle_confirmation_button(element, delay = 1000) {
         element.classList.remove('pointer-events-none', "animate-pulse");
     }, delay);
 }
+
+
+// ===== Saved Wi-Fi networks management =====
+function get_saved_wifi_list() {
+    const el = document.getElementById('saved-wifi-list');
+    if (!el) return;
+    el.innerHTML = '';
+    const xhttp = new XMLHttpRequest();
+    xhttp.onreadystatechange = function () {
+        if (this.readyState === 4 && this.status === 200) {
+            const res = JSON.parse(this.responseText);
+            if (res.success) {
+                render_saved_wifi(res.networks || []);
+            }
+        }
+    };
+    xhttp.open("GET", "/api/get_saved_wifi_list", true);
+    xhttp.send();
+}
+
+function render_saved_wifi(networks) {
+    const el = document.getElementById('saved-wifi-list');
+    if (!el) return;
+    el.innerHTML = '';
+    if (!networks.length) {
+        el.innerHTML = '<div class="opacity-60 text-sm">No saved networks</div>';
+        return;
+    }
+    networks.forEach(n => {
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between bg-gray-100 dark:bg-gray-600 mb-2 p-2 rounded';
+        row.innerHTML = `
+            <div class="truncate">${n.ssid}</div>
+            <button class="text-xs px-2 py-1 bg-red-600 text-white rounded-2xl"
+                onclick="remove_saved_wifi('${n.ssid.replace(/'/g, "\\'")}')">Remove</button>`;
+        el.appendChild(row);
+    });
+}
+
+function add_saved_wifi() {
+    const ssid = (document.getElementById('saved-ssid')||{}).value || '';
+    const password = (document.getElementById('saved-password')||{}).value || '';
+    if (!ssid || !password) return;
+    const xhttp = new XMLHttpRequest();
+    xhttp.open("POST", "/api/add_saved_wifi", true);
+    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    xhttp.onreadystatechange = function () {
+        if (this.readyState === 4) {
+            get_saved_wifi_list();
+            if (document.getElementById('saved-password')) document.getElementById('saved-password').value='';
+            if (document.getElementById('saved-ssid')) document.getElementById('saved-ssid').value='';
+        }
+    };
+    xhttp.send(JSON.stringify({ssid, password}));
+}
+
+function remove_saved_wifi(ssid) {
+    const xhttp = new XMLHttpRequest();
+    xhttp.open("POST", "/api/remove_saved_wifi", true);
+    xhttp.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+    xhttp.onreadystatechange = function () {
+        if (this.readyState === 4) {
+            get_saved_wifi_list();
+        }
+    };
+    xhttp.send(JSON.stringify({ssid}));
+}
+
+function try_connect_saved_wifi_now(btn) {
+    if (btn && typeof temporary_disable_button === 'function') temporary_disable_button(btn, 7000);
+    const xhttp = new XMLHttpRequest();
+    xhttp.open("POST", "/api/try_connect_saved_wifi", true);
+    xhttp.onreadystatechange = function () {
+        if (this.readyState === 4) {
+            get_wifi_list();
+        }
+    };
+    xhttp.send();
+}

@@ -47,27 +47,11 @@ def start_server(loop):
                     await websocket.send(str(msg))
                     app_state.learning.socket_send.remove(msg)
         except:
-            # Handle the connection closed error
             pass
-
-    async def ledemu_recv(websocket):
-        async for message in websocket:
-            try:
-                msg = json.loads(message)
-                if msg["cmd"] == "pause":
-                    app_state.ledemu_pause = True
-                elif msg["cmd"] == "resume":
-                    app_state.ledemu_pause = False
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            except websockets.exceptions.WebSocketException:
-                pass
-            except Exception as e:
-                logger.warning(e)
-                return
 
     async def ledemu(websocket):
         try:
+            # Register the client
             app_state.ledemu_clients.add(websocket)
             logger.info(f"LED emulator client connected. Active clients: {len(app_state.ledemu_clients)}")
 
@@ -76,7 +60,7 @@ def start_server(loop):
                                                   "reverse": app_state.ledstrip.reverse}}))
 
             previous_leds = None
-            while not websocket.closed and websocket in app_state.ledemu_clients:  # Check both conditions
+            while not websocket.closed and websocket in app_state.ledemu_clients:
                 try:
                     ledstrip = app_state.ledstrip
                     await asyncio.sleep(1 / ledstrip.WEBEMU_FPS)
@@ -84,15 +68,14 @@ def start_server(loop):
                     if app_state.ledemu_pause:
                         continue
 
-                    # Check connection is still open before sending
                     if websocket.closed:
                         break
 
                     current_leds = ledstrip.strip.getPixels()
-                    if previous_leds != current_leds:  # Only send if LED state has changed
+                    if previous_leds != current_leds:
                         try:
                             await websocket.send(json.dumps({"leds": current_leds}))
-                            previous_leds = list(current_leds)  # Create a copy of the list
+                            previous_leds = list(current_leds)
                         except websockets.exceptions.ConnectionClosed:
                             break
 
@@ -101,49 +84,41 @@ def start_server(loop):
                 except websockets.exceptions.WebSocketException:
                     break
                 except Exception as e:
-                    logger.warning(f"LED emulator error: {str(e)}")
+                    logger.warning("Unhandled exception in ledemu:", exc_info=e)
                     break
-        finally:
+
             if websocket in app_state.ledemu_clients:
                 app_state.ledemu_clients.remove(websocket)
                 logger.info(f"LED emulator client disconnected. Active clients: {len(app_state.ledemu_clients)}")
-            try:
-                await websocket.close()
-            except:
-                pass
 
-    async def handler(websocket):
-        try:
-            if websocket.path == "/learning":
-                await learning(websocket)
-            elif websocket.path == "/ledemu":
-                await asyncio.gather(ledemu(websocket), ledemu_recv(websocket))
-            else:
-                # No handler for this path; close the connection.
-                return
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        except websockets.exceptions.WebSocketException:
+            pass
         except Exception as e:
-            logger.warning(f"WebSocket handler error: {str(e)}")
+            logger.warning("Unexpected error in ledemu handler:", exc_info=e)
+
+    async def main_async():
+        server_learning = await websockets.serve(learning, get_ip_address(), 5678)
+        server_ledemu = await websockets.serve(ledemu, get_ip_address(), 5679)
+        try:
+            await asyncio.Future()  # run forever
         finally:
-            if websocket in app_state.ledemu_clients:
-                app_state.ledemu_clients.remove(websocket)
-                logger.info(
-                    f"LED emulator client disconnected (handler cleanup). Active clients: {len(app_state.ledemu_clients)}")
+            server_learning.close()
+            server_ledemu.close()
+            await server_learning.wait_closed()
+            await server_ledemu.wait_closed()
 
-    async def main():
-        logger.info("WebSocket listening on: " + str(get_ip_address()) + ":8765")
-        async with websockets.serve(handler, "0.0.0.0", 8765):
-            await asyncio.Future()
+    loop.create_task(main_async())
 
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
-
-
-# Stop the WebSocket server and cancel pending tasks on shutdown
 def stop_server(loop):
-    for task in asyncio.all_tasks(loop=loop):
+    for task in asyncio.all_tasks(loop):
         task.cancel()
     loop.stop()
 
 
 # Import views after app is defined to avoid circular imports
 from webinterface import views, views_api
+
+# NEW: register extra Wi-Fi management endpoints
+import webinterface.wifi_api

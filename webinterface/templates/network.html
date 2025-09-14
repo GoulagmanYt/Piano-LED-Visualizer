@@ -63,7 +63,19 @@
     </div>
 
     <div class="flex-1 grid p-5 bg-gray-200 dark:bg-gray-700 shadow-xl rounded-lg">
-        <div class="text-lg font-semibold mb-2" data-translate="local_address">
+        <div class="text-lg font-semibold mb-2"     <!-- NEW: Saved Wi-Fi Networks block -->
+    <div class=\"flex-1 grid p-5 bg-gray-200 dark:bg-gray-700 shadow-xl rounded-lg\">
+      <div class=\"text-lg font-semibold mb-2\">Saved Wi-Fi Networks</div>
+      <div class=\"mb-2 flex gap-2\">
+        <input id=\"saved-ssid\" class=\"flex-1 h-10 dark:text-black bg-gray-100 appearance-none border rounded py-2 px-3 leading-tight focus:outline-none\" type=\"text\" placeholder=\"SSID\">
+        <input id=\"saved-password\" class=\"flex-1 h-10 dark:text-black bg-gray-100 appearance-none border rounded py-2 px-3 leading-tight focus:outline-none\" type=\"password\" placeholder=\"Password\">
+        <button onclick=\"add_saved_wifi()\" class=\"h-10 px-3 bg-blue-600 text-white rounded-2xl\">Add</button>
+      </div>
+      <div class=\"text-xs opacity-60 mb-2\">Saved networks are tried automatically when Wi-Fi is unavailable (top to bottom).</div>
+      <div id=\"saved-wifi-list\"></div>
+      <button onclick=\"try_connect_saved_wifi_now(this)\" class=\"w-full h-10 mt-3 outline-none bg-green-600 text-white font-bold py-2 px-2 rounded-2xl\">Try Saved Networks Now</button>
+    </div>
+data-translate="local_address">
             Local Address
         </div>
         <div id="current-local-address" class="text-xl font-bold mb-4"></div>

@@ -16,16 +16,8 @@ class Hotspot:
         self.time_without_wifi = 0
         self.last_wifi_check_time = 0
 
-        subprocess.run("sudo chmod a+rwxX -R /home/Piano-LED-Visualizer/", shell=True, check=True)
 
 class PlatformBase:
-    def __getattr__(self, name):
-        def method(*args, **kwargs):
-            return False, f"Method '{name}' is not supported on this platform", ""
-        return method
-
-
-class PlatformNull(PlatformBase):
     def __getattr__(self, name):
         return self.pass_func
 
@@ -37,7 +29,6 @@ class PlatformRasp(PlatformBase):
     @staticmethod
     def check_and_enable_spi():
         try:
-            # Check if SPI is enabled by looking for spidev in /dev
             if not os.path.exists('/dev/spidev0.0'):
                 logger.info("SPI is not enabled. Enabling SPI interface...")
                 subprocess.run(['sudo', 'raspi-config', 'nonint', 'do_spi', '0'], check=True)
@@ -53,12 +44,10 @@ class PlatformRasp(PlatformBase):
 
     @staticmethod
     def copy_connectall_script():
-        # make sure connectall.py file exists and is updated
-        if not os.path.exists('/usr/local/bin/connectall.py') or \
-                filecmp.cmp('/usr/local/bin/connectall.py', 'lib/connectall.py') is not True:
+        if not os.path.exists('/usr/local/bin/connectall.py') or                 filecmp.cmp('/usr/local/bin/connectall.py', 'lib/connectall.py') is not True:
             logger.info("connectall.py script is outdated, updating...")
             copyfile('lib/connectall.py', '/usr/local/bin/connectall.py')
-            os.chmod('/usr/local/bin/connectall.py', 493)
+            os.chmod('/usr/local/bin/connectall.py', 0o755)
 
     def install_midi2abc(self):
         if not self.is_package_installed("abcmidi"):
@@ -83,6 +72,47 @@ class PlatformRasp(PlatformBase):
     def reboot():
         call("sudo /sbin/reboot now", shell=True)
 
+    # ---------- Try connecting to saved Wi-Fi networks ----------
+    def attempt_connect_saved_networks(self, hotspot, usersettings):
+        """Try to connect to one of the saved Wi-Fi networks using nmcli.
+        Returns (True, ssid) on success, (False, '') otherwise.
+        """
+        try:
+            saved = usersettings.get_saved_wifi_networks()
+        except Exception:
+            saved = []
+        if not saved:
+            return (False, '')
+        try:
+            visible = {n.get('ESSID') for n in self.get_wifi_networks()}
+        except Exception:
+            visible = set()
+        for entry in saved:
+            ssid = (entry.get('ssid') or '').strip()
+            password = entry.get('password') or ''
+            if not ssid or not password:
+                continue
+            if visible and ssid not in visible:
+                continue
+            logger.info(f"Trying saved Wi-Fi network: {ssid}")
+            try:
+                self.disable_hotspot()
+                result = subprocess.run(
+                    ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
+                    capture_output=True, text=True, timeout=25
+                )
+                if result.returncode == 0:
+                    usersettings.change_setting_value("is_hotspot_active", 0)
+                    logger.info(f"Connected to saved network {ssid}")
+                    return (True, ssid)
+                else:
+                    logger.warning(f"nmcli failed for {ssid}: {result.stderr.strip()}")
+            except subprocess.TimeoutExpired:
+                logger.warning(f"nmcli timed out for {ssid}")
+            except Exception as e:
+                logger.warning(f"Error connecting to {ssid}: {e}")
+        return (False, '')
+
     @staticmethod
     def restart_visualizer():
         call("sudo systemctl restart visualizer", shell=True)
@@ -94,12 +124,10 @@ class PlatformRasp(PlatformBase):
     @staticmethod
     def is_package_installed(package_name):
         try:
-            # Run the 'dpkg' command to check if the package is installed
             result = subprocess.run(['dpkg', '-s', package_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     check=True, text=True)
             output = result.stdout
             status_line = [line for line in output.split('\n') if line.startswith('Status:')][0]
-
             if "install ok installed" in status_line:
                 logger.info(f"{package_name} package is installed")
                 return True
@@ -112,65 +140,31 @@ class PlatformRasp(PlatformBase):
 
     @staticmethod
     def create_hotspot_profile():
-        # Check if the 'Hotspot' profile already exists
         check_profile = subprocess.run(['sudo', 'nmcli', 'connection', 'show', 'Hotspot'],
-                                       capture_output=True, text=True)
-
-        if 'Hotspot' in check_profile.stdout:
-            logger.info("Hotspot profile already exists. Skipping creation.")
-            return
-
-        # If we reach here, the profile doesn't exist, so we create it
-        logger.info("Creating new Hotspot profile...")
-        # Default password if not provided
-        password = "visualizer"
-
-
-        try:
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', 'wlan0',
-                'con-name', 'Hotspot', 'autoconnect', 'no', 'ssid', 'PianoLEDVisualizer'
-            ], check=True)
-
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
-                '802-11-wireless.mode', 'ap', '802-11-wireless.band', 'bg',
-                'ipv4.method', 'shared'
-            ], check=True)
-
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
-                'wifi-sec.key-mgmt', 'wpa-psk'
-            ], check=True)
-
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
-                'wifi-sec.psk', password
-            ], check=True)
-
-            logger.info(f"Hotspot profile created successfully with password: {password}")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"An error occurred while creating the Hotspot profile: {e}")
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if check_profile.returncode == 0:
+            logger.info("Hotspot profile already exists.")
+            return True
+        create_hotspot = subprocess.run(['sudo', 'nmcli', 'device', 'wifi', 'hotspot', 'ifname', 'wlan0',
+                                         'ssid', 'PianoLED', 'password', '12345678'],
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if create_hotspot.returncode == 0:
+            logger.info("Hotspot profile created successfully.")
+            return True
+        else:
+            logger.warning(f"Failed to create Hotspot profile: {create_hotspot.stderr}")
+            return False
 
     @staticmethod
-    def change_hotspot_password(new_password):
-        logger.info(f"Changing Hotspot password to: {new_password}")
+    def change_hotspot_password(password):
         try:
-            # Modify the Hotspot connection with the new password
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
-                'wifi-sec.psk', new_password
-            ], check=True)
-
-            logger.info("Hotspot password changed successfully.")
-
-            # Restart the hotspot to apply changes
-            # First, bring the connection down
-            subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'], check=False) # Allow failure if not up
-            time.sleep(2) # Give it a moment
-            # Then, bring it up again
+            subprocess.run(['sudo', 'nmcli', 'connection', 'show', 'Hotspot'],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'modify', 'Hotspot', 'wifi-sec.key-mgmt', 'wpa-psk'], check=True)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'modify', 'Hotspot', 'wifi-sec.psk', password], check=True)
+            subprocess.run(['sudo', 'nmcli', 'connection', 'down', 'Hotspot'], check=True)
             subprocess.run(['sudo', 'nmcli', 'connection', 'up', 'Hotspot'], check=True)
-            logger.info("Hotspot restarted to apply new password.")
+            logger.info("Hotspot password successfully changed and applied.")
             return True
         except subprocess.CalledProcessError as e:
             logger.warning(f"An error occurred while changing the Hotspot password: {e}")
@@ -194,37 +188,42 @@ class PlatformRasp(PlatformBase):
         try:
             with open(os.devnull, 'w') as null_file:
                 output = subprocess.check_output(['iwconfig'], text=True, stderr=null_file)
-
             if "Mode:Master" in output:
                 return False, "Running as hotspot", ""
-
             for line in output.split('\n'):
                 if "ESSID:" in line:
                     ssid = line.split("ESSID:")[-1].strip().strip('"')
                     if ssid != "off/any":
-                        access_point_line = [line for line in output.split('\n') if "Access Point:" in line]
-                        if access_point_line:
-                            access_point = access_point_line[0].split("Access Point:")[1].strip()
-                            return True, ssid, access_point
-                        return False, "Not connected to any Wi-Fi network.", ""
-                    return False, "Not connected to any Wi-Fi network.", ""
-
+                        with open(os.devnull, 'w') as null_file:
+                            iw_dev = subprocess.check_output(['iw', 'dev'], text=True, stderr=null_file)
+                        interface = re.search(r'Interface\s+(\S+)', iw_dev)
+                        interface_name = 'wlan0'
+                        if interface:
+                            interface_name = interface.group(1)
+                        scan_output = subprocess.check_output(['iw', 'dev', interface_name, 'link'], text=True, stderr=null_file)
+                        bssid = ""
+                        for l in scan_output.split('\n'):
+                            if "Connected to" in l:
+                                bssid = l.split("Connected to")[-1].strip()
+                                break
+                        return True, ssid, bssid
             return False, "No Wi-Fi interface found.", ""
-        except subprocess.CalledProcessError:
-            return False, "Error occurred while getting Wi-Fi information.", ""
-
-    def is_hotspot_running(self):
-        try:
-            result = subprocess.run(
-                ['nmcli', 'connection', 'show', '--active'],
-                capture_output=True,
-                text=True
-            )
-            return 'Hotspot' in result.stdout
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Error while checking current connections: {e.output}")
+            return False, "", ""
         except Exception as e:
-            logger.warning(f"Error checking hotspot status: {str(e)}")
-            return False
+            logger.warning(f"Error while checking current connections: {e}")
+            return False, "", ""
 
+    @staticmethod
+    def restart_visualizer():
+        call("sudo systemctl restart visualizer", shell=True)
+
+    @staticmethod
+    def restart_rtpmidid():
+        call("sudo systemctl restart rtpmidid", shell=True)
+
+    # ---------- manage_hotspot with saved networks ----------
     def manage_hotspot(self, hotspot, usersettings, midiports, first_run=False):
         if first_run:
             self.create_hotspot_profile()
@@ -233,11 +232,6 @@ class PlatformRasp(PlatformBase):
                     logger.info("Hotspot is enabled in settings but not running. Starting hotspot...")
                     self.enable_hotspot()
                     time.sleep(5)
-
-                    if self.is_hotspot_running():
-                        logger.info("Hotspot started successfully")
-                    else:
-                        logger.warning("Failed to start hotspot")
                 else:
                     logger.info("Hotspot is already running")
 
@@ -253,28 +247,35 @@ class PlatformRasp(PlatformBase):
             wifi_success, wifi_ssid, _ = self.get_current_connections()
 
             if not wifi_success:
+                ok, used = self.attempt_connect_saved_networks(hotspot, usersettings)
+                if ok:
+                    hotspot.time_without_wifi = 0
+                    return
+
                 hotspot.time_without_wifi += (current_time - hotspot.last_wifi_check_time)
                 if hotspot.time_without_wifi > 240:
                     logger.info("No wifi connection. Enabling hotspot")
                     usersettings.change_setting_value("is_hotspot_active", 1)
                     self.enable_hotspot()
+                    hotspot.time_without_wifi = 0
             else:
+                if self.is_hotspot_running():
+                    logger.info("Wifi is connected, disabling hotspot")
+                    self.disable_hotspot()
+                    usersettings.change_setting_value("is_hotspot_active", 0)
                 hotspot.time_without_wifi = 0
 
         hotspot.last_wifi_check_time = current_time
 
     def connect_to_wifi(self, ssid, password, hotspot, usersettings):
-        # Disable the hotspot first
         self.disable_hotspot()
-
         try:
             result = subprocess.run(
                 ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
                 capture_output=True,
                 text=True,
-                timeout=30  # Set a timeout for the connection attempt
+                timeout=30
             )
-            # Check if the connection was successful
             if result.returncode == 0:
                 logger.info(f"Successfully connected to {ssid}")
                 usersettings.change_setting_value("is_hotspot_active", 0)
@@ -283,7 +284,6 @@ class PlatformRasp(PlatformBase):
                 logger.warning(f"Failed to connect to {ssid}. Error: {result.stderr}")
                 usersettings.change_setting_value("is_hotspot_active", 1)
                 self.enable_hotspot()
-
         except subprocess.TimeoutExpired:
             logger.warning(f"Connection attempt to {ssid} timed out")
             usersettings.change_setting_value("is_hotspot_active", 1)
@@ -302,55 +302,39 @@ class PlatformRasp(PlatformBase):
     @staticmethod
     def get_wifi_networks():
         try:
-            output = subprocess.check_output(['sudo', 'iwlist', 'wlan0', 'scan'], stderr=subprocess.STDOUT)
-            networks = output.decode().split('Cell ')
-
-            def calculate_signal_strength(level):
-                # Map the signal level to a percentage (0% to 100%) linearly.
-                # -50 dBm or higher -> 100%
-                # -90 dBm or lower -> 0%
-                if level >= -50:
-                    return 100
-                elif level <= -90:
-                    return 0
-                else:
-                    return 100 - (100 / 40) * (level + 90)
-
-            wifi_dict = defaultdict(lambda: {'Signal Strength': -float('inf'), 'Signal dBm': -float('inf')})
-
+            def calculate_signal_strength(dbm):
+                return max(0, min(100, 2 * (dbm + 100)))
+            with open(os.devnull, 'w') as null_file:
+                scan_output = subprocess.check_output(['sudo', 'iwlist', 'wlan0', 'scan'], text=True, stderr=null_file)
+            networks = scan_output.split('Cell ')
+            wifi_dict = defaultdict(lambda: {"ESSID": "", "Address": "", "Signal Strength": -100, "Signal dBm": -100})
             for network in networks[1:]:
-                wifi_data = {}
-
+                essid_line = [line for line in network.split('\n') if 'ESSID:' in line]
+                if not essid_line:
+                    continue
+                essid = essid_line[0].split('ESSID:')[1].strip().strip('"')
                 address_line = [line for line in network.split('\n') if 'Address:' in line]
-                if address_line:
-                    wifi_data['Address'] = address_line[0].split('Address:')[1].strip()
-
-                ssid_line = [line for line in network.split('\n') if 'ESSID:' in line]
-                if ssid_line:
-                    ssid = ssid_line[0].split('ESSID:')[1].strip('"')
-                    wifi_data['ESSID'] = ssid
-
-                freq_line = [line for line in network.split('\n') if 'Frequency:' in line]
-                if freq_line:
-                    wifi_data['Frequency'] = freq_line[0].split('Frequency:')[1].split(' (')[0]
-
+                address = address_line[0].split('Address:')[1].strip() if address_line else ""
+                if essid not in wifi_dict:
+                    wifi_dict[essid]["ESSID"] = essid
+                    wifi_dict[essid]["Address"] = address
                 signal_line = [line for line in network.split('\n') if 'Signal level=' in line]
                 if signal_line:
-                    signal_dbm = int(signal_line[0].split('Signal level=')[1].split(' dBm')[0])
+                    try:
+                        signal_dbm = int(signal_line[0].split('Signal level=')[1].split(' dBm')[0])
+                    except Exception:
+                        continue
                     signal_strength = calculate_signal_strength(signal_dbm)
-                    wifi_data['Signal Strength'] = signal_strength
-                    wifi_data['Signal dBm'] = signal_dbm
-
-                # Update the network info if this is the strongest signal for this SSID
-                if wifi_data['Signal Strength'] > wifi_dict[ssid]['Signal Strength']:
-                    wifi_dict[ssid].update(wifi_data)
-
-            # Convert the dictionary to a list
+                    wifi_data = {
+                        "ESSID": essid,
+                        "Address": address,
+                        "Signal Strength": signal_strength,
+                        "Signal dBm": signal_dbm
+                    }
+                    if wifi_data["Signal Strength"] > wifi_dict[essid]["Signal Strength"]:
+                        wifi_dict[essid].update(wifi_data)
             wifi_list = list(wifi_dict.values())
-
-            # Sort descending by "Signal Strength"
-            wifi_list.sort(key=lambda x: x['Signal Strength'], reverse=True)
-
+            wifi_list.sort(key=lambda x: x["Signal Strength"], reverse=True)
             return wifi_list
         except subprocess.CalledProcessError as e:
             logger.warning(f"Error while scanning Wi-Fi networks: {e.output}")
@@ -359,58 +343,30 @@ class PlatformRasp(PlatformBase):
     @staticmethod
     def get_local_address():
         try:
-            # Get the hostname
             hostname = socket.gethostname()
-
-            # Get the IP address
             ip_address = socket.gethostbyname(hostname + ".local")
-
-            # Construct the full local address
-            local_address = f"{hostname}.local"
-
-            return {
-                "success": True,
-                "local_address": local_address,
-                "ip_address": ip_address
-            }
+            return f"{hostname}.local ({ip_address})"
+        except socket.gaierror as e:
+            logger.warning(f"Could not get local address: {e}")
+            return "Unknown"
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            logger.warning(f"Unexpected error: {e}")
+            return "Unknown"
 
     @staticmethod
     def change_local_address(new_name):
-        new_name = new_name.rstrip('.local')
-        logger.info("Changing local address to " + new_name)
-        # Validate the new name
-        if not re.match(r'^[a-zA-Z0-9-]+$', new_name):
-            raise ValueError("Invalid name. Use only letters, numbers, and hyphens.")
-
         try:
-            # Change the hostname
+            with open('/etc/hostname', 'w') as hostname_file:
+                hostname_file.write(new_name + '\n')
+            with open('/etc/hosts', 'r') as hosts_file:
+                hosts_content = hosts_file.read()
+            hosts_content = re.sub(r'127\.0\.1\.1\s+\S+', f'127.0.1.1\t{new_name}', hosts_content)
+            with open('/etc/hosts', 'w') as hosts_file:
+                hosts_file.write(hosts_content)
             subprocess.run(['sudo', 'hostnamectl', 'set-hostname', new_name], check=True)
-
-            # Update /etc/hosts file
-            with open('/etc/hosts', 'r') as file:
-                hosts_content = file.readlines()
-
-            with open('/etc/hosts', 'w') as file:
-                for line in hosts_content:
-                    if "127.0.1.1" in line:
-                        file.write(f"127.0.1.1\t{new_name}\n")
-                    else:
-                        file.write(line)
-
-            # Restart avahi-daemon to apply changes
-            subprocess.run(['sudo', 'systemctl', 'restart', 'avahi-daemon'], check=True)
-
-            # Optionally, restart the networking service
             subprocess.run(['sudo', 'systemctl', 'restart', 'networking'], check=True)
-
             logger.info(f"Local address successfully changed to {new_name}.local")
             return True
-
         except subprocess.CalledProcessError as e:
             logger.warning(f"An error occurred while changing the local address: {e}")
             return False
@@ -419,4 +375,15 @@ class PlatformRasp(PlatformBase):
             return False
         except Exception as e:
             logger.warning(f"An unexpected error occurred: {e}")
+            return False
+
+    # This method exists in original codebase; we keep the interface.
+    def is_hotspot_running(self):
+        try:
+            output = subprocess.check_output(['nmcli', '-t', '-f', 'NAME,TYPE,DEVICE', 'connection', 'show', '--active'], text=True)
+            for line in output.splitlines():
+                if line.startswith('Hotspot:wifi:'):
+                    return True
+            return False
+        except Exception:
             return False
