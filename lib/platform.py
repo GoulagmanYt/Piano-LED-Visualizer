@@ -42,6 +42,12 @@ class PlatformNull(PlatformBase):
 
 
 class PlatformRasp(PlatformBase):
+    MAINTAINED_REPO_URL = "https://github.com/GoulagmanYt/Piano-LED-Visualizer.git"
+    HOTSPOT_CONNECTION_NAME = "Hotspot"
+    HOTSPOT_SSID = "PianoLEDVisualizer"
+    HOTSPOT_IFACE = "wlan0"
+    DEFAULT_HOTSPOT_PASSWORD = "visualizer"
+
     @staticmethod
     def check_and_enable_spi():
         try:
@@ -70,16 +76,16 @@ class PlatformRasp(PlatformBase):
                 logger.info("Disabling udev MIDI rule...")
                 # Rename the file to disable it
                 os.rename(udev_rule_path, udev_rule_path + '.disabled')
-                subprocess.call(['sudo', 'udevadm', 'control', '--reload'], check=False)
+                subprocess.call(['sudo', 'udevadm', 'control', '--reload'])
                 logger.info("udev MIDI rule disabled")
             
             # Disable the systemd service
             service_name = 'midi.service'
             try:
                 # Stop the service
-                subprocess.call(['sudo', 'systemctl', 'stop', service_name], check=False)
+                subprocess.call(['sudo', 'systemctl', 'stop', service_name])
                 # Disable the service
-                subprocess.call(['sudo', 'systemctl', 'disable', service_name], check=False)
+                subprocess.call(['sudo', 'systemctl', 'disable', service_name])
                 logger.info(f"Systemd service {service_name} disabled")
             except:
                 logger.info(f"Could not disable systemd service {service_name}")
@@ -99,6 +105,7 @@ class PlatformRasp(PlatformBase):
         call("sudo git clean -fdx -e Songs/ -e "
              "config/settings.xml -e config/wpa_disable_ap.conf -e visualizer.log", shell=True)
         call("sudo git clean -fdx Songs/cache", shell=True)
+        call(f"sudo git remote set-url origin {PlatformRasp.MAINTAINED_REPO_URL}", shell=True)
         call("sudo git pull origin master", shell=True)
         call("sudo pip install -r requirements.txt", shell=True)
 
@@ -137,47 +144,63 @@ class PlatformRasp(PlatformBase):
             logger.warning(f"Error checking {package_name} package status")
             return False
 
-    @staticmethod
-    def create_hotspot_profile():
+    @classmethod
+    def _get_hotspot_password(cls, usersettings=None):
+        if usersettings is None:
+            return cls.DEFAULT_HOTSPOT_PASSWORD
+        try:
+            password = usersettings.get_setting_value("hotspot_password")
+        except Exception:
+            try:
+                password = usersettings.get("hotspot_password")
+            except Exception:
+                password = None
+        if not password or len(str(password)) < 8:
+            return cls.DEFAULT_HOTSPOT_PASSWORD
+        return str(password)
+
+    @classmethod
+    def create_hotspot_profile(cls, password=None):
         # Check if the 'Hotspot' profile already exists
-        check_profile = subprocess.run(['sudo', 'nmcli', 'connection', 'show', 'Hotspot'],
+        hotspot_name = cls.HOTSPOT_CONNECTION_NAME
+        hotspot_ssid = cls.HOTSPOT_SSID
+        hotspot_iface = cls.HOTSPOT_IFACE
+        password = password or cls.DEFAULT_HOTSPOT_PASSWORD
+
+        check_profile = subprocess.run(['sudo', 'nmcli', 'connection', 'show', hotspot_name],
                                        capture_output=True, text=True)
 
-        if 'Hotspot' in check_profile.stdout:
+        if check_profile.returncode == 0 and hotspot_name in check_profile.stdout:
             logger.info("Hotspot profile already exists. Skipping creation.")
-            return
-
-        # If we reach here, the profile doesn't exist, so we create it
-        logger.info("Creating new Hotspot profile...")
-        # Default password if not provided
-        password = "visualizer"
-
+        else:
+            logger.info("Creating new Hotspot profile...")
+            try:
+                subprocess.run([
+                    'sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', hotspot_iface,
+                    'con-name', hotspot_name, 'autoconnect', 'no', 'ssid', hotspot_ssid
+                ], check=True)
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"An error occurred while creating the Hotspot profile: {e}")
+                return False
 
         try:
             subprocess.run([
-                'sudo', 'nmcli', 'connection', 'add', 'type', 'wifi', 'ifname', 'wlan0',
-                'con-name', 'Hotspot', 'autoconnect', 'no', 'ssid', 'PianoLEDVisualizer'
-            ], check=True)
-
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
-                '802-11-wireless.mode', 'ap', '802-11-wireless.band', 'bg',
-                'ipv4.method', 'shared'
-            ], check=True)
-
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
-                'wifi-sec.key-mgmt', 'wpa-psk'
-            ], check=True)
-
-            subprocess.run([
-                'sudo', 'nmcli', 'connection', 'modify', 'Hotspot',
+                'sudo', 'nmcli', 'connection', 'modify', hotspot_name,
+                'connection.autoconnect', 'no',
+                'connection.interface-name', hotspot_iface,
+                '802-11-wireless.ssid', hotspot_ssid,
+                '802-11-wireless.mode', 'ap',
+                '802-11-wireless.band', 'bg',
+                'ipv4.method', 'shared',
+                'ipv6.method', 'ignore',
+                'wifi-sec.key-mgmt', 'wpa-psk',
                 'wifi-sec.psk', password
             ], check=True)
-
-            logger.info(f"Hotspot profile created successfully with password: {password}")
+            logger.info("Hotspot profile is configured.")
+            return True
         except subprocess.CalledProcessError as e:
-            logger.warning(f"An error occurred while creating the Hotspot profile: {e}")
+            logger.warning(f"An error occurred while configuring the Hotspot profile: {e}")
+            return False
 
     @staticmethod
     def change_hotspot_password(new_password):
@@ -206,10 +229,25 @@ class PlatformRasp(PlatformBase):
             logger.warning(f"An unexpected error occurred while changing hotspot password: {e}")
             return False
 
-    @staticmethod
-    def enable_hotspot():
+    @classmethod
+    def enable_hotspot(cls, password=None, force=False):
         logger.info("Enabling Hotspot")
-        subprocess.run(['sudo', 'nmcli', 'connection', 'up', 'Hotspot'])
+        if not cls.create_hotspot_profile(password):
+            return False
+
+        subprocess.run(['sudo', 'nmcli', 'radio', 'wifi', 'on'], check=False)
+        subprocess.run(['sudo', 'nmcli', 'device', 'set', cls.HOTSPOT_IFACE, 'managed', 'yes'], check=False)
+
+        if force:
+            subprocess.run(['sudo', 'nmcli', 'device', 'disconnect', cls.HOTSPOT_IFACE], check=False)
+            time.sleep(2)
+
+        try:
+            subprocess.run(['sudo', 'nmcli', 'connection', 'up', cls.HOTSPOT_CONNECTION_NAME], check=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to start hotspot: {e}")
+            return False
 
     @staticmethod
     def disable_hotspot():
@@ -254,11 +292,11 @@ class PlatformRasp(PlatformBase):
 
     def manage_hotspot(self, hotspot, usersettings, midiports, first_run=False, current_time=None):
         if first_run:
-            self.create_hotspot_profile()
+            self.create_hotspot_profile(self._get_hotspot_password(usersettings))
             if int(usersettings.get("is_hotspot_active")):
                 if not self.is_hotspot_running():
                     logger.info("Hotspot is enabled in settings but not running. Starting hotspot...")
-                    self.enable_hotspot()
+                    self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
                     time.sleep(5)
 
                     if self.is_hotspot_running():
@@ -285,7 +323,7 @@ class PlatformRasp(PlatformBase):
                 if hotspot.time_without_wifi > 240:
                     logger.info("No wifi connection. Enabling hotspot")
                     usersettings.change_setting_value("is_hotspot_active", 1)
-                    self.enable_hotspot()
+                    self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
             else:
                 hotspot.time_without_wifi = 0
 
@@ -310,22 +348,22 @@ class PlatformRasp(PlatformBase):
             else:
                 logger.warning(f"Failed to connect to {ssid}. Error: {result.stderr}")
                 usersettings.change_setting_value("is_hotspot_active", 1)
-                self.enable_hotspot()
+                self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
 
         except subprocess.TimeoutExpired:
             logger.warning(f"Connection attempt to {ssid} timed out")
             usersettings.change_setting_value("is_hotspot_active", 1)
-            self.enable_hotspot()
+            self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
         except Exception as e:
             logger.warning(f"An error occurred while connecting to {ssid}: {str(e)}")
             usersettings.change_setting_value("is_hotspot_active", 1)
-            self.enable_hotspot()
+            self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
 
     def disconnect_from_wifi(self, hotspot, usersettings):
         logger.info("Disconnecting from wifi")
         hotspot.hotspot_script_time = time.time()
-        self.enable_hotspot()
         usersettings.change_setting_value("is_hotspot_active", 1)
+        return self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
 
     @staticmethod
     def get_wifi_networks():
