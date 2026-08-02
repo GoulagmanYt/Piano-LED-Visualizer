@@ -151,14 +151,12 @@ class LCD(object):
             raise ValueError('Image must be same dimensions as display \
                 ({0}x{1}).' .format(self.width, self.height))
         img = np.asarray(Image)
-        pix = np.zeros((self.width,self.height,2), dtype = np.uint8)
-        pix[...,[0]] = np.add(np.bitwise_and(img[...,[0]],0xF8),np.right_shift(img[...,[1]],5))
-        pix[...,[1]] = np.add(np.bitwise_and(np.left_shift(img[...,[1]],3),0xE0),np.right_shift(img[...,[2]],3))
-        pix = pix.flatten().tolist()
+        pix = np.empty((self.width, self.height, 2), dtype=np.uint8)
+        pix[..., 0] = (img[..., 0] & 0xF8) | (img[..., 1] >> 5)
+        pix[..., 1] = ((img[..., 1] << 3) & 0xE0) | (img[..., 2] >> 3)
         self.LCD_SetWindows (0, 0, self.width, self.height)
         GPIO.output(self._dc,GPIO.HIGH)
-        for i in range(0,len(pix),4096):
-            self._spi.writebytes(pix[i:i+4096])		
+        self._spi.writebytes2(pix.reshape(-1))
         
     def LCD_Clear(self):
         """Clear contents of image buffer"""

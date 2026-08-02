@@ -1,4 +1,5 @@
-import bisect
+import heapq
+import itertools
 import threading
 import time
 from collections import deque
@@ -25,7 +26,8 @@ class MidiQueues:
         self.file_queue = deque()
         self.websocket_queue = deque()
         self.live_forward_queue = deque()
-        self.scheduled_forward_queue = deque()
+        self.scheduled_forward_queue = []
+        self._scheduled_sequence = itertools.count()
         self.websocket_publish_queue = deque(maxlen=websocket_publish_maxlen)
         self.reserved_noteoff_slots = (
             reserved_noteoff_slots
@@ -179,26 +181,11 @@ class MidiQueues:
             due_time = enqueued_at
         item = (msg, enqueued_at, due_time, source)
         with self._lock:
-            queued = self.queue_with_policy(
+            heapq.heappush(
                 self.scheduled_forward_queue,
-                item,
-                source,
-                reserve_slots=self._reserve_slots_for(self.scheduled_forward_queue),
+                (due_time, next(self._scheduled_sequence), item),
             )
-            if queued and len(self.scheduled_forward_queue) > 1:
-                # O(log n) insertion: find the correct position for the newly
-                # appended item and rotate it there instead of re-sorting the
-                # entire deque (which was O(n log n) per insert).
-                new_item = self.scheduled_forward_queue[-1]
-                new_due = new_item[2]
-                prev_due = self.scheduled_forward_queue[-2][2] if len(self.scheduled_forward_queue) >= 2 else new_due
-                if new_due < prev_due:
-                    self.scheduled_forward_queue.pop()
-                    # Convert to list for bisect, insert, convert back
-                    due_times = [entry[2] for entry in self.scheduled_forward_queue]
-                    insert_at = bisect.bisect_right(due_times, new_due)
-                    self.scheduled_forward_queue.insert(insert_at, new_item)
-            return queued
+            return True
 
     def peek_due_scheduled_forward(self, now_perf=None):
         if now_perf is None:
@@ -206,7 +193,7 @@ class MidiQueues:
         with self._lock:
             if not self.scheduled_forward_queue:
                 return None
-            item = self.scheduled_forward_queue[0]
+            item = self.scheduled_forward_queue[0][2]
             if item[2] <= now_perf:
                 return item
             return None
@@ -217,22 +204,24 @@ class MidiQueues:
         with self._lock:
             if not self.scheduled_forward_queue:
                 return None
-            if expected is None:
-                item = self.scheduled_forward_queue[0]
-                if item[2] <= now_perf:
-                    return self.scheduled_forward_queue.popleft()
+            first_entry = self.scheduled_forward_queue[0]
+            first_item = first_entry[2]
+            if expected is None or first_item == expected:
+                if first_item[2] <= now_perf:
+                    return heapq.heappop(self.scheduled_forward_queue)[2]
                 return None
-            for index, item in enumerate(self.scheduled_forward_queue):
-                if item == expected:
+            for index, entry in enumerate(self.scheduled_forward_queue):
+                if entry[2] == expected:
                     del self.scheduled_forward_queue[index]
-                    return item
+                    heapq.heapify(self.scheduled_forward_queue)
+                    return entry[2]
             return None
 
     def peek_next_scheduled_forward(self):
         with self._lock:
             if not self.scheduled_forward_queue:
                 return None
-            return self.scheduled_forward_queue[0]
+            return self.scheduled_forward_queue[0][2]
 
     def clear_scheduled_forward(self, source=None):
         with self._lock:
@@ -240,12 +229,13 @@ class MidiQueues:
                 removed = len(self.scheduled_forward_queue)
                 self.scheduled_forward_queue.clear()
                 return removed
-            kept = deque(
-                item for item in self.scheduled_forward_queue if len(item) < 4 or item[3] != source
-            )
+            kept = [
+                entry for entry in self.scheduled_forward_queue
+                if len(entry[2]) < 4 or entry[2][3] != source
+            ]
             removed = len(self.scheduled_forward_queue) - len(kept)
-            self.scheduled_forward_queue.clear()
-            self.scheduled_forward_queue.extend(kept)
+            self.scheduled_forward_queue[:] = kept
+            heapq.heapify(self.scheduled_forward_queue)
             return removed
 
     def enqueue_websocket_publish(self, msg, timestamp=None):

@@ -136,14 +136,18 @@ class MIDIEventProcessor:
 
         while processed < max_messages and (time.perf_counter() - t0) < max_duration:
             if queues is not None:
-                item = queues.pop_queue(midipending)
+                batch = queues.drain_queue(
+                    midipending,
+                    max_messages=min(64, max_messages - processed),
+                )
             else:
                 item = midipending.popleft() if midipending else None
-            if item is None:
+                batch = [item] if item is not None else []
+            if not batch:
                 break
-            msg, msg_timestamp = item
-            _process_one(msg, msg_timestamp)
-            processed += 1
+            for msg, msg_timestamp in batch:
+                _process_one(msg, msg_timestamp)
+                processed += 1
         diagnostics.increment_counter("midi_events_processed_total", processed)
         diagnostics.set_gauge("midi_events_processed_last", processed)
         if queues is not None:
@@ -269,7 +273,7 @@ class MIDIEventProcessor:
             red, green, blue = (0, 0, 0)
 
         # Store the note color
-        self.ledstrip.keylist_color[note_position] = [red, green, blue]
+        self.ledstrip.keylist_color[note_position] = (red, green, blue)
 
         # Set this key as active and clear sustained status
         self.ledstrip.keylist_status[note_position] = 1

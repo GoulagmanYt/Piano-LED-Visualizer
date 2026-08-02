@@ -51,48 +51,38 @@ def start_server(loop):
     async def broadcast_midi_to_clients():
         """Background task to broadcast MIDI messages to all connected clients."""
         logger.info("Starting MIDI broadcast task")
+
+        async def send_batch(websocket, messages):
+            for message in messages:
+                await websocket.send(str(message))
+
         while True:
             try:
-                if app_state.practice_active:
+                clients = list(app_state.websocket_midi_clients)
+                if clients:
                     messages = []
-                    # Safely move messages from queue to local list
-                    # deque append is atomic, but we use a robust pattern: 
-                    # popleft until empty
-                    while True:
-                        try:
+                    if app_state.practice_active:
+                        while webinterface.websocket_midi_send:
                             messages.append(webinterface.websocket_midi_send.popleft())
-                        except IndexError:
-                            break
-                    
+
+                    learning = getattr(app_state, "learning", None)
+                    learning_outbox = getattr(learning, "socket_send", None)
+                    if learning_outbox is not None:
+                        if hasattr(learning_outbox, "drain"):
+                            messages.extend(learning_outbox.drain())
+                        elif learning_outbox:
+                            messages.extend(learning_outbox[:])
+                            del learning_outbox[:]
+
                     if messages:
-                        clients = list(app_state.websocket_midi_clients)
-                        if not clients:
-                            await asyncio.sleep(0.01)
-                            continue
-
-                        disconnected_clients = set()
-                        send_tasks = []
-
-                        for ws in clients:
-                            for msg in messages:
-                                try:
-                                    send_tasks.append((ws, asyncio.create_task(ws.send(str(msg)))))
-                                except Exception:
-                                    disconnected_clients.add(ws)
-
-                        if send_tasks:
-                            results = await asyncio.gather(
-                                *(task for _, task in send_tasks),
-                                return_exceptions=True,
-                            )
-                            for (ws, _), result in zip(send_tasks, results):
-                                if isinstance(result, Exception):
-                                    disconnected_clients.add(ws)
-
-                        if disconnected_clients:
-                            for ws in disconnected_clients:
+                        results = await asyncio.gather(
+                            *(send_batch(ws, messages) for ws in clients),
+                            return_exceptions=True,
+                        )
+                        for ws, result in zip(clients, results):
+                            if isinstance(result, Exception):
                                 app_state.websocket_midi_clients.discard(ws)
-                            
+
                 await asyncio.sleep(0.01)
             except Exception as e:
                 logger.error(f"Error in MIDI broadcast task: {e}")
@@ -102,20 +92,6 @@ def start_server(loop):
         try:
             app_state.websocket_midi_clients.add(websocket)
             logger.info(f"WebSocket MIDI client connected. Active clients: {len(app_state.websocket_midi_clients)}")
-            
-            async def send_messages():
-                """Send outgoing messages to client."""
-                try:
-                    while True:
-                        await asyncio.sleep(0.01)
-                        # Send learning messages
-                        for msg in app_state.learning.socket_send[:]:
-                            await websocket.send(str(msg))
-                            app_state.learning.socket_send.remove(msg)
-                except websockets.exceptions.ConnectionClosed:
-                    pass
-                except Exception as e:
-                    logger.warning(f"Error sending websocket message: {e}")
             
             async def receive_messages():
                 """Receive incoming MIDI messages from client."""
@@ -144,18 +120,7 @@ def start_server(loop):
                 except Exception as e:
                     logger.warning(f"Error receiving websocket message: {e}")
             
-            send_task = asyncio.create_task(send_messages())
-            receive_task = asyncio.create_task(receive_messages())
-            done, pending = await asyncio.wait(
-                {send_task, receive_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            if pending:
-                await asyncio.gather(*pending, return_exceptions=True)
-            for task in done:
-                task.result()
+            await receive_messages()
         except Exception as e:
             logger.warning(f"WebSocket learning handler error: {e}")
         finally:

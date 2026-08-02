@@ -20,6 +20,9 @@ from webinterface import app_state
 
 import logging
 from logging.handlers import RotatingFileHandler
+from itertools import chain, islice, pairwise
+
+from lib.broadcast_outbox import BroadcastOutbox
 
 # Create a score logger
 score_logger = logging.getLogger("score_logger")
@@ -83,7 +86,7 @@ class LearnMIDI:
         self.show_future_notes = int(usersettings.get_setting_value("show_future_notes"))
 
         self.notes_time = []
-        self.socket_send = []
+        self.socket_send = BroadcastOutbox()
 
         # Store software's notes that need to be played when user presses their key
         self.pending_software_notes = []
@@ -499,7 +502,7 @@ class LearnMIDI:
             logger.info("learning_midi transition=error")
             return
 
-        self.t = threading.currentThread()
+        self.t = threading.current_thread()
         hand_hint_notesL = []
         hand_hint_notesR = []
 
@@ -536,10 +539,11 @@ class LearnMIDI:
                 # absolute_idx counts all messages (used for predicting messages)
 
                 self.current_idx = start_idx
-                absolute_idx = start_idx
-                track_slice = self.song_tracks[start_idx:end_idx]
+                track_range = islice(self.song_tracks, start_idx, end_idx)
+                messages_with_lookahead = pairwise(chain(track_range, (None,)))
 
-                for track_index, msg in enumerate(track_slice):
+                for absolute_idx, (msg, next_msg) in enumerate(
+                        messages_with_lookahead, start=start_idx):
                     self.midiports.last_activity = time.time()
                     # Exit thread if learning is stopped
                     if not self.is_started_midi:
@@ -737,7 +741,6 @@ class LearnMIDI:
                                         source="learning",
                                     )
 
-                        next_msg = track_slice[track_index + 1] if (track_index + 1) < len(track_slice) else None
                         next_delay = None
                         if next_msg is not None:
                             next_delay = mido.tick2second(
@@ -747,8 +750,6 @@ class LearnMIDI:
                             )
                         if next_msg is None or next_delay > 0:
                             self.ledstrip.strip.show()
-
-                    absolute_idx += 1
 
                     # If we have pending software notes but no user notes to press,
                     # and we've reached the next note's time, play and clear the pending notes

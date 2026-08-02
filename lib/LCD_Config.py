@@ -50,6 +50,9 @@ def Driver_Delay_ms(xms):
 def SPI_Write_Byte(data):
     SPI.writebytes(data)
 
+def SPI_Write_Buffer(data):
+    SPI.writebytes2(data)
+
 def GPIO_Init():
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)

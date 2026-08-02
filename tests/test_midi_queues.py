@@ -130,6 +130,19 @@ class TestMidiQueues(unittest.TestCase):
             (live_msg, 1.0, 10.0, "live"),
         )
 
+    def test_scheduled_forward_preserves_insertion_order_for_equal_due_times(self):
+        queues = MidiQueues()
+        messages = [FakeMidiMessage(note=note) for note in (60, 61, 62)]
+        for message in messages:
+            queues.enqueue_scheduled_forward(message, enqueued_at=1.0, due_time=10.0)
+
+        popped = [
+            queues.pop_due_scheduled_forward(now_perf=10.0)[0]
+            for _ in messages
+        ]
+
+        self.assertEqual(popped, messages)
+
 
 if __name__ == "__main__":
     unittest.main()

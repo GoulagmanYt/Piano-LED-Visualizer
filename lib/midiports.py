@@ -173,6 +173,8 @@ class MidiPorts:
         if now_perf is None:
             now_perf = time.perf_counter()
         oldest = queue[0]
+        if queue is self.scheduled_forward_queue and hasattr(self, "queues"):
+            oldest = oldest[2]
         if not isinstance(oldest, tuple) or len(oldest) < 2:
             return 0.0
         timestamp = oldest[1]

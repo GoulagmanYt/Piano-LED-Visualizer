@@ -3,12 +3,12 @@
 from pathlib import Path
 
 
-def test_learning_websocket_cancels_peer_task_when_one_side_closes():
+def test_learning_websocket_uses_centralized_broadcasting():
     source = Path("webinterface/__init__.py").read_text(encoding="utf-8")
 
-    assert "asyncio.wait" in source
-    assert "FIRST_COMPLETED" in source
-    assert ".cancel()" in source
+    assert "async def send_batch" in source
+    assert "learning_outbox.drain()" in source
+    assert "send_messages" not in source
 
 
 def test_learning_and_broadcast_use_client_snapshots_before_sending():

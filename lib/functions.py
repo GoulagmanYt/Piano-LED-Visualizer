@@ -640,7 +640,7 @@ def theaterChase(ledstrip, ledsettings, menu, speed_ms=None):
     stop_animations(menu)
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     # Use global speed from settings
     wait_ms = speed_ms if speed_ms is not None else get_global_speed_ms(ledsettings.usersettings)
@@ -719,7 +719,7 @@ def rainbow(ledstrip, ledsettings, menu, speed_ms=None):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
     j = 0.0
 
     while menu.is_idle_animation_running or menu.is_animation_running:
@@ -754,7 +754,7 @@ def fireplace(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
@@ -801,7 +801,7 @@ def rainbowCycle(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
     j = 0.0
 
     while menu.is_idle_animation_running or menu.is_animation_running:
@@ -889,7 +889,7 @@ def theaterChaseRainbow(ledstrip, ledsettings, menu, speed_ms=None):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
     j = 0
 
     while menu.is_idle_animation_running or menu.is_animation_running:
@@ -938,7 +938,7 @@ def breathing(ledstrip, ledsettings, menu, speed_ms=None):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     multiplier = 24.0
     direction = step_size
@@ -992,7 +992,7 @@ def sound_of_da_police(ledstrip, ledsettings, menu, speed_ms=None):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
     middle = strip.numPixels() / 2
     r_start = 0.0
     l_start = 196.0
@@ -1047,7 +1047,7 @@ def scanner(ledstrip, ledsettings, menu, speed_ms=None):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     position = 0.0
     direction = step_size
@@ -1104,7 +1104,7 @@ def chords(scale, ledstrip, ledsettings, menu):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
@@ -1151,7 +1151,7 @@ def colormap_animation(colormap, ledstrip, ledsettings, menu):
     strip = ledstrip.strip
 
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     while menu.is_idle_animation_running or menu.is_animation_running:
         if colormap not in cmap.colormaps:
@@ -1203,7 +1203,7 @@ def wave(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     # Trail length is approximately 30% of strip length, but at least 10 pixels
@@ -1303,7 +1303,7 @@ def lava_lamp(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     
@@ -1416,7 +1416,7 @@ def aurora(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     brightness = calculate_brightness(ledsettings)
@@ -1546,7 +1546,7 @@ def stardust(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     brightness = calculate_brightness(ledsettings)
@@ -1675,7 +1675,7 @@ def kaleidoscope(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     brightness = calculate_brightness(ledsettings)
@@ -1807,7 +1807,7 @@ def color_ripple(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     brightness = calculate_brightness(ledsettings)
@@ -1981,7 +1981,7 @@ def fireworks(ledstrip, ledsettings, menu, speed_ms=None):
 
     strip = ledstrip.strip
     fastColorWipe(strip, True, ledsettings)
-    menu.t = threading.currentThread()
+    menu.t = threading.current_thread()
 
     num_pixels = strip.numPixels()
     brightness = calculate_brightness(ledsettings)

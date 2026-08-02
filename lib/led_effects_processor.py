@@ -1,3 +1,4 @@
+import math
 import time
 from rpi_ws281x import Color
 
@@ -11,6 +12,9 @@ class LEDEffectsProcessor:
         self.last_sustain = last_sustain
         self.pedal_deadzone = pedal_deadzone
         self.runtime_diagnostics = runtime_diagnostics
+        self._pulse_rgb = [[0.0, 0.0, 0.0] for _ in range(ledstrip.led_number)]
+        self._pulse_seen = [False] * ledstrip.led_number
+        self._pulse_touched = []
 
     def process_fade_effects(self, event_loop_time):
         any_led_changed = False
@@ -54,12 +58,7 @@ class LEDEffectsProcessor:
                 continue
             active_leds += 1
 
-            if type(keylist_color[n]) is list:
-                red = keylist_color[n][0]
-                green = keylist_color[n][1]
-                blue = keylist_color[n][2]
-            else:
-                red, green, blue = (0, 0, 0)
+            red, green, blue = keylist_color[n]
 
             led_changed = False
             new_color = color_update(None, n, (red, green, blue))
@@ -118,12 +117,18 @@ class LEDEffectsProcessor:
         if not self.ledstrip.active_pulses:
             return False
 
-        import math
-
         current_time = time.perf_counter()
         pulses_to_remove = []
         surviving_pulses = []
-        leds_to_update = {}
+        pulse_rgb = self._pulse_rgb
+        pulse_seen = self._pulse_seen
+        touched_leds = self._pulse_touched
+
+        def touch_led(index):
+            if not pulse_seen[index]:
+                pulse_seen[index] = True
+                touched_leds.append(index)
+            return pulse_rgb[index]
         
         max_dist = self.ledsettings.pulse_animation_distance
         duration = self.ledsettings.pulse_animation_speed / 1000.0
@@ -199,8 +204,7 @@ class LEDEffectsProcessor:
                 dist = abs(i - center)
                 
                 # Initialize with 0 (background will be added later) if not already visited
-                if i not in leds_to_update:
-                    leds_to_update[i] = [0, 0, 0]
+                color = touch_led(i)
 
                 # Check if pixel is within the active band (inner < dist < outer)
                 if dist < current_inner_radius or dist > current_outer_radius:
@@ -215,9 +219,9 @@ class LEDEffectsProcessor:
                 final_intensity = current_intensity * dist_intensity
                 
                 if final_intensity > 0.005:
-                    leds_to_update[i][0] += p_r * final_intensity
-                    leds_to_update[i][1] += p_g * final_intensity
-                    leds_to_update[i][2] += p_b * final_intensity
+                    color[0] += p_r * final_intensity
+                    color[1] += p_g * final_intensity
+                    color[2] += p_b * final_intensity
 
         # Process "dying" pulses one last time to clear their area
         for pulse in pulses_to_remove:
@@ -226,10 +230,10 @@ class LEDEffectsProcessor:
              end_led = min(self.ledstrip.led_number, int(center + max_dist + 3))
              
              for i in range(start_led, end_led):
-                 if i not in leds_to_update:
-                     leds_to_update[i] = [0, 0, 0]
+                 touch_led(i)
 
-        for i, color in leds_to_update.items():
+        for i in touched_leds:
+            color = pulse_rgb[i]
             final_r = min(255, int(color[0] + br))
             final_g = min(255, int(color[1] + bg))
             final_b = min(255, int(color[2] + bb))
@@ -237,6 +241,10 @@ class LEDEffectsProcessor:
             pixel_color = Color(final_r, final_g, final_b)
             self.ledstrip.strip.setPixelColor(i, pixel_color)
             self.ledstrip.set_adjacent_colors(i, pixel_color, False)
+            color[0] = color[1] = color[2] = 0.0
+            pulse_seen[i] = False
+
+        touched_leds.clear()
 
         if pulses_to_remove:
             self.ledstrip.active_pulses = surviving_pulses
