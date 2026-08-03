@@ -334,6 +334,58 @@ function change_setting(setting_name, value, second_value = false, disable_seque
 }
 
 
+const UPDATE_TERMINAL_STATES = new Set(['success', 'no_update', 'rolled_back', 'failed']);
+let reliableUpdatePoll = null;
+
+function render_reliable_update_status(status) {
+    const element = document.getElementById('reliable-update-status');
+    if (!element) return;
+    element.classList.remove('hidden');
+    element.textContent = status.message || status.state || '';
+    element.classList.toggle('text-red-400', status.state === 'failed' || status.state === 'rolled_back');
+    element.classList.toggle('text-green-400', status.state === 'success' || status.state === 'no_update');
+}
+
+function poll_reliable_update_status() {
+    fetch('/api/update_status', {cache: 'no-store'})
+        .then(response => response.json())
+        .then(status => {
+            render_reliable_update_status(status);
+            if (UPDATE_TERMINAL_STATES.has(status.state)) {
+                clearInterval(reliableUpdatePoll);
+                reliableUpdatePoll = null;
+                const button = document.getElementById('reliable-update-button');
+                if (button) button.disabled = false;
+                if (status.state === 'success') showAlert(status.message, 'info');
+                if (status.state === 'rolled_back' || status.state === 'failed') showAlert(status.message, 'error');
+            }
+        })
+        .catch(() => {
+            // A short connection loss is expected while visualizer.service restarts.
+        });
+}
+
+function start_reliable_update(button) {
+    button.disabled = true;
+    render_reliable_update_status({state: 'starting', message: 'Démarrage de la mise à jour sécurisée…'});
+    fetch('/api/change_setting?setting_name=update_rpi&value=0', {cache: 'no-store'})
+        .then(async response => {
+            const result = await response.json();
+            if (!response.ok || result.success === false) {
+                throw new Error(result.error || 'Impossible de démarrer la mise à jour');
+            }
+            render_reliable_update_status(result);
+            reliableUpdatePoll = setInterval(poll_reliable_update_status, 1500);
+            poll_reliable_update_status();
+        })
+        .catch(error => {
+            button.disabled = false;
+            render_reliable_update_status({state: 'failed', message: error.message});
+            showAlert(error.message, 'error');
+        });
+}
+
+
 function set_midi_playback_buttons(isPlaying) {
     const startButton = document.getElementById('start_midi_play');
     const stopButton = document.getElementById('stop_midi_play');

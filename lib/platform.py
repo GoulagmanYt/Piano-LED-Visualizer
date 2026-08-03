@@ -7,6 +7,9 @@ from shutil import copyfile
 from lib.log_setup import logger
 import re
 import socket
+import sys
+import json
+from pathlib import Path
 from collections import defaultdict
 
 
@@ -47,6 +50,8 @@ class PlatformRasp(PlatformBase):
     HOTSPOT_SSID = "PianoLEDVisualizer"
     HOTSPOT_IFACE = "wlan0"
     DEFAULT_HOTSPOT_PASSWORD = "visualizer"
+    UPDATE_STATE_DIR = Path("/var/lib/piano-led-visualizer")
+    UPDATE_UNIT = "plv-reliable-update"
 
     @staticmethod
     def check_and_enable_spi():
@@ -98,16 +103,88 @@ class PlatformRasp(PlatformBase):
             logger.info("Installing abcmidi")
             subprocess.call(['sudo', 'apt-get', 'install', 'abcmidi', '-y'])
 
-    @staticmethod
-    def update_visualizer():
-        call("sudo git reset --hard HEAD", shell=True)
-        call("sudo git checkout .", shell=True)
-        call("sudo git clean -fdx -e Songs/ -e "
-             "config/settings.xml -e config/wpa_disable_ap.conf -e visualizer.log", shell=True)
-        call("sudo git clean -fdx Songs/cache", shell=True)
-        call(f"sudo git remote set-url origin {PlatformRasp.MAINTAINED_REPO_URL}", shell=True)
-        call("sudo git pull origin master", shell=True)
-        call("sudo pip install -r requirements.txt", shell=True)
+    @classmethod
+    def get_update_status(cls):
+        status_path = cls.UPDATE_STATE_DIR / "update-status.json"
+        try:
+            with status_path.open("r", encoding="utf-8") as status_file:
+                status = json.load(status_file)
+                updated_at = int(status.get("updated_at", 0) or 0)
+                if (
+                    status.get("state") not in {"success", "no_update", "rolled_back", "failed"}
+                    and updated_at
+                    and time.time() - updated_at > 3600
+                ):
+                    return {
+                        **status,
+                        "state": "failed",
+                        "message": "La mise à jour précédente a été interrompue",
+                        "error": "État de mise à jour expiré",
+                    }
+                return status
+        except (OSError, ValueError):
+            return {"state": "idle", "message": "Aucune mise à jour en cours"}
+
+    @classmethod
+    def update_visualizer(cls):
+        """Start the updater in an independent systemd transient service."""
+        current_status = cls.get_update_status()
+        if current_status.get("state") not in {"idle", "success", "no_update", "rolled_back", "failed"}:
+            return {"success": False, "error": "Une mise à jour est déjà en cours", **current_status}
+
+        project_dir = Path(__file__).resolve().parent.parent
+        updater = project_dir / "scripts" / "reliable_update.py"
+        if not updater.is_file():
+            return {"success": False, "error": f"Programme de mise à jour introuvable: {updater}"}
+
+        try:
+            cls.UPDATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+            status_path = cls.UPDATE_STATE_DIR / "update-status.json"
+            temporary_status = status_path.with_suffix(".json.tmp")
+            temporary_status.write_text(json.dumps({
+                "state": "starting",
+                "message": "Démarrage de la mise à jour sécurisée",
+                "started_at": int(time.time()),
+                "updated_at": int(time.time()),
+            }), encoding="utf-8")
+            os.replace(temporary_status, status_path)
+        except OSError as error:
+            logger.error(f"Unable to initialize update state: {error}")
+            return {"success": False, "error": f"Impossible d'initialiser la mise à jour: {error}"}
+
+        geteuid = getattr(os, "geteuid", lambda: 1)
+        unit_name = f"{cls.UPDATE_UNIT}-{int(time.time())}"
+        command = [] if geteuid() == 0 else ["sudo"]
+        command.extend([
+            "systemd-run",
+            f"--unit={unit_name}",
+            "--collect",
+            "--property=Type=exec",
+            sys.executable,
+            str(updater),
+            "--project-dir",
+            str(project_dir),
+            "--state-dir",
+            str(cls.UPDATE_STATE_DIR),
+            "--remote-url",
+            cls.MAINTAINED_REPO_URL,
+        ])
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode:
+            detail = (result.stderr or result.stdout).strip()
+            logger.error(f"Unable to start reliable updater: {detail}")
+            try:
+                status_path.write_text(json.dumps({
+                    "state": "failed",
+                    "message": "Impossible de démarrer la mise à jour",
+                    "error": detail,
+                    "updated_at": int(time.time()),
+                }), encoding="utf-8")
+            except OSError:
+                pass
+            return {"success": False, "error": detail or "Impossible de démarrer la mise à jour"}
+        logger.info("Reliable update started in %s", unit_name)
+        return {"success": True, "state": "starting", "message": "Mise à jour sécurisée démarrée"}
 
     @staticmethod
     def shutdown():

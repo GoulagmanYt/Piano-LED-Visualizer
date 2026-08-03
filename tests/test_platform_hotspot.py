@@ -79,20 +79,48 @@ def test_disable_system_midi_scripts_does_not_pass_check_to_subprocess_call(monk
     assert all(kwargs == {} for _, kwargs in calls)
 
 
-def test_update_visualizer_pulls_from_maintained_github_remote(monkeypatch):
+def test_update_visualizer_starts_independent_reliable_updater(monkeypatch, tmp_path):
     calls = []
 
-    monkeypatch.setattr("lib.platform.call", lambda command, shell=True: calls.append(command) or 0)
+    monkeypatch.setattr(PlatformRasp, "UPDATE_STATE_DIR", tmp_path)
+    monkeypatch.setattr("lib.platform.os.geteuid", lambda: 0, raising=False)
 
-    PlatformRasp.update_visualizer()
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, "Running as unit", "")
 
-    assert any(
-        "git remote set-url origin https://github.com/GoulagmanYt/Piano-LED-Visualizer.git" in command
-        for command in calls
+    monkeypatch.setattr("lib.platform.subprocess.run", fake_run)
+
+    result = PlatformRasp.update_visualizer()
+
+    assert result["success"] is True
+    assert len(calls) == 1
+    command = calls[0][0]
+    assert command[0] == "systemd-run"
+    assert any(argument.startswith("--unit=plv-reliable-update-") for argument in command)
+    assert "https://github.com/GoulagmanYt/Piano-LED-Visualizer.git" in command
+    assert (tmp_path / "update-status.json").exists()
+
+
+def test_update_visualizer_rejects_concurrent_update(monkeypatch, tmp_path):
+    monkeypatch.setattr(PlatformRasp, "UPDATE_STATE_DIR", tmp_path)
+    (tmp_path / "update-status.json").write_text(
+        '{"state": "validating", "message": "busy"}', encoding="utf-8"
     )
-    remote_set_index = next(
-        index for index, command in enumerate(calls)
-        if "git remote set-url origin https://github.com/GoulagmanYt/Piano-LED-Visualizer.git" in command
+
+    result = PlatformRasp.update_visualizer()
+
+    assert result["success"] is False
+    assert result["state"] == "validating"
+
+
+def test_update_status_marks_stale_operation_as_failed(monkeypatch, tmp_path):
+    monkeypatch.setattr(PlatformRasp, "UPDATE_STATE_DIR", tmp_path)
+    (tmp_path / "update-status.json").write_text(
+        '{"state": "health_check", "message": "busy", "updated_at": 1}', encoding="utf-8"
     )
-    pull_index = next(index for index, command in enumerate(calls) if "git pull origin master" in command)
-    assert remote_set_index < pull_index
+
+    status = PlatformRasp.get_update_status()
+
+    assert status["state"] == "failed"
+    assert "interrompue" in status["message"]

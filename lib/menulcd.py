@@ -1786,7 +1786,7 @@ class MenuLCD:
 
         if location == "Update_visualizer":
             if choice == "Confirm":
-                self.render_message("Updating...", "reboot is required", 5000)
+                self.render_message("Update started", "automatic restart", 5000)
                 self.platform.update_visualizer()
             self.go_back()
 

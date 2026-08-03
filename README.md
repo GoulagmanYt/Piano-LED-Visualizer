@@ -166,24 +166,21 @@ For SFTP: in any FTP program (like Filezilla) connect to your RPi local address 
 
 **Q - How do I update visualizer?**
 
-- **A** - From the Visualiser menu `Other Settings > Update visualizer > Confirm`. 
- 
-After the update, a reboot is required.
+- **A** - From the Visualiser menu `Other Settings > Update visualizer > Confirm`.
+
+The update now runs in an independent service. It downloads and validates the new release before activation, backs up persistent configuration, restarts the visualizer and verifies both the systemd service and `/api/health`. If that health check fails, the previous Git revision, configuration and dependencies are restored automatically. The web interface displays each phase and the final result; no manual reboot is required.
+
+Configuration backups are retained in `/var/backups/piano-led-visualizer` (the five most recent archives). The machine-readable status is stored in `/var/lib/piano-led-visualizer/update-status.json`.
 
 - **B** - Connect to your console using SSH and type:
 
 `cd /home/Piano-LED-Visualizer`
-and then 
 
-`git pull origin master`
+and run the same reliable updater directly:
 
-If for some reasons it does not work try to remove whole project and clone it again.
+`sudo python3 scripts/reliable_update.py --project-dir /home/Piano-LED-Visualizer`
 
-`cd /home`
-
-`sudo rm -rf Piano-LED-Visualizer`
-
-`sudo git clone https://github.com/GoulagmanYt/Piano-LED-Visualizer`
+The update log can be inspected with `journalctl -u 'plv-reliable-update-*' --no-pager`.
 
 
 ![Image](https://i.imgur.com/9MgNUl5.jpg?1)

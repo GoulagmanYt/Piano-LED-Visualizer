@@ -232,10 +232,11 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
                         </svg>
                     </button>
-                    <button onclick="change_setting('update_rpi', '0');temporary_disable_button(this, 25000);"
+                    <button id="reliable-update-button" onclick="start_reliable_update(this);"
                             class="w-full h-10 outline-none glass-light font-bold py-2 px-2 rounded-glass inline-flex items-center justify-center hidden">
                         <span class="uppercase text-xs" data-translate="confirm">Confirm</span>
                     </button>
+                    <p id="reliable-update-status" class="hidden mt-2 text-xs text-gray-600 dark:text-gray-400"></p>
                 </div>
             </div>
         </div>

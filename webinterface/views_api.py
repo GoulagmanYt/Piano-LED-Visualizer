@@ -57,6 +57,20 @@ SONGS_DIR = Path("Songs").resolve()
 SHEET_MUSIC_EXTENSIONS = (".musicxml", ".xml", ".mxl", ".abc")
 
 
+@webinterface.route('/api/health', methods=['GET'])
+def api_health():
+    """Minimal endpoint used by the external updater after a service restart."""
+    return jsonify(success=True, service="piano-led-visualizer", pid=os.getpid())
+
+
+@webinterface.route('/api/update_status', methods=['GET'])
+def api_update_status():
+    platform = app_state.platform
+    if platform is None or not hasattr(platform, "get_update_status"):
+        return jsonify(state="unsupported", message="Mise à jour non disponible")
+    return jsonify(platform.get_update_status())
+
+
 def _song_error(error, status_code=None, **extra):
     status = status_code or getattr(error, "status_code", 400)
     payload = {"success": False, "error": str(error)}
@@ -1202,7 +1216,10 @@ def change_setting():
         app_state.platform.shutdown()
 
     if setting_name == "update_rpi":
-        app_state.platform.update_visualizer()
+        result = app_state.platform.update_visualizer()
+        if isinstance(result, dict):
+            status_code = 202 if result.get("success") else 409
+            return jsonify(result), status_code
 
     if setting_name == "connect_ports":
         app_state.midiports.connectall()
