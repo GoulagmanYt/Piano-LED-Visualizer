@@ -138,6 +138,15 @@ def test_changed_source_files_allows_persistent_config_only(tmp_path):
     assert reliable_update.changed_source_files(project) == ["visualizer.py"]
 
 
+def test_git_command_scopes_safe_directory_to_repository(tmp_path):
+    project = tmp_path / "repo"
+
+    command = reliable_update.git_command(project, "status", "--short")
+
+    assert command[:3] == ["git", "-c", f"safe.directory={project.resolve()}"]
+    assert command[3:] == ["-C", str(project.resolve()), "status", "--short"]
+
+
 def test_validate_release_compiles_required_python_files(tmp_path):
     project = tmp_path / "repo"
     init_repo(project)

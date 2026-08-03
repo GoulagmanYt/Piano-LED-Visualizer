@@ -92,8 +92,13 @@ class StatusWriter:
         atomic_json_write(self.path, self.payload)
 
 
+def git_command(project_dir: Path, *arguments: str) -> list[str]:
+    resolved = project_dir.resolve()
+    return ["git", "-c", f"safe.directory={resolved}", "-C", str(resolved), *arguments]
+
+
 def git_output(project_dir: Path, *arguments: str) -> str:
-    return run(["git", "-C", str(project_dir), *arguments]).stdout.strip()
+    return run(git_command(project_dir, *arguments)).stdout.strip()
 
 
 def changed_source_files(project_dir: Path) -> list[str]:
@@ -223,7 +228,7 @@ def prepare_staging(project_dir: Path, target_revision: str) -> Path:
     staging_root = Path(tempfile.mkdtemp(prefix="plv-update-"))
     staging = staging_root / "release"
     try:
-        run(["git", "-C", str(project_dir), "worktree", "add", "--detach", str(staging), target_revision])
+        run(git_command(project_dir, "worktree", "add", "--detach", str(staging), target_revision))
         validate_release(staging)
         return staging
     except Exception:
@@ -234,13 +239,13 @@ def prepare_staging(project_dir: Path, target_revision: str) -> Path:
 def remove_staging(project_dir: Path, staging: Path | None) -> None:
     if staging is None:
         return
-    run(["git", "-C", str(project_dir), "worktree", "remove", "--force", str(staging)], check=False)
+    run(git_command(project_dir, "worktree", "remove", "--force", str(staging)), check=False)
     shutil.rmtree(staging.parent, ignore_errors=True)
-    run(["git", "-C", str(project_dir), "worktree", "prune"], check=False)
+    run(git_command(project_dir, "worktree", "prune"), check=False)
 
 
 def activate_revision(project_dir: Path, revision: str, backup_path: Path) -> None:
-    run(["git", "-C", str(project_dir), "reset", "--hard", revision])
+    run(git_command(project_dir, "reset", "--hard", revision))
     restore_backup(project_dir, backup_path)
 
 
@@ -262,8 +267,8 @@ def perform_update(
             "Local source changes must be committed or removed first: " + ", ".join(dirty_sources[:10])
         )
 
-    run(["git", "-C", str(project_dir), "remote", "set-url", "origin", remote_url])
-    run(["git", "-C", str(project_dir), "fetch", "--prune", "origin", branch])
+    run(git_command(project_dir, "remote", "set-url", "origin", remote_url))
+    run(git_command(project_dir, "fetch", "--prune", "origin", branch))
     target_revision = git_output(project_dir, "rev-parse", f"origin/{branch}")
     status.update("fetched", "Version distante récupérée", target_revision=target_revision)
     if target_revision == previous_revision:
