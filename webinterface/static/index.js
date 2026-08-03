@@ -397,14 +397,51 @@ function set_midi_playback_buttons(isPlaying) {
 }
 
 
-function start_midi_playback() {
+let midiPlaybackStatusPoll = null;
+
+function start_midi_playback_status_poll() {
+    if (midiPlaybackStatusPoll) clearInterval(midiPlaybackStatusPoll);
+    midiPlaybackStatusPoll = setInterval(() => {
+        fetch('/api/get_playback_status', {cache: 'no-store'})
+            .then(response => response.json())
+            .then(status => {
+                if (!status.is_playing) {
+                    set_midi_playback_buttons(false);
+                    clearInterval(midiPlaybackStatusPoll);
+                    midiPlaybackStatusPoll = null;
+                }
+            })
+            .catch(() => {});
+    }, 1000);
+}
+
+
+async function start_midi_playback() {
     const midiPlayer = document.getElementById('midi_player');
     const songName = midiPlayer ? midiPlayer.dataset.songName : '';
     if (!songName) {
+        showAlert('Sélectionne d’abord un morceau.', 'warning');
         return;
     }
-    change_setting('start_midi_play', songName);
-    set_midi_playback_buttons(true);
+    const startButton = document.getElementById('start_midi_play');
+    if (startButton) startButton.disabled = true;
+    try {
+        const response = await fetch(
+            '/api/change_setting?setting_name=start_midi_play&value=' + encodeURIComponent(songName),
+            {cache: 'no-store'}
+        );
+        const result = await response.json();
+        if (!response.ok || result.success === false) {
+            throw new Error(result.error || 'La lecture MIDI n’a pas pu démarrer.');
+        }
+        set_midi_playback_buttons(true);
+        start_midi_playback_status_poll();
+    } catch (error) {
+        set_midi_playback_buttons(false);
+        showAlert(error.message, 'error');
+    } finally {
+        if (startButton) startButton.disabled = false;
+    }
 }
 
 
@@ -414,6 +451,10 @@ function stop_midi_playback() {
         document.getElementById('midi_player').stop();
     }
     clearTimeout(scrolldelay);
+    if (midiPlaybackStatusPoll) {
+        clearInterval(midiPlaybackStatusPoll);
+        midiPlaybackStatusPoll = null;
+    }
     change_setting('stop_midi_play', '');
     set_midi_playback_buttons(false);
 }

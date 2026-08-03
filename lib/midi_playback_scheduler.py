@@ -14,6 +14,9 @@ from lib.reliable_midi_playback_client import (
 )
 
 
+NATIVE_RTP_START_DELAY_MS = 100
+
+
 class PlaybackState(str, Enum):
     STOPPED = "stopped"
     RUNNING = "running"
@@ -34,6 +37,8 @@ class MidiPlaybackScheduler:
         self._lock = threading.RLock()
         self.reliable_client_factory = reliable_client_factory or ReliableMidiPlaybackClient.from_settings
         self._reliable_handle = None
+        self.playback_mode = None
+        self.last_error = None
 
     @property
     def is_playing(self):
@@ -75,6 +80,8 @@ class MidiPlaybackScheduler:
             self.stop_event.clear()
             self.saving.is_playing_midi.clear()
             self.saving.is_playing_midi[song_path] = True
+            self.playback_mode = "reliable"
+            self.last_error = None
             logger.info("midi_playback transition=running song=%s", song_path)
 
         if self.menu is not None:
@@ -128,10 +135,12 @@ class MidiPlaybackScheduler:
             with self._lock:
                 if self.stop_event.is_set():
                     return False
-                self.state = PlaybackState.ERROR
+                self.playback_mode = "native_rtp_fallback"
+                self.last_error = str(e)
             if self.menu is not None:
-                self.menu.render_message(song_path, "Reliable MIDI unavailable", 2000)
-            return False
+                self.menu.render_message(song_path, "Using RTP fallback", 2000)
+            logger.info("midi_playback fallback=native_rtp song=%s", song_path)
+            return self._play_native_rtp_events(song_path, compiled)
 
         t0 = handle.start_perf
         self._play_local_events(song_path, compiled, t0)
@@ -172,6 +181,58 @@ class MidiPlaybackScheduler:
             song_path,
             processed,
             completed.get("maxLateUs"),
+        )
+        return True
+
+    def _play_native_rtp_events(self, song_path, compiled):
+        """Stream a compiled song through the regular RTP output queue.
+
+        Events are scheduled one timestamp group at a time. This keeps memory
+        bounded for large songs while ensuring simultaneous MIDI events are
+        placed in the forwarding queue before their deadline.
+        """
+        start_perf = time.perf_counter() + (NATIVE_RTP_START_DELAY_MS / 1000.0)
+        local_messages = compiled.local_messages
+        index = 0
+        scheduled = 0
+
+        while index < len(local_messages):
+            if self.stop_event.is_set():
+                logger.info("midi_playback transition=stopping song=%s", song_path)
+                return False
+
+            due_us = local_messages[index][0]
+            due_time = start_perf + (due_us / 1_000_000.0)
+            group_end = index
+            while group_end < len(local_messages) and local_messages[group_end][0] == due_us:
+                _, message = local_messages[group_end]
+                queued = self.midiports.schedule_rtp_message(
+                    message.copy(time=0),
+                    due_time=due_time,
+                    source="midifile",
+                )
+                if queued:
+                    scheduled += 1
+                group_end += 1
+
+            delay = max(0.0, due_time - time.perf_counter())
+            if delay > 0 and self.stop_event.wait(delay):
+                logger.info("midi_playback transition=stopping song=%s", song_path)
+                return False
+
+            for local_index in range(index, group_end):
+                _, message = local_messages[local_index]
+                if self.stop_event.is_set():
+                    return False
+                if self.midiports.should_process_locally(message):
+                    self._enqueue_file_message(message.copy(time=0), due_time)
+            index = group_end
+
+        logger.info(
+            "native_rtp_midi_playback complete song=%s scheduled=%s total=%s",
+            song_path,
+            scheduled,
+            compiled.total,
         )
         return True
 

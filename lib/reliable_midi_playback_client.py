@@ -1,6 +1,8 @@
 import json
+import queue
 import socket
 import struct
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -71,7 +73,7 @@ class ReliablePlaybackHandle:
 
 
 class ReliableMidiPlaybackClient:
-    def __init__(self, host=DEFAULT_RELIABLE_MIDI_HOST, port=DEFAULT_RELIABLE_MIDI_PORT, timeout=5.0):
+    def __init__(self, host=DEFAULT_RELIABLE_MIDI_HOST, port=DEFAULT_RELIABLE_MIDI_PORT, timeout=2.0):
         self.host = host or DEFAULT_RELIABLE_MIDI_HOST
         self.port = int(port or DEFAULT_RELIABLE_MIDI_PORT)
         self.timeout = float(timeout)
@@ -86,7 +88,7 @@ class ReliableMidiPlaybackClient:
 
     def play_events(self, song, compiled, start_delay_ms=DEFAULT_START_DELAY_MS):
         session_id = uuid.uuid4().hex
-        sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        sock = _create_connection(self.host, self.port, timeout=self.timeout)
         sock.settimeout(self.timeout)
         try:
             _send_frame(
@@ -129,6 +131,45 @@ class ReliableMidiPlaybackClient:
             except OSError:
                 pass
             raise
+
+
+def _create_connection(host, port, timeout):
+    """Resolve and connect within a bounded time, including slow mDNS lookups."""
+    started = time.monotonic()
+    results = queue.Queue(maxsize=1)
+
+    def resolve():
+        try:
+            addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            results.put((addresses, None))
+        except OSError as error:
+            results.put((None, error))
+
+    threading.Thread(target=resolve, name="reliable-midi-dns", daemon=True).start()
+    try:
+        addresses, resolution_error = results.get(timeout=timeout)
+    except queue.Empty as error:
+        raise ReliablePlaybackError(f"Timed out resolving {host}") from error
+    if resolution_error is not None:
+        raise ReliablePlaybackError(str(resolution_error)) from resolution_error
+
+    last_error = None
+    deadline = started + timeout
+    for family, socktype, proto, _, sockaddr in addresses:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        sock = socket.socket(family, socktype, proto)
+        sock.settimeout(remaining)
+        try:
+            sock.connect(sockaddr)
+            return sock
+        except OSError as error:
+            last_error = error
+            sock.close()
+    if last_error is not None:
+        raise ReliablePlaybackError(str(last_error)) from last_error
+    raise ReliablePlaybackError(f"Timed out connecting to {host}:{port}")
 
 
 def compile_midi_file(path):

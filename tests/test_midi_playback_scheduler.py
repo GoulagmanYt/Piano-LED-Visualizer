@@ -230,7 +230,7 @@ class TestMidiPlaybackScheduler(unittest.TestCase):
         self.assertEqual([msg.note for msg, _ in midiports.file_enqueued], [60, 60, 60])
         self.assertTrue(client.handle.waited)
 
-    def test_reliable_failure_refuses_playback_without_rtp_fallback(self):
+    def test_reliable_failure_falls_back_to_native_rtp_playback(self):
         midiports = FakeMidiPorts()
         client = FakeReliableClient(error=ReliablePlaybackError("connect failed"))
         scheduler = MidiPlaybackScheduler(
@@ -246,12 +246,40 @@ class TestMidiPlaybackScheduler(unittest.TestCase):
         mid.tracks.append(track)
         track.append(mido.Message("note_on", note=60, velocity=100, time=0))
 
-        with patch("lib.midi_playback_scheduler.mido.MidiFile", return_value=mid):
-            self.assertFalse(scheduler.play("song.mid"))
+        with patch("lib.midi_playback_scheduler.mido.MidiFile", return_value=mid), patch(
+            "lib.midi_playback_scheduler.time.perf_counter", return_value=100.0
+        ):
+            scheduler.stop_event.wait = lambda _delay: False
+            self.assertTrue(scheduler.play("song.mid"))
 
-        self.assertEqual(midiports.scheduled, [])
-        self.assertEqual(midiports.file_enqueued, [])
-        self.assertEqual(scheduler.state, PlaybackState.ERROR)
+        self.assertEqual([msg.note for msg, _, source in midiports.scheduled if source == "midifile"], [60])
+        self.assertEqual([msg.note for msg, _ in midiports.file_enqueued], [60])
+        self.assertEqual(scheduler.playback_mode, "native_rtp_fallback")
+        self.assertEqual(scheduler.last_error, "connect failed")
+        self.assertEqual(scheduler.state, PlaybackState.STOPPED)
+
+    def test_native_rtp_fallback_schedules_simultaneous_events_before_waiting(self):
+        midiports = FakeMidiPorts()
+        scheduler = MidiPlaybackScheduler(midiports, FakeSaving(), FakeMenu(), None, None)
+        scheduler.state = PlaybackState.RUNNING
+        messages = [
+            mido.Message("note_on", note=60, velocity=100),
+            mido.Message("note_on", note=64, velocity=100),
+            mido.Message("note_off", note=60, velocity=0),
+        ]
+        compiled = CompiledMidiPlayback(
+            events=[],
+            local_messages=[(0, messages[0]), (0, messages[1]), (500_000, messages[2])],
+            total_delay_s=0.5,
+        )
+        scheduled_counts_at_wait = []
+        scheduler.stop_event.wait = lambda _delay: (scheduled_counts_at_wait.append(len(midiports.scheduled)) or False)
+
+        with patch("lib.midi_playback_scheduler.time.perf_counter", return_value=100.0):
+            self.assertTrue(scheduler._play_native_rtp_events("chord.mid", compiled))
+
+        self.assertEqual(scheduled_counts_at_wait, [2, 3])
+        self.assertEqual([msg.note for msg, _, _ in midiports.scheduled], [60, 64, 60])
 
 
 if __name__ == "__main__":
