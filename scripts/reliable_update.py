@@ -34,6 +34,7 @@ DEFAULT_STATE_DIR = Path("/var/lib/piano-led-visualizer")
 DEFAULT_BACKUP_DIR = Path("/var/backups/piano-led-visualizer")
 TERMINAL_STATES = {"success", "no_update", "rolled_back", "failed"}
 PERSISTENT_PATHS = (
+    "Songs",
     "config/settings.xml",
     "config/sequences.xml",
     "config/presets",
@@ -118,6 +119,26 @@ def create_backup(project_dir: Path, backup_dir: Path, revision: str) -> Path:
             if source.exists():
                 archive.add(source, arcname=relative, recursive=True)
     return destination
+
+
+def ensure_backup_space(project_dir: Path, backup_dir: Path) -> None:
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    content_size = 0
+    for relative in PERSISTENT_PATHS:
+        source = project_dir / relative
+        if source.is_file():
+            content_size += source.stat().st_size
+        elif source.is_dir():
+            content_size += sum(
+                path.stat().st_size for path in source.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            )
+    required = int(content_size * 1.1) + 16 * 1024 * 1024
+    free = shutil.disk_usage(backup_dir).free
+    if free < required:
+        raise UpdateError(
+            f"Not enough space for a safe backup: {required} bytes required, {free} bytes available"
+        )
 
 
 def restore_backup(project_dir: Path, backup_path: Path) -> None:
@@ -255,6 +276,7 @@ def perform_update(
         install_requirements(staging / "requirements.txt")
 
         status.update("backing_up", "Sauvegarde de la configuration")
+        ensure_backup_space(project_dir, backup_dir)
         run(["systemctl", "stop", "visualizer.service"])
         backup_path = create_backup(project_dir, backup_dir, previous_revision)
         status.update("activating", "Activation de la nouvelle version", backup=str(backup_path))

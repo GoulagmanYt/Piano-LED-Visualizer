@@ -72,22 +72,27 @@ def test_backup_round_trip_restores_persistent_data(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
     (project / "config/presets").mkdir(parents=True)
+    (project / "Songs").mkdir()
     settings = project / "config/settings.xml"
     preset = project / "config/presets/custom.xml"
     profile = project / "profiles.db"
+    song = project / "Songs/user-song.mid"
     settings.write_text("before", encoding="utf-8")
     preset.write_text("preset", encoding="utf-8")
     profile.write_bytes(b"database")
+    song.write_bytes(b"midi")
 
     backup = reliable_update.create_backup(project, tmp_path / "backups", "a" * 40)
     settings.write_text("after", encoding="utf-8")
     preset.unlink()
     profile.unlink()
+    song.unlink()
     reliable_update.restore_backup(project, backup)
 
     assert settings.read_text(encoding="utf-8") == "before"
     assert preset.read_text(encoding="utf-8") == "preset"
     assert profile.read_bytes() == b"database"
+    assert song.read_bytes() == b"midi"
 
 
 def test_restore_rejects_path_traversal(tmp_path):
@@ -105,10 +110,28 @@ def test_restore_rejects_path_traversal(tmp_path):
     assert not (tmp_path / "outside.txt").exists()
 
 
+def test_backup_space_check_rejects_insufficient_disk(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    (project / "Songs").mkdir(parents=True)
+    (project / "Songs/large.mid").write_bytes(b"x" * 1024)
+    usage = reliable_update.shutil._ntuple_diskusage(total=2048, used=2048, free=0)
+    monkeypatch.setattr(reliable_update.shutil, "disk_usage", lambda path: usage)
+
+    with pytest.raises(reliable_update.UpdateError, match="Not enough space"):
+        reliable_update.ensure_backup_space(project, tmp_path / "backups")
+
+
 def test_changed_source_files_allows_persistent_config_only(tmp_path):
     project = tmp_path / "repo"
     init_repo(project)
     (project / "config/sequences.xml").write_text("<changed/>\n", encoding="utf-8")
+    assert reliable_update.changed_source_files(project) == []
+
+    (project / "Songs").mkdir()
+    (project / "Songs/example.mid").write_bytes(b"midi")
+    git(project, "add", "Songs/example.mid")
+    git(project, "commit", "-m", "song")
+    (project / "Songs/example.mid").write_bytes(b"changed")
     assert reliable_update.changed_source_files(project) == []
 
     (project / "visualizer.py").write_text("print('changed')\n", encoding="utf-8")

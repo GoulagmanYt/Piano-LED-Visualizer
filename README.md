@@ -170,7 +170,7 @@ For SFTP: in any FTP program (like Filezilla) connect to your RPi local address 
 
 The update now runs in an independent service. It downloads and validates the new release before activation, backs up persistent configuration, restarts the visualizer and verifies both the systemd service and `/api/health`. If that health check fails, the previous Git revision, configuration and dependencies are restored automatically. The web interface displays each phase and the final result; no manual reboot is required.
 
-Configuration backups are retained in `/var/backups/piano-led-visualizer` (the five most recent archives). The machine-readable status is stored in `/var/lib/piano-led-visualizer/update-status.json`.
+Configuration and song-library backups are retained in `/var/backups/piano-led-visualizer` (the five most recent archives). The machine-readable status is stored in `/var/lib/piano-led-visualizer/update-status.json`.
 
 - **B** - Connect to your console using SSH and type:
 
