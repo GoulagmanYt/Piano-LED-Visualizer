@@ -56,56 +56,6 @@ pid = psutil.Process(os.getpid())
 SONGS_DIR = Path("Songs").resolve()
 SHEET_MUSIC_EXTENSIONS = (".musicxml", ".xml", ".mxl", ".abc")
 
-THEME_DEFAULTS = {
-    "web_theme_mode": "dark",
-    "web_theme_preset": "aurora",
-    "web_theme_accent": "#22d3ee",
-    "web_theme_background_color": "#334155",
-    "web_theme_surface_color": "#cbd5e1",
-    "web_theme_icon_color": "#94a3b8",
-    "web_theme_badge_color": "#0f766e",
-    "web_theme_badge_text_color": "#f8fafc",
-    "web_theme_surface": "glass",
-    "web_theme_radius": "rounded",
-    "web_theme_glow": "normal",
-    "web_theme_contrast": "balanced",
-    "web_theme_background": "ambient",
-}
-
-THEME_ALLOWED_VALUES = {
-    "web_theme_mode": {"dark", "light", "auto"},
-    "web_theme_preset": {"aurora", "ember", "forest", "mono", "ocean", "sunrise"},
-    "web_theme_surface": {"glass", "solid", "flat"},
-    "web_theme_radius": {"soft", "rounded", "crisp"},
-    "web_theme_glow": {"subtle", "normal", "vivid"},
-    "web_theme_contrast": {"balanced", "strong"},
-    "web_theme_background": {"ambient", "mesh", "minimal", "stage"},
-}
-
-
-def _normalize_theme_hex(value, default):
-    if not value:
-        return default
-    normalized = value.strip()
-    if not normalized.startswith("#"):
-        normalized = "#" + normalized
-    if re.fullmatch(r"#[0-9a-fA-F]{6}", normalized):
-        return normalized.lower()
-    return default
-
-
-def _normalize_theme_setting(setting_name, value):
-    if setting_name in {
-        "web_theme_accent",
-        "web_theme_background_color",
-        "web_theme_surface_color",
-        "web_theme_icon_color",
-        "web_theme_badge_color",
-        "web_theme_badge_text_color",
-    }:
-        return _normalize_theme_hex(value, THEME_DEFAULTS[setting_name])
-    return value if value in THEME_ALLOWED_VALUES.get(setting_name, set()) else THEME_DEFAULTS[setting_name]
-
 
 @webinterface.route('/api/health', methods=['GET'])
 def api_health():
@@ -334,13 +284,13 @@ def change_setting():
         reload_sequence = False
 
     if disable_sequence == "true":
+        #menu = app_state.ledsettings.menu
+        #ledstrip = app_state.ledsettings.ledstrip
+        #app_state.ledsettings.__init__(app_state.usersettings)
+        #app_state.ledsettings.menu = menu
+        #app_state.ledsettings.add_instance(menu, ledstrip)
+        #app_state.ledsettings.ledstrip = ledstrip
         app_state.ledsettings.sequence_active = False
-
-    if setting_name in THEME_DEFAULTS:
-        app_state.usersettings.change_setting_value(
-            setting_name,
-            _normalize_theme_setting(setting_name, value),
-        )
 
     if setting_name == "clean_ledstrip":
         fastColorWipe(app_state.ledstrip.strip, True, app_state.ledsettings)
@@ -2180,11 +2130,6 @@ def get_settings():
     response["speed_period_in_seconds"] = app_state.usersettings.get_setting_value("speed_period_in_seconds")
     response["hotspot_password"] = app_state.usersettings.get_setting_value("hotspot_password")
     response["practice_tool_url"] = app_state.usersettings.get_setting_value("practice_tool_url") or "https://piano-visualizer.pages.dev"
-    for setting_name, default_value in THEME_DEFAULTS.items():
-        response[setting_name] = _normalize_theme_setting(
-            setting_name,
-            app_state.usersettings.get_setting_value(setting_name) or default_value,
-        )
 
     return jsonify(response)
 

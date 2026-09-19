@@ -1,4 +1,9 @@
 <settings>
+    <missing_nest>
+        <sub>sub</sub>
+    </missing_nest>
+    
+    <missing>miss1</missing>
     <screen_on>1</screen_on>
     <brightness_percent>50</brightness_percent>
     <background_color>BLACK</background_color>
@@ -11,23 +16,14 @@
 
     <fadingspeed>1000</fadingspeed>
     <color_mode>VelocityRainbow</color_mode>
-    <web_theme_mode>dark</web_theme_mode>
-    <web_theme_preset>aurora</web_theme_preset>
-    <web_theme_accent>#22d3ee</web_theme_accent>
-    <web_theme_background_color>#334155</web_theme_background_color>
-    <web_theme_surface_color>#cbd5e1</web_theme_surface_color>
-    <web_theme_icon_color>#94a3b8</web_theme_icon_color>
-    <web_theme_badge_color>#0f766e</web_theme_badge_color>
-    <web_theme_badge_text_color>#f8fafc</web_theme_badge_text_color>
-    <web_theme_surface>glass</web_theme_surface>
-    <web_theme_radius>rounded</web_theme_radius>
-    <web_theme_glow>normal</web_theme_glow>
-    <web_theme_contrast>balanced</web_theme_contrast>
-    <web_theme_background>ambient</web_theme_background>
 
     <color_mode_settings>
-        <VelocityRainbow>
-            <offset>210</offset>
+        <missing_color_mode>
+            <param>1</param>
+        </missing_color_mode>
+    <VelocityRainbow>
+            <missing>miss2</missing>
+        <offset>210</offset>
             <scale>120</scale>
             <curve>0</curve>
         </VelocityRainbow>

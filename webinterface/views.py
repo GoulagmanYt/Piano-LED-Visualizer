@@ -6,21 +6,6 @@ import time
 from lib.song_file_security import SongFileError, resolve_song_path, validate_song_filename
 
 ALLOWED_EXTENSIONS = {'mid', 'musicxml', 'mxl', 'xml', 'abc'}
-DEFAULT_WEB_THEME_SETTINGS = {
-    "web_theme_mode": "dark",
-    "web_theme_preset": "aurora",
-    "web_theme_accent": "#22d3ee",
-    "web_theme_background_color": "#334155",
-    "web_theme_surface_color": "#cbd5e1",
-    "web_theme_icon_color": "#94a3b8",
-    "web_theme_badge_color": "#0f766e",
-    "web_theme_badge_text_color": "#f8fafc",
-    "web_theme_surface": "glass",
-    "web_theme_radius": "rounded",
-    "web_theme_glow": "normal",
-    "web_theme_contrast": "balanced",
-    "web_theme_background": "ambient",
-}
 
 
 def allowed_file(filename):
@@ -42,24 +27,12 @@ def before_request():
 
 @webinterface.route('/')
 def index():
-    initial_theme_settings = {
-        key: (app_state.usersettings.get_setting_value(key) if getattr(app_state, "usersettings", None) else None) or value
-        for key, value in DEFAULT_WEB_THEME_SETTINGS.items()
-    }
-    return render_template(
-        'index.html',
-        initial_theme_settings=initial_theme_settings,
-    )
+    return render_template('index.html')
 
 
 @webinterface.route('/home')
 def home():
     return render_template('home.html')
-
-
-@webinterface.route('/appearance')
-def appearance():
-    return render_template('appearance.html')
 
 
 @webinterface.route('/ledsettings')
