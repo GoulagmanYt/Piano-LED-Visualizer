@@ -1,11 +1,15 @@
 from xml.etree import ElementTree as ET
 import time
+import os
+import tempfile
+import threading
 from functools import reduce
 from lib.log_setup import logger
 
 
 class UserSettings:
     def __init__(self, config="config/settings.xml", default_config="config/default_settings.xml"):
+        self._lock = threading.RLock()
         self.cache = {}
 
         self.CONFIG_FILE = config
@@ -53,6 +57,10 @@ class UserSettings:
     # set setting
 
     def __setitem__(self, key, value):
+        with self._lock:
+            self._setitem_locked(key, value)
+
+    def _setitem_locked(self, key, value):
         val = str(value)
         self._xml_set(key, val)
 
@@ -94,26 +102,32 @@ class UserSettings:
         self.pending_changes = True
 
     def save_changes(self):
-        if self.pending_changes:
-            self.pending_changes = False
-
-            self.tree.write(self.CONFIG_FILE)
-            # Avoid re-parsing: we already have the tree structure in memory
-            # Just refresh the root reference (it's already updated from _xml_set calls)
-            # Only re-parse if we need to ensure file consistency, but for performance,
-            # we can skip this since we're writing our in-memory tree
-            # self.tree = ET.parse(self.CONFIG_FILE)  # Removed redundant parse
-            # self.root = self.tree.getroot()  # Root is already current
-            # Cache is already updated via _xml_set, so no need to rebuild
-            self.last_save = time.time()
+        with self._lock:
+            if not self.pending_changes:
+                return
+            directory = os.path.dirname(os.path.abspath(self.CONFIG_FILE))
+            fd, temporary = tempfile.mkstemp(prefix='.settings-', dir=directory)
+            try:
+                with os.fdopen(fd, 'wb') as output:
+                    self.tree.write(output)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, self.CONFIG_FILE)
+                self.pending_changes = False
+                self.last_save = time.time()
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
 
     def reset_to_default(self):
-        self.tree = ET.parse(self.DEFAULT_CONFIG_FILE)
-        self.tree.write(self.CONFIG_FILE)
-        self.root = self.tree.getroot()
-        self.xml_to_dict(self.cache, self.root)
-        self.pending_reset = True
-        self.last_save = time.time()
+        with self._lock:
+            self.tree = ET.parse(self.DEFAULT_CONFIG_FILE)
+            self.root = self.tree.getroot()
+            self.cache.clear()
+            self.xml_to_dict(self.cache, self.root)
+            self.pending_changes = True
+            self.save_changes()
+            self.pending_reset = True
 
     def xml_to_dict(self, dict, node):
         """Recursively convert xml node into dict

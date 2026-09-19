@@ -37,6 +37,7 @@ class MidiQueues:
         self.drop_counter = 0
         self.drop_counts = {}
         self._lock = threading.RLock()
+        self.activity = threading.Event()
 
     def classify_message(self, msg):
         msg_type = getattr(msg, "type", None)
@@ -78,6 +79,7 @@ class MidiQueues:
                 return False
 
         queue.append(item)
+        self.activity.set()
         return True
 
     def enqueue_live(self, msg, timestamp=None):
@@ -105,6 +107,7 @@ class MidiQueues:
             timestamp = time.perf_counter()
         with self._lock:
             self.file_queue.append((msg, timestamp))
+            self.activity.set()
             return True
 
     def enqueue_websocket(self, msg, timestamp=None):
@@ -283,6 +286,14 @@ class MidiQueues:
 
     def drain_websocket(self, max_messages=None):
         return self.drain_queue(self.websocket_queue, max_messages=max_messages)
+
+    def discard_inactive(self, *, learning_active, live_active):
+        """Do not retain an unconsumed copy of every note for days."""
+        with self._lock:
+            if not learning_active:
+                self.live_learning_queue.clear()
+            if not live_active:
+                self.live_visualizer_queue.clear()
 
     def clear_file(self):
         with self._lock:

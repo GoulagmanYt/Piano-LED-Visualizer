@@ -163,6 +163,10 @@ class FakeDiagnostics:
         self.metadata = {}
         self.gauges = {}
         self.counters = {}
+        self.durations = {}
+
+    def record_duration(self, name, value):
+        self.durations[name] = value
 
     def set_metadata(self, name, value):
         self.metadata[name] = value
@@ -342,3 +346,13 @@ def test_midi_activity_update_falls_back_for_legacy_state_manager():
     processor.process_midi_events()
 
     assert state_manager.calls == 1
+
+
+def test_soft_velocity_scales_down_instead_of_overflowing_rgb():
+    settings = FakeLedSettings()
+    settings.mode = 'Velocity'
+    settings.skipped_notes = 'None'
+    processor = make_processor(ledsettings=settings)
+    processor.color_mode.NoteOn = lambda *args: (255, 128, 64)
+    processor.handle_note_on(FakeMessage(velocity=1), 1.0, 3)
+    assert processor.ledstrip.strip.pixels[-1] == (3, (2, 1, 0))

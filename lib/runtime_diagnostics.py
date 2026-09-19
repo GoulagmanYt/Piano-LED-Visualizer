@@ -19,10 +19,10 @@ class RuntimeDiagnostics:
             return
         elapsed_ms = max(0.0, float(seconds) * 1000.0)
         with self._lock:
-            metric = self._timings.setdefault(
-                name,
-                {"count": 0, "total_ms": 0.0, "max_ms": 0.0, "last_ms": 0.0},
-            )
+            metric = self._timings.get(name)
+            if metric is None:
+                metric = {"count": 0, "total_ms": 0.0, "max_ms": 0.0, "last_ms": 0.0}
+                self._timings[name] = metric
             metric["count"] += 1
             metric["total_ms"] += elapsed_ms
             metric["last_ms"] = elapsed_ms
@@ -35,15 +35,11 @@ class RuntimeDiagnostics:
         current_depth = max(0, int(depth))
         current_age_ms = max(0.0, float(oldest_age_ms or 0.0))
         with self._lock:
-            metric = self._queues.setdefault(
-                name,
-                {
-                    "current_depth": 0,
-                    "max_depth": 0,
-                    "current_oldest_age_ms": 0.0,
-                    "max_oldest_age_ms": 0.0,
-                },
-            )
+            metric = self._queues.get(name)
+            if metric is None:
+                metric = {"current_depth": 0, "max_depth": 0,
+                          "current_oldest_age_ms": 0.0, "max_oldest_age_ms": 0.0}
+                self._queues[name] = metric
             metric["current_depth"] = current_depth
             metric["current_oldest_age_ms"] = current_age_ms
             if current_depth > metric["max_depth"]:

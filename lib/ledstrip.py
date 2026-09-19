@@ -2,6 +2,7 @@ from lib.functions import *
 import lib.colormaps as cmap
 from lib.rpi_drivers import PixelStrip, ws
 from lib.LED_drivers import PixelStrip_Emu
+from lib.async_strip import AsyncPixelStrip, dma_waiter
 from lib.log_setup import logger
 
 class LedStrip:
@@ -50,6 +51,9 @@ class LedStrip:
         self.init_strip()
 
     def init_strip(self):
+        old_strip = getattr(self, "strip", None)
+        if isinstance(old_strip, AsyncPixelStrip):
+            old_strip.close()
         self.keylist = [0] * self.led_number
         self.keylist_status = [0] * self.led_number
         self.keylist_color = [(0, 0, 0)] * self.led_number
@@ -67,22 +71,19 @@ class LedStrip:
                 self.strip.begin()
                 if "releaseGIL" in dir(self.strip):
                     self.strip.releaseGIL()
+                backend = self.strip
+                self.strip = AsyncPixelStrip(backend, wait_for_dma=dma_waiter(ws, backend))
                 self.change_gamma(self.led_gamma)
-            except Exception as e:
-                logger.warning(e)
-
-                if isinstance(e, RuntimeError):
-                    # rpi_ws281x registers _cleanup() atexit, but if it's not initialized ws2811_fini will segfault.
-                    # Manually clean up memory, then bypass _cleanup() using knowledge that _cleanup() checks _leds first
-                    logger.info("Cleaning up ws281x instance.")
-                    ws.delete_ws2811_t(self.strip._leds)
-                    self.strip._leds = None
-
-                logger.info("Failed to load LED strip.  Using emu driver.")
-                self.strip = PixelStrip_Emu(int(self.led_number))
-                self.driver = "emu"
+            except Exception:
+                failed_strip = getattr(self, "strip", None)
+                if isinstance(failed_strip, AsyncPixelStrip):
+                    failed_strip.close()
+                elif failed_strip is not None:
+                    failed_strip._cleanup()
+                logger.exception("LED hardware initialization failed")
+                raise
         elif self.driver == "emu":
-            self.strip = PixelStrip_Emu(int(self.led_number))
+            self.strip = AsyncPixelStrip(PixelStrip_Emu(int(self.led_number)))
 
     def _note_position_state_key(self, ledsettings):
         note_offsets = tuple(tuple(offset) for offset in ledsettings.note_offsets)
@@ -130,7 +131,7 @@ class LedStrip:
         if 0.01 <= self.led_gamma <= 10.0:
             if self.driver == "rpi_ws281x":
                 # rpi_ws281x.py interface has no ported method to set gamma by factor, using direct ws
-                ws.ws2811_set_custom_gamma_factor(self.strip._leds, self.led_gamma)
+                self.strip.configure_gamma(ws, self.led_gamma)
 
             # Rebuild colormaps
             cmap.generate_colormaps(cmap.gradients, self.led_gamma)
@@ -148,15 +149,10 @@ class LedStrip:
         self.strip.setBrightness(int(self.brightness))
 
     def change_led_count(self, value, fixed_number=False):
-        if fixed_number:
-            self.led_number = value
-        else:
-            self.led_number += value
-        self.led_number = max(1, self.led_number)
-
-        self.usersettings.change_setting_value("led_count", self.led_number)
-
-        self.init_strip()
+        count = max(1, int(value if fixed_number else self.led_number + value))
+        self.usersettings.change_setting_value("led_count", count)
+        # Rebuild driver, render buffers and every consumer together at restart.
+        self.usersettings.pending_reset = True
 
     def change_shift(self, value, fixed_number=False):
         if fixed_number:

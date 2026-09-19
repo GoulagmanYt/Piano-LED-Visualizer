@@ -34,6 +34,10 @@ def restart_script():
 
 class VisualizerApp:
     def __init__(self):
+        self.stop_event = threading.Event()
+        self._shutdown_done = False
+        self._screensaver_thread = None
+        self._housekeeping_thread = None
         self.ci = None
         self.component_initializer = None
         signal.signal(signal.SIGTERM, self.handle_shutdown)
@@ -49,8 +53,10 @@ class VisualizerApp:
 
         # Initialize components
         self.args = ArgumentParser().args
-        self.component_initializer = ComponentInitializer(self.args)
+        self.component_initializer = ComponentInitializer.__new__(ComponentInitializer)
         self.ci = self.component_initializer
+        self.component_initializer.__init__(self.args)
+        self.ci.menu.shutdown_event = self.stop_event
         self.ci.midiports.on_input_connected = self.handle_input_connected
         
         # Check and enable SPI if running on Raspberry Pi
@@ -136,58 +142,88 @@ class VisualizerApp:
         return result
 
     def handle_input_connected(self, port_name):
+        # Never overwrite a played frame from a connection-notification thread.
         logger.info("MIDI input detected: %s", port_name)
-        threading.Thread(target=self._blink_input_detected, daemon=True).start()
-
-    def _blink_input_detected(self):
-        if not self._input_detected_blink_lock.acquire(blocking=False):
-            return
-        try:
-            ci = getattr(self, "ci", None)
-            if ci is None:
-                return
-            strip = ci.ledstrip.strip
-            green = Color(0, 255, 0)
-            off = Color(0, 0, 0)
-            end_time = time.monotonic() + 2.0
-            enabled = True
-            while time.monotonic() < end_time:
-                color = green if enabled else off
-                for led in range(strip.numPixels()):
-                    strip.setPixelColor(led, color)
-                strip.show()
-                enabled = not enabled
-                time.sleep(0.25)
-            fastColorWipe(strip, True, ci.ledsettings)
-        except Exception as error:
-            logger.warning("Could not blink LEDs for MIDI input detection: %s", error)
-        finally:
-            self._input_detected_blink_lock.release()
 
     def handle_shutdown(self, signum, frame):
-        ci = getattr(self, "ci", None)
-        if ci is not None:
+        self.stop_event.set()
+        if self.ci is not None and hasattr(self.ci, 'midiports'):
+            self.ci.midiports.queues.activity.set()
+
+    def shutdown(self):
+        if self._shutdown_done:
+            return
+        self._shutdown_done = True
+        self.stop_event.set()
+        ci = self.ci
+        if ci is None:
+            return
+        menu = getattr(ci, 'menu', None)
+        if menu is not None:
+            menu.is_animation_running = False
+            menu.is_idle_animation_running = False
+            menu.screensaver_is_running = False
+        # Freeze output first; late animation/UI writes become harmless no-ops.
+        strip = getattr(getattr(ci, 'ledstrip', None), 'strip', None)
+        cleanups = ((strip, 'close'), (getattr(ci, 'learning', None), 'stop_learning'),
+                    (getattr(ci, 'playback_scheduler', None), 'stop'),
+                    (getattr(ci, 'midiports', None), 'close'),
+                    (getattr(ci, 'usersettings', None), 'save_changes'))
+        for component, method in cleanups:
+            cleanup = getattr(component, method, None)
+            if cleanup is None:
+                continue
             try:
-                stop_animations(ci.menu)
-                fastColorWipe(ci.ledstrip.strip, True, ci.ledsettings)
-            except Exception as error:
-                logger.warning(f"[shutdown] Could not clear LEDs cleanly: {error}")
-        os._exit(0)
-    
+                cleanup()
+            except Exception:
+                logger.exception("Shutdown cleanup failed")
+        for worker in (self._housekeeping_thread, self._screensaver_thread,
+                       getattr(getattr(ci, 'learning', None), 't', None), getattr(menu, 't', None)):
+            if worker is not None and worker is not threading.current_thread():
+                worker.join(timeout=2)
+        from lib.rpi_drivers import GPIO
+        GPIO.cleanup()
+        if self.fh is not None:
+            self.fh.close()
+        logger.info("Shutdown complete: LEDs black, DMA and MIDI released")
+
+    def _housekeeping_loop(self):
+        # Blocking LCD/screensaver, disk and network operations stay off render.
+        while not self.stop_event.is_set():
+            ci = self.ci
+            now = time.time()
+            try:
+                self.check_screensaver(ci.midiports, ci.menu, now)
+                manage_idle_animation(ci.ledstrip, ci.ledsettings, ci.menu,
+                                      ci.midiports, self.state_manager)
+                self.update_display(time.perf_counter() - ci.saving.start_time, ci.menu)
+                self.check_settings_changes(ci.usersettings, now)
+                ci.platform.manage_hotspot(ci.hotspot, ci.usersettings, ci.midiports, False, now)
+                self.gpio_handler.process_gpio_keys()
+            except Exception:
+                logger.exception("Housekeeping failed")
+            self.stop_event.wait(0.1 if getattr(self, 'state_manager', None) and self.state_manager.is_active_use() else 0.05)
+
     def ensure_singleton(self):
         self.fh = open(os.path.realpath(__file__), 'r')
         try:
             fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except Exception as error:
             logger.warning(f"[ensure_singleton] Unexpected exception occurred: {error}")
-            restart_script()
+            raise RuntimeError("Another visualizer already owns the process lock") from error
 
     def run(self):
         ci = self.ci
         platform = ci.platform
-        platform.manage_hotspot(ci.hotspot, ci.usersettings, ci.midiports, True)
-
-        while True:
+        self._housekeeping_thread = threading.Thread(target=self._housekeeping_loop, name="housekeeping", daemon=True)
+        self._housekeeping_thread.start()
+        ci.ledstrip.strip.diagnostics = self.runtime_diagnostics
+        activity = ci.midiports.queues.activity
+        while not self.stop_event.is_set():
+            activity.clear()
+            ci.ledstrip.strip.check_health()
+            if self.state_manager.is_active_use():
+                ci.menu.is_idle_animation_running = False
             loop_start = time.perf_counter()
             try:
                 elapsed_time = loop_start - ci.saving.start_time
@@ -211,22 +247,12 @@ class VisualizerApp:
             sleep_interval = self.state_manager.get_loop_delay()
             self.runtime_diagnostics.set_gauge("requested_loop_sleep_ms", round(sleep_interval * 1000.0, 4))
 
-            self._run_timed("check_screensaver", self.check_screensaver, midiports, menu, now_wall)
-            self._run_timed(
-                "manage_idle_animation",
-                manage_idle_animation,
-                ledstrip,
-                ledsettings,
-                menu,
-                midiports,
-                self.state_manager,
+            self.check_activity_backlight(ledstrip, ledsettings, midiports, now_wall)
+            self.check_color_mode(ledsettings)
+            midiports.queues.discard_inactive(
+                learning_active=bool(ci.learning.is_started_midi),
+                live_active=not (ci.learning.is_started_midi or ci.saving.is_playing_midi),
             )
-            self._run_timed("check_activity_backlight", self.check_activity_backlight, ledstrip, ledsettings, midiports, now_wall)
-            self._run_timed("update_display", self.update_display, elapsed_time, menu)
-            self._run_timed("check_color_mode", self.check_color_mode, ledsettings)
-            self._run_timed("check_settings_changes", self.check_settings_changes, usersettings, now_wall)
-            self._run_timed("manage_hotspot", platform.manage_hotspot, hotspot, usersettings, midiports, False, now_wall)
-            self._run_timed("process_gpio_keys", self.gpio_handler.process_gpio_keys)
 
             event_loop_time = loop_start - self.event_loop_stamp
             self.event_loop_stamp = loop_start
@@ -253,7 +279,10 @@ class VisualizerApp:
                     ledstrip.current_fps = 0.0
             midiports.refresh_queue_diagnostics()
             self.runtime_diagnostics.record_duration("main_loop", time.perf_counter() - loop_start)
-            time.sleep(sleep_interval)  # Dynamic delay based on system state
+            if should_update:
+                time.sleep(sleep_interval)
+            else:
+                activity.wait(min(0.05, max(0.001, sleep_interval)))
 
     def update_fps_stats(self):
         now = time.perf_counter()
@@ -286,7 +315,12 @@ class VisualizerApp:
         
         # Check if screensaver should start using state manager
         if self.state_manager.should_run_screensaver(menu):
-            screensaver(menu, midiports, ci.saving, ci.ledstrip, ci.ledsettings, self.state_manager)
+            if self._screensaver_thread is None or not self._screensaver_thread.is_alive():
+                self._screensaver_thread = threading.Thread(
+                    target=screensaver,
+                    args=(menu, midiports, ci.saving, ci.ledstrip, ci.ledsettings, self.state_manager),
+                    name="screensaver", daemon=True)
+                self._screensaver_thread.start()
 
     def check_activity_backlight(self, ledstrip, ledsettings, midiports, current_time):
         now = current_time
@@ -302,6 +336,8 @@ class VisualizerApp:
                 self.backlight_cleared = False
 
     def update_display(self, elapsed_time, menu):
+        if menu.screensaver_is_running:
+            return
         now = time.monotonic()
         tick_interval = 0.2  # ~5 fps animation 
         #(still really drop led fps but go back to normal 
@@ -352,22 +388,15 @@ class VisualizerApp:
             usersettings.save_changes()
 
         if usersettings.pending_reset:
-            usersettings.pending_reset = False
-            ci.ledsettings = LedSettings(usersettings)
-            ci.ledstrip = LedStrip(usersettings, ci.ledsettings)
-            ci.menu = MenuLCD("config/menu.xml", self.args,
-                              usersettings,
-                              ci.ledsettings,
-                              ci.ledstrip,
-                              ci.learning,
-                              ci.saving,
-                              ci.midiports,
-                              ci.hotspot,
-                              ci.platform)
-            ci.menu.show()
-            ci.ledsettings.add_instance(ci.menu, ci.ledstrip)
+            # Rebuild all references together via supervised restart, never half-reset them.
+            self.stop_event.set()
+            ci.midiports.queues.activity.set()
 
 
 if __name__ == "__main__":
-    app = VisualizerApp()
-    app.run()
+    app = VisualizerApp.__new__(VisualizerApp)
+    try:
+        app.__init__()
+        app.run()
+    finally:
+        app.shutdown()

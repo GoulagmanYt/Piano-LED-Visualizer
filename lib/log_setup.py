@@ -1,5 +1,6 @@
 import logging
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
+import queue
 import sys
 
 # Create a custom logger
@@ -12,7 +13,6 @@ logger.setLevel(logging.DEBUG)
 console_handler = logging.StreamHandler()
 file_handler = RotatingFileHandler('/home/Piano-LED-Visualizer/visualizer.log', maxBytes=500000, backupCount=10)
 
-
 # Set the level for handlers
 console_handler.setLevel(logging.DEBUG)
 file_handler.setLevel(logging.DEBUG)
@@ -23,15 +23,18 @@ formatter = logging.Formatter('[%(asctime)s] %(levelname)s - %(message)s',
 console_handler.setFormatter(formatter)
 file_handler.setFormatter(formatter)
 
-# Add handlers to the logger
-logger.addHandler(console_handler)
-logger.addHandler(file_handler)
+# Asynchronous non-blocking logging queue: eliminates SD card flush stalls on render loop
+_log_queue = queue.SimpleQueue()
+_queue_handler = QueueHandler(_log_queue)
+_listener = QueueListener(_log_queue, console_handler, file_handler, respect_handler_level=True)
+_listener.start()
 
+# Add queue handler to the logger
+logger.addHandler(_queue_handler)
 
 # Custom exception handler to log unhandled exceptions
 def log_unhandled_exception(exc_type, exc_value, exc_traceback):
     logger.error("Unhandled Exception: ", exc_info=(exc_type, exc_value, exc_traceback))
-
 
 # Set the custom exception handler
 sys.excepthook = log_unhandled_exception

@@ -128,6 +128,7 @@ class MidiPorts:
         self.midipending = None
         self.midi_monitor_thread = None
         self.monitor_running = False
+        self.monitor_stop = threading.Event()
         self.on_input_connected = None
         self.worker_running = False
         self.live_forward_thread = None
@@ -172,7 +173,10 @@ class MidiPorts:
             return 0.0
         if now_perf is None:
             now_perf = time.perf_counter()
-        oldest = queue[0]
+        try:
+            oldest = queue[0]
+        except IndexError:
+            return 0.0
         if queue is self.scheduled_forward_queue and hasattr(self, "queues"):
             oldest = oldest[2]
         if not isinstance(oldest, tuple) or len(oldest) < 2:
@@ -211,8 +215,10 @@ class MidiPorts:
         queues = getattr(self, "queues", None)
         if queues is None:
             return
-        self.drop_counter = getattr(queues, "drop_counter", self.drop_counter)
-        self.drop_counts = dict(getattr(queues, "drop_counts", self.drop_counts))
+        drop_counter = getattr(queues, "drop_counter", self.drop_counter)
+        if drop_counter != self.drop_counter:
+            self.drop_counter = drop_counter
+            self.drop_counts = dict(getattr(queues, "drop_counts", self.drop_counts))
 
     def _increment_ignored(self, key):
         self.ignored_counts[key] = self.ignored_counts.get(key, 0) + 1
@@ -477,13 +483,11 @@ class MidiPorts:
                     diagnostics.increment_counter("scheduled_rtp_late_messages")
                 if late_ms > self.forward_stats["scheduled_late_max_ms"]:
                     self.forward_stats["scheduled_late_max_ms"] = late_ms
-            self.refresh_queue_diagnostics(now_perf=send_started + elapsed_seconds)
             return True
         except Exception as e:
             self.forward_stats["live_send_errors"] += 1
             logger.debug(f"Skipping playport send: {e}")
             self._ensure_runtime_diagnostics().increment_counter("rtp_send_errors")
-            self.refresh_queue_diagnostics(now_perf=send_started)
             return False
 
     def _flush_websocket_publish_queue_once(self):
@@ -539,6 +543,7 @@ class MidiPorts:
                 else:
                     break
             if sent_any:
+                self.refresh_queue_diagnostics()
                 continue
 
             timeout = 0.05
@@ -577,6 +582,17 @@ class MidiPorts:
         self.websocket_publish_thread = threading.Thread(target=self._websocket_publish_loop, daemon=True)
         self.live_forward_thread.start()
         self.websocket_publish_thread.start()
+
+    def close(self):
+        self.stop_midi_monitor()
+        self.worker_running = False
+        self._notify_forward_worker()
+        for worker in (self.live_forward_thread, self.websocket_publish_thread):
+            if worker is not None and worker is not threading.current_thread():
+                worker.join(timeout=2)
+        for name in ("inport", "playport"):
+            self._safe_close_port(getattr(self, name, None))
+            setattr(self, name, None)
 
     def _safe_close_port(self, port_handle):
         if port_handle is None:
@@ -1124,6 +1140,7 @@ class MidiPorts:
         """Start monitoring for MIDI device changes and auto-connect."""
         if self.midi_monitor_thread is None or not self.midi_monitor_thread.is_alive():
             self.monitor_running = True
+            self.monitor_stop.clear()
             self.midi_monitor_thread = threading.Thread(target=self.auto_reconnect_loop, daemon=True)
             self.midi_monitor_thread.start()
             logger.info("MIDI device monitor started")
@@ -1131,6 +1148,7 @@ class MidiPorts:
     def stop_midi_monitor(self):
         """Stop monitoring for MIDI device changes."""
         self.monitor_running = False
+        self.monitor_stop.set()
         if self.midi_monitor_thread and self.midi_monitor_thread.is_alive():
             self.midi_monitor_thread.join(timeout=1)
         logger.info("MIDI device monitor stopped")
@@ -1193,7 +1211,7 @@ class MidiPorts:
                     last_secondary_present,
                     last_play_present,
                 )
-                time.sleep(3)
+                self.monitor_stop.wait(3)
             except Exception as e:
                 logger.info("auto_reconnect_loop error: {}".format(e))
-                time.sleep(5)
+                self.monitor_stop.wait(5)

@@ -23,11 +23,11 @@ def get_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
     except OSError:
         return "0.0.0.0"
-    local_ip = s.getsockname()[0]
-    s.close()
-    return local_ip
+    finally:
+        s.close()
 
 
 def get_last_logs(n=100):
@@ -35,7 +35,7 @@ def get_last_logs(n=100):
     # If the file does not exist, create it with write permissions
     if not os.path.exists(file_path):
         open(file_path, 'w').close()
-        os.chmod(file_path, 0o777)
+        os.chmod(file_path, 0o644)
 
     try:
         # Use the 'tail' command to get the last N lines of the log file
@@ -365,15 +365,10 @@ def screensaver(menu, midiports, saving, ledstrip, ledsettings, state_manager=No
     if menu.screensaver_settings["local_ip"] == "1":
         local_ip = get_ip_address()
 
-    inport = getattr(midiports, "inport", None)
-    if inport is not None:
-        try:
-            inport.poll()
-        except Exception as e:
-            menu.render_message("Error while getting ports", "", 2000)
-            logger.warning("Error while getting ports " + str(e))
-
     while True:
+        shutdown_event = getattr(menu, 'shutdown_event', None)
+        if shutdown_event is not None and shutdown_event.is_set():
+            return
         manage_idle_animation(ledstrip, ledsettings, menu, midiports, state_manager)
 
         # Update state manager in screensaver loop
@@ -465,7 +460,11 @@ def screensaver(menu, midiports, saving, ledstrip, ledsettings, state_manager=No
 
         menu.render_screensaver(hour, date, cpu_usage, round(cpu_average, 1), ram_usage, temp, cpu_chart, upload,
                                 download, card_space, local_ip)
-        time.sleep(delay)
+        if shutdown_event is not None:
+            if shutdown_event.wait(delay):
+                return
+        else:
+            time.sleep(delay)
         i += 1
         try:
             # Exit screensaver if MIDI activity or state changed to active use
@@ -616,7 +615,7 @@ def clear_ledstrip_state(ledstrip, *, show=True):
     ledstrip.keylist_status = [0] * ledstrip.led_number
     ledstrip.keylist_sustained = [0] * ledstrip.led_number
     ledstrip.keylist_external_software = [0] * ledstrip.led_number
-    ledstrip.keylist_color = [0] * ledstrip.led_number
+    ledstrip.keylist_color = [(0, 0, 0)] * ledstrip.led_number
 
 
 def calculate_brightness(ledsettings):

@@ -60,6 +60,8 @@ class MIDIEventProcessor:
             self.midiports.midipending = self.midiports.midifile_queue
             queue_name = "midi_file"
 
+        if not self.midiports.midipending:
+            return False
         midi_logging_enabled = int(self.usersettings.get_setting_value("midi_logging")) == 1
         log_sink = self.learning.socket_send if midi_logging_enabled else None
         midiports = self.midiports
@@ -85,12 +87,6 @@ class MIDIEventProcessor:
                     log_sink.append("midi_event" + str(msg))
                 except Exception as e:
                     logger.warning(f"[process midi events] Unexpected exception occurred: {e}")
-
-            current_time = time.time()
-            midiports.last_activity = current_time
-            # Update state manager for MIDI activity
-            if self.state_manager:
-                self._update_midi_activity(current_time)
 
             msg_type = getattr(msg, "type", None)
             velocity = getattr(msg, "velocity", 0)
@@ -122,7 +118,7 @@ class MIDIEventProcessor:
         diagnostics.set_gauge("midi_queue_depth_before", queue_depth)
         is_active_use = bool(self.state_manager and self.state_manager.is_active_use())
         max_messages = 1536 if is_active_use else 512
-        max_duration = 0.008 if is_active_use else 0.003
+        max_duration = 0.003
 
         if queue_depth > 768:
             max_messages = min(max(max_messages, queue_depth * 2), 8192)
@@ -138,14 +134,22 @@ class MIDIEventProcessor:
             if queues is not None:
                 batch = queues.drain_queue(
                     midipending,
-                    max_messages=min(64, max_messages - processed),
+                    max_messages=min(128, max_messages - processed),
                 )
             else:
-                item = midipending.popleft() if midipending else None
-                batch = [item] if item is not None else []
+                batch = []
+                while midipending and len(batch) < min(128, max_messages - processed):
+                    batch.append(midipending.popleft())
             if not batch:
                 break
+            now_perf = time.perf_counter()
+            cur_time = time.time()
+            midiports.last_activity = cur_time
+            if self.state_manager:
+                self._update_midi_activity(cur_time)
+            saving.restart_time()
             for msg, msg_timestamp in batch:
+                diagnostics.record_duration("midi_receive_to_process", now_perf - msg_timestamp)
                 _process_one(msg, msg_timestamp)
                 processed += 1
         diagnostics.increment_counter("midi_events_processed_total", processed)
@@ -332,8 +336,8 @@ class MIDIEventProcessor:
             
             if self.ledsettings.skipped_notes != "Normal":
                 # Apply standard note color with velocity-based brightness
-                s_color = Color(int(int(red) / float(brightness)), int(int(green) / float(brightness)),
-                                int(int(blue) / float(brightness)))
+                s_color = Color(int(int(red) * brightness), int(int(green) * brightness),
+                                int(int(blue) * brightness))
                 self.ledstrip.strip.setPixelColor(note_position, s_color)
                 self.ledstrip.set_adjacent_colors(note_position, s_color, False)
 

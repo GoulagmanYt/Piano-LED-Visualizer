@@ -150,7 +150,7 @@ class StateManager:
         logger.info(f"State transition: {old_state.value} → {new_state.value}")
         
         # Reset screen update timer on state change
-        self.last_screen_update = 0.0
+        self.last_screen_update = current_time
         self.last_state = old_state
         self.last_state_change = current_time
     

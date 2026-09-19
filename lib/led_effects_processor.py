@@ -42,6 +42,8 @@ class LEDEffectsProcessor:
         else:
             speed = ledsettings.fadingspeed
 
+        decrease_amount = max(0.0, event_loop_time) * 1000000.0 / max(1.0, float(speed))
+
         def get_backlight_color():
             nonlocal backlight_color
             if backlight_color is None:
@@ -75,7 +77,6 @@ class LEDEffectsProcessor:
                 green = int(green * fading)
                 blue = int(blue * fading)
 
-                decrease_amount = int((event_loop_time / float(speed / 1000)) * 1000)
                 keylist[n] = max(0, keylist[n] - decrease_amount)
                 led_changed = True
 
@@ -117,6 +118,10 @@ class LEDEffectsProcessor:
         if not self.ledstrip.active_pulses:
             return False
 
+        if len(self._pulse_rgb) != self.ledstrip.led_number:
+            self._pulse_rgb = [[0.0, 0.0, 0.0] for _ in range(self.ledstrip.led_number)]
+            self._pulse_seen = [False] * self.ledstrip.led_number
+            self._pulse_touched.clear()
         current_time = time.perf_counter()
         pulses_to_remove = []
         surviving_pulses = []
@@ -131,7 +136,7 @@ class LEDEffectsProcessor:
             return pulse_rgb[index]
         
         max_dist = self.ledsettings.pulse_animation_distance
-        duration = self.ledsettings.pulse_animation_speed / 1000.0
+        duration = max(1.0, self.ledsettings.pulse_animation_speed) / 1000.0
         flicker_strength = self.ledsettings.pulse_flicker_strength / 100.0
         
         # Base background color (backlight) to blend on top of

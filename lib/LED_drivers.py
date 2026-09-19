@@ -11,10 +11,16 @@ class PixelStrip_Emu():
         return self.leds
 
     def setBrightness(self, brightness):
+        self.brightness = brightness
+
+    def getBrightness(self):
+        return getattr(self, 'brightness', 255)
+
+    def _cleanup(self):
         pass
 
     def setPixelColor(self, pos, color):
-        if 0 < pos < self.leds:
+        if 0 <= pos < self.leds:
             self.led_state[pos] = color
 
     def getPixels(self):
