@@ -847,99 +847,189 @@ def startup_animation(ledstrip, ledsettings, duration_ms=3800, midiports=None):
     center = (num_pixels - 1) / 2.0
     half_len = max(1.0, center)
 
+# ==============================================================================
+# Pacifica Ocean Waves (FastLED by Mark Kriegsman & Mary Corey March)
+# ==============================================================================
+PACIFICA_PALETTE_1 = [
+    (0x00, 0x05, 0x07), (0x00, 0x04, 0x09), (0x00, 0x03, 0x0B), (0x00, 0x03, 0x0D),
+    (0x00, 0x02, 0x10), (0x00, 0x02, 0x12), (0x00, 0x01, 0x14), (0x00, 0x01, 0x17),
+    (0x00, 0x00, 0x19), (0x00, 0x00, 0x1C), (0x00, 0x00, 0x26), (0x00, 0x00, 0x31),
+    (0x00, 0x00, 0x3B), (0x00, 0x00, 0x46), (0x14, 0x55, 0x4B), (0x28, 0xAA, 0x50),
+]
+PACIFICA_PALETTE_2 = [
+    (0x00, 0x05, 0x07), (0x00, 0x04, 0x09), (0x00, 0x03, 0x0B), (0x00, 0x03, 0x0D),
+    (0x00, 0x02, 0x10), (0x00, 0x02, 0x12), (0x00, 0x01, 0x14), (0x00, 0x01, 0x17),
+    (0x00, 0x00, 0x19), (0x00, 0x00, 0x1C), (0x00, 0x00, 0x26), (0x00, 0x00, 0x31),
+    (0x00, 0x00, 0x3B), (0x00, 0x00, 0x46), (0x0C, 0x5F, 0x52), (0x19, 0xBE, 0x5F),
+]
+PACIFICA_PALETTE_3 = [
+    (0x00, 0x02, 0x08), (0x00, 0x03, 0x0E), (0x00, 0x05, 0x14), (0x00, 0x06, 0x1A),
+    (0x00, 0x08, 0x20), (0x00, 0x09, 0x27), (0x00, 0x0B, 0x2D), (0x00, 0x0C, 0x33),
+    (0x00, 0x0E, 0x39), (0x00, 0x10, 0x40), (0x00, 0x14, 0x50), (0x00, 0x18, 0x60),
+    (0x00, 0x1C, 0x70), (0x00, 0x20, 0x80), (0x10, 0x40, 0xBF), (0x20, 0x60, 0xFF),
+]
+
+
+def _pacifica_color_from_palette(palette, idx8, bri):
+    pos = (idx8 & 0xFF) / 256.0 * 15.0
+    i0 = int(pos)
+    i1 = min(15, i0 + 1)
+    f = pos - i0
+    c0 = palette[i0]
+    c1 = palette[i1]
+    b = bri / 255.0
+    return (
+        (c0[0] + (c1[0] - c0[0]) * f) * b,
+        (c0[1] + (c1[1] - c0[1]) * f) * b,
+        (c0[2] + (c1[2] - c0[2]) * f) * b,
+    )
+
+
+def _beatsin(bpm, low, high, time_ms, phase_deg=0.0):
+    omega = (2.0 * math.pi * bpm / 60000.0) * time_ms + math.radians(phase_deg)
+    sin_val = 0.5 + 0.5 * math.sin(omega)
+    return low + (high - low) * sin_val
+
+
+def _beat(bpm, time_ms):
+    period_ms = 60000.0 / max(0.001, float(bpm))
+    phase = (time_ms % period_ms) / period_ms
+    return int(phase * 65536.0)
+
+
+def startup_animation(ledstrip, ledsettings, duration_ms=4000, midiports=None):
+    """
+    Pacifica Ocean Waves Startup Animation (Mark Kriegsman & Mary Corey March - FastLED).
+    Features:
+      - 4 independent multi-scale oceanic wave layers rolling across the keyboard.
+      - Dynamic foam and whitecap glimmers where waves intersect.
+      - Deep oceanic hue calibration (turquoise, deep aqua, seafoam, mother-of-pearl).
+      - Smooth swell on boot and organic dissolve to ready/backlight state.
+      - Zero-latency interrupt: aborts immediately (< 20ms) if pianist plays notes.
+    """
+    strip = getattr(ledstrip, "strip", None)
+    if strip is None:
+        return
+
+    num_pixels = strip.numPixels()
+    if not num_pixels or num_pixels <= 0:
+        return
+
+    user_brightness = calculate_brightness(ledsettings)
+    master_dim = max(0.2, min(1.0, user_brightness / 255.0))
+
     frame_interval = 0.020
     total_frames = max(30, int((duration_ms / 1000.0) / frame_interval))
 
-    def _color_lerp(c1, c2, t):
-        t = max(0.0, min(1.0, t))
-        return (
-            int(c1[0] + (c2[0] - c1[0]) * t),
-            int(c1[1] + (c2[1] - c1[1]) * t),
-            int(c1[2] + (c2[2] - c1[2]) * t),
-        )
-
-    c_cyan = (0, 220, 255)
-    c_indigo = (130, 50, 255)
-    c_rose = (255, 50, 160)
-    c_gold = (255, 190, 60)
-
-    trails = [(0.0, 0.0, 0.0)] * num_pixels
+    sCIStart1 = 0.0
+    sCIStart2 = 0.0
+    sCIStart3 = 0.0
+    sCIStart4 = 0.0
 
     for frame in range(total_frames):
         if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
             logger.info("Startup animation interrupted by incoming MIDI notes")
             break
 
+        time_ms = frame * 20.0
         progress = frame / float(total_frames)
 
-        decay_factor = 0.82
-        for i in range(num_pixels):
-            tr, tg, tb = trails[i]
-            trails[i] = (tr * decay_factor, tg * decay_factor, tb * decay_factor)
-
-        if progress < 0.45:
-            sub_prog = progress / 0.45
-            eased_prog = 1.0 - math.pow(1.0 - sub_prog, 2.6)
-            wave_dist = eased_prog * half_len
-
-            head_l = center - wave_dist
-            head_r = center + wave_dist
-
-            if sub_prog < 0.5:
-                head_color = _color_lerp(c_cyan, c_indigo, sub_prog * 2.0)
-            else:
-                head_color = _color_lerp(c_indigo, c_rose, (sub_prog - 0.5) * 2.0)
-
-            sigma = 2.4
-            sigma_sq2 = 2.0 * sigma * sigma
-            span = int(math.ceil(sigma * 3.0))
-
-            for head in (head_l, head_r):
-                start_i = max(0, int(math.floor(head - span)))
-                end_i = min(num_pixels, int(math.ceil(head + span + 1)))
-                for i in range(start_i, end_i):
-                    dist_sq = (i - head) ** 2
-                    intensity = math.exp(-dist_sq / sigma_sq2)
-                    tr, tg, tb = trails[i]
-                    trails[i] = (
-                        min(255.0, tr + head_color[0] * intensity),
-                        min(255.0, tg + head_color[1] * intensity),
-                        min(255.0, tb + head_color[2] * intensity),
-                    )
-
-        elif progress < 0.75:
-            sub_prog = (progress - 0.45) / 0.30
-            wave_phase = sub_prog * math.pi * 4.0
-
-            for i in range(num_pixels):
-                norm_pos = i / float(num_pixels)
-                wave_val = 0.5 + 0.5 * math.sin(norm_pos * math.pi * 3.0 - wave_phase)
-                shimmer = 0.7 + 0.3 * math.sin(norm_pos * math.pi * 7.0 + wave_phase * 1.5)
-                amp = wave_val * shimmer * (1.0 - math.pow(sub_prog - 0.5, 2) * 2.5)
-                amp = max(0.0, min(1.0, amp))
-
-                col = _color_lerp(c_cyan, c_gold, norm_pos)
-                tr, tg, tb = trails[i]
-                trails[i] = (
-                    max(tr, col[0] * amp),
-                    max(tg, col[1] * amp),
-                    max(tb, col[2] * amp),
-                )
-
+        # Swell in (0 -> 22%) and dissolve out (75% -> 100%)
+        if progress < 0.22:
+            envelope = math.sin((progress / 0.22) * math.pi * 0.5)
+        elif progress > 0.75:
+            envelope = math.cos(((progress - 0.75) / 0.25) * math.pi * 0.5)
         else:
-            sub_prog = (progress - 0.75) / 0.25
-            dissolve = max(0.0, 0.5 * (1.0 + math.cos(sub_prog * math.pi)))
-            for i in range(num_pixels):
-                tr, tg, tb = trails[i]
-                trails[i] = (tr * dissolve, tg * dissolve, tb * dissolve)
+            envelope = 1.0
+
+        # Update layer speed counters (FastLED pacifica math)
+        speedfactor1 = _beatsin(3, 179, 269, time_ms)
+        speedfactor2 = _beatsin(4, 179, 269, time_ms)
+        deltams1 = (20.0 * speedfactor1) / 256.0
+        deltams2 = (20.0 * speedfactor2) / 256.0
+        deltams21 = (deltams1 + deltams2) * 0.5
+
+        sCIStart1 += deltams1 * _beatsin(10, 10, 13, time_ms) * 0.1
+        sCIStart2 -= deltams21 * _beatsin(7, 8, 11, time_ms) * 0.1
+        sCIStart3 -= deltams1 * _beatsin(5, 5, 7, time_ms) * 0.1
+        sCIStart4 -= deltams2 * _beatsin(3, 4, 6, time_ms) * 0.1
+
+        # Layer parameters
+        wscale1 = _beatsin(3, 11 * 256, 14 * 256, time_ms)
+        bri1 = _beatsin(10, 70, 130, time_ms)
+        ioff1 = -(_beat(301, time_ms) >> 8)
+
+        wscale2 = _beatsin(4, 6 * 256, 9 * 256, time_ms)
+        bri2 = _beatsin(17, 40, 80, time_ms)
+        ioff2 = (_beat(401, time_ms) >> 8)
+
+        wscale3 = 6 * 256
+        bri3 = _beatsin(9, 10, 38, time_ms)
+        ioff3 = -(_beat(503, time_ms) >> 8)
+
+        wscale4 = 5 * 256
+        bri4 = _beatsin(8, 10, 28, time_ms)
+        ioff4 = (_beat(601, time_ms) >> 8)
+
+        basethreshold = _beatsin(9, 55, 65, time_ms)
 
         for i in range(num_pixels):
-            if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
-                tr, tg, tb = trails[i]
-                r = int(tr * master_dim)
-                g = int(tg * master_dim)
-                b = int(tb * master_dim)
-                strip.setPixelColor(i, Color(r, g, b))
+            if not check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
+                continue
+
+            # Layer 1
+            ang1 = ioff1 + i * 4.0
+            s1 = (math.sin(math.radians(ang1 * 360.0 / 256.0)) + 1.0) * 0.5
+            cs1 = s1 * (wscale1 / 512.0 + 20.0) + (wscale1 / 512.0 + 20.0)
+            ci1 = int(sCIStart1 + i * cs1) & 0xFF
+            c1 = _pacifica_color_from_palette(PACIFICA_PALETTE_1, ci1, bri1)
+
+            # Layer 2
+            ang2 = ioff2 + i * 5.0
+            s2 = (math.sin(math.radians(ang2 * 360.0 / 256.0)) + 1.0) * 0.5
+            cs2 = s2 * (wscale2 / 512.0 + 20.0) + (wscale2 / 512.0 + 20.0)
+            ci2 = int(sCIStart2 + i * cs2) & 0xFF
+            c2 = _pacifica_color_from_palette(PACIFICA_PALETTE_2, ci2, bri2)
+
+            # Layer 3
+            ang3 = ioff3 + i * 3.5
+            s3 = (math.sin(math.radians(ang3 * 360.0 / 256.0)) + 1.0) * 0.5
+            cs3 = s3 * (wscale3 / 512.0 + 20.0) + (wscale3 / 512.0 + 20.0)
+            ci3 = int(sCIStart3 + i * cs3) & 0xFF
+            c3 = _pacifica_color_from_palette(PACIFICA_PALETTE_3, ci3, bri3)
+
+            # Layer 4
+            ang4 = ioff4 + i * 4.5
+            s4 = (math.sin(math.radians(ang4 * 360.0 / 256.0)) + 1.0) * 0.5
+            cs4 = s4 * (wscale4 / 512.0 + 20.0) + (wscale4 / 512.0 + 20.0)
+            ci4 = int(sCIStart4 + i * cs4) & 0xFF
+            c4 = _pacifica_color_from_palette(PACIFICA_PALETTE_3, ci4, bri4)
+
+            # Base dim oceanic background + layers
+            r = min(255.0, 2.0 + c1[0] + c2[0] + c3[0] + c4[0])
+            g = min(255.0, 6.0 + c1[1] + c2[1] + c3[1] + c4[1])
+            b = min(255.0, 10.0 + c1[2] + c2[2] + c3[2] + c4[2])
+
+            # Whitecaps (foam highlights at wave intersections)
+            avg_light = (r + g + b) / 3.0
+            threshold = basethreshold + math.sin((time_ms * 0.005 + i * 0.15)) * 10.0
+            if avg_light > threshold:
+                overage = avg_light - threshold
+                overage2 = min(255.0, overage * 2.0)
+                r = min(255.0, r + overage)
+                g = min(255.0, g + overage2)
+                b = min(255.0, b + overage2 * 1.5)
+
+            # Pacifica deepen blues and greens
+            b = b * 0.62 + 3.0
+            g = g * 0.82 + 5.0
+            r = r * 0.85 + 2.0
+
+            final_r = int(clamp(r * master_dim * envelope, 0, 255))
+            final_g = int(clamp(g * master_dim * envelope, 0, 255))
+            final_b = int(clamp(b * master_dim * envelope, 0, 255))
+
+            strip.setPixelColor(i, Color(final_r, final_g, final_b))
 
         strip.show()
         time.sleep(frame_interval)
@@ -947,13 +1037,15 @@ def startup_animation(ledstrip, ledsettings, duration_ms=3800, midiports=None):
     fastColorWipe(strip, True, ledsettings)
 
 
-def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms=1600):
+def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms=1700):
     """
-    Stylish, dynamic handshake animation when the digital piano connects.
+    Double Meteor Collision & Stardust Sparkles (Tweaking4All Meteor Rain + Spark Burst).
     Features:
-      - Phase 1 (0 -> 50%): Dual emerald/mint comets gliding from ends inward to center.
-      - Phase 2 (50% -> 72%): Radial warm-white / jade bloom radiating outward.
-      - Phase 3 (72% -> 100%): Soft exponential release to ready state.
+      - Phase 1 (0 -> 40%): Two fast meteors (A0 gold flame & C8 diamond blue) shoot inward
+        toward Middle C with authentic decaying trails and random spark decay.
+      - Phase 2 (40% -> 100%): Meteors collide at Middle C with a brilliant impact flash,
+        bursting into a shower of warm golden and diamond stardust embers that scatter
+        across the piano keys, twinkle, and softly dissolve.
       - Zero latency: Aborts immediately if pianist plays a note.
     """
     strip = getattr(ledstrip, "strip", None)
@@ -968,92 +1060,139 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
     master_dim = max(0.2, min(1.0, user_brightness / 255.0))
 
     center = (num_pixels - 1) / 2.0
-    half_len = max(1.0, center)
-
     frame_interval = 0.020
-    total_frames = max(25, int((duration_ms / 1000.0) / frame_interval))
-
-    def _color_lerp(c1, c2, t):
-        t = max(0.0, min(1.0, t))
-        return (
-            int(c1[0] + (c2[0] - c1[0]) * t),
-            int(c1[1] + (c2[1] - c1[1]) * t),
-            int(c1[2] + (c2[2] - c1[2]) * t),
-        )
-
-    c_mint = (0, 255, 150)
-    c_cyan = (0, 200, 255)
-    c_white_bloom = (240, 255, 230)
+    total_frames = max(35, int((duration_ms / 1000.0) / frame_interval))
+    impact_frame = int(total_frames * 0.38)
 
     trails = [(0.0, 0.0, 0.0)] * num_pixels
+
+    # Meteor colors: Left = warm solar gold, Right = celestial cyan diamond
+    c_gold_head = (255, 235, 160)
+    c_gold_body = (255, 175, 45)
+    c_cyan_head = (200, 250, 255)
+    c_cyan_body = (30, 180, 255)
+
+    # Particle class for impact burst
+    class Spark:
+        def __init__(self, pos, vel, color, lifetime):
+            self.pos = float(pos)
+            self.vel = vel
+            self.color = color
+            self.lifetime = lifetime
+            self.age = 0.0
+            self.twinkle_seed = random.uniform(0.0, math.pi * 2.0)
+
+    sparks = []
 
     for frame in range(total_frames):
         if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
             logger.info("Piano connection animation interrupted by playing")
             break
 
-        progress = frame / float(total_frames)
-
-        decay_factor = 0.80
+        # Base trail decay with Tweaking4All random spark decay
+        decay = 0.74
         for i in range(num_pixels):
             tr, tg, tb = trails[i]
-            trails[i] = (tr * decay_factor, tg * decay_factor, tb * decay_factor)
+            # Random natural spark drop
+            f = decay * (0.55 if random.random() < 0.22 else 1.0)
+            trails[i] = (tr * f, tg * f, tb * f)
 
-        if progress < 0.50:
-            sub_prog = progress / 0.50
-            eased = math.pow(sub_prog, 1.3)
+        if frame <= impact_frame:
+            # Phase 1: Dual Converging Meteors
+            sub_prog = frame / float(impact_frame)
+            eased = math.pow(sub_prog, 1.45)
             head_l = eased * center
             head_r = (num_pixels - 1) - eased * center
 
-            head_color = _color_lerp(c_mint, c_cyan, sub_prog)
+            span = 4
+            for i in range(max(0, int(head_l - span)), min(num_pixels, int(head_l + span + 1))):
+                dist = abs(i - head_l)
+                if dist < 1.0:
+                    col = c_gold_head
+                    intensity = 1.0 - dist * 0.3
+                else:
+                    col = c_gold_body
+                    intensity = max(0.0, 1.0 - dist / float(span))
+                tr, tg, tb = trails[i]
+                trails[i] = (
+                    min(255.0, tr + col[0] * intensity),
+                    min(255.0, tg + col[1] * intensity),
+                    min(255.0, tb + col[2] * intensity),
+                )
 
-            sigma = 2.2
-            sigma_sq2 = 2.0 * sigma * sigma
-            span = int(math.ceil(sigma * 3.0))
+            for i in range(max(0, int(head_r - span)), min(num_pixels, int(head_r + span + 1))):
+                dist = abs(i - head_r)
+                if dist < 1.0:
+                    col = c_cyan_head
+                    intensity = 1.0 - dist * 0.3
+                else:
+                    col = c_cyan_body
+                    intensity = max(0.0, 1.0 - dist / float(span))
+                tr, tg, tb = trails[i]
+                trails[i] = (
+                    min(255.0, tr + col[0] * intensity),
+                    min(255.0, tg + col[1] * intensity),
+                    min(255.0, tb + col[2] * intensity),
+                )
 
-            for head in (head_l, head_r):
-                start_i = max(0, int(math.floor(head - span)))
-                end_i = min(num_pixels, int(math.ceil(head + span + 1)))
-                for i in range(start_i, end_i):
-                    dist_sq = (i - head) ** 2
-                    intensity = math.exp(-dist_sq / sigma_sq2)
+            if frame == impact_frame:
+                # Trigger impact burst!
+                for _ in range(36):
+                    vel = random.uniform(-4.5, 4.5)
+                    # Bias some particles with higher velocities outward
+                    if random.random() < 0.35:
+                        vel *= random.uniform(1.3, 2.0)
+                    lifetime = random.uniform(18.0, 48.0)
+                    if random.random() < 0.65:
+                        col = (255, random.randint(210, 245), random.randint(90, 160))  # gold/champagne
+                    else:
+                        col = (random.randint(220, 255), random.randint(245, 255), 255)  # diamond white
+                    sparks.append(Spark(center, vel, col, lifetime))
+
+                # Center flash
+                for i in range(max(0, int(center - 5)), min(num_pixels, int(center + 6))):
+                    dist = abs(i - center)
+                    flash_intensity = max(0.0, 1.0 - dist / 5.0)
                     tr, tg, tb = trails[i]
                     trails[i] = (
-                        min(255.0, tr + head_color[0] * intensity),
-                        min(255.0, tg + head_color[1] * intensity),
-                        min(255.0, tb + head_color[2] * intensity),
-                    )
-
-        elif progress < 0.72:
-            sub_prog = (progress - 0.50) / 0.22
-            radius = sub_prog * half_len * 1.1
-            bloom_width = 4.0 + sub_prog * 8.0
-
-            for i in range(num_pixels):
-                dist = abs(i - center)
-                diff = abs(dist - radius)
-                if diff < bloom_width:
-                    intensity = (1.0 - (diff / bloom_width)) * (1.0 - sub_prog * 0.4)
-                    core_mix = max(0.0, 1.0 - sub_prog * 1.5)
-                    color = _color_lerp(c_mint, c_white_bloom, core_mix)
-                    tr, tg, tb = trails[i]
-                    trails[i] = (
-                        min(255.0, tr + color[0] * intensity),
-                        min(255.0, tg + color[1] * intensity),
-                        min(255.0, tb + color[2] * intensity),
+                        min(255.0, tr + 255.0 * flash_intensity),
+                        min(255.0, tg + 255.0 * flash_intensity),
+                        min(255.0, tb + 255.0 * flash_intensity),
                     )
 
         else:
-            sub_prog = (progress - 0.72) / 0.28
-            fade = math.exp(-sub_prog * 3.5)
-            for i in range(num_pixels):
-                tr, tg, tb = trails[i]
-                trails[i] = (tr * fade, tg * fade, tb * fade)
+            # Phase 2: Stardust Sparkle Dispersion
+            for spark in sparks:
+                spark.age += 1.0
+                spark.pos += spark.vel
+                spark.vel *= 0.93  # air drag
 
+                if spark.age < spark.lifetime and 0 <= spark.pos < num_pixels:
+                    led_idx = int(spark.pos)
+                    progress_spark = spark.age / spark.lifetime
+                    # Exponential fade with shimmering twinkle
+                    shimmer = 0.75 + 0.25 * math.sin(spark.twinkle_seed + spark.age * 0.8)
+                    bri = math.pow(1.0 - progress_spark, 1.6) * shimmer
+
+                    tr, tg, tb = trails[led_idx]
+                    trails[led_idx] = (
+                        min(255.0, tr + spark.color[0] * bri),
+                        min(255.0, tg + spark.color[1] * bri),
+                        min(255.0, tb + spark.color[2] * bri),
+                    )
+
+        # Output to LEDs
         for i in range(num_pixels):
             if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
                 tr, tg, tb = trails[i]
-                strip.setPixelColor(i, Color(int(tr * master_dim), int(tg * master_dim), int(tb * master_dim)))
+                strip.setPixelColor(
+                    i,
+                    Color(
+                        int(clamp(tr * master_dim, 0, 255)),
+                        int(clamp(tg * master_dim, 0, 255)),
+                        int(clamp(tb * master_dim, 0, 255)),
+                    ),
+                )
 
         strip.show()
         time.sleep(frame_interval)
