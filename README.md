@@ -7,7 +7,7 @@
 
 An ultra-responsive, real-time LED visualizer for digital pianos, specifically engineered and finely tuned for the **Raspberry Pi Zero 2 W** (BCM2837B0 quad-core Cortex-A53).
 
-This project is a dedicated fork of the original [Onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visualizer). It strips out legacy overhead, fixes real-time audio/lighting pipeline bottlenecks, introduces authentic open-source visual effects, and is tailored to work hand-in-hand with [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool) for seamless low-latency network & USB MIDI routing.
+This project is a dedicated fork of the original [Onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visualizer). It strips out legacy overhead, fixes real-time audio/lighting pipeline bottlenecks,  and is tailored to work hand-in-hand with [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool) for seamless low-latency network & USB MIDI routing.
 
 ---
 
