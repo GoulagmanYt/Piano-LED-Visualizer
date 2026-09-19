@@ -824,200 +824,12 @@ def rainbowCycle(ledstrip, ledsettings, menu, speed_ms=None):
 
 
 
-# ==============================================================================
-# Pacifica Ocean Waves (FastLED by Mark Kriegsman & Mary Corey March)
-# ==============================================================================
-PACIFICA_PALETTE_1 = [
-    (0, 8, 45), (0, 18, 75), (0, 35, 115), (0, 55, 160),
-    (0, 85, 205), (0, 120, 240), (0, 160, 255), (0, 200, 255),
-    (0, 235, 255), (0, 255, 235), (0, 255, 195), (0, 245, 150),
-    (0, 225, 110), (0, 190, 75), (0, 140, 45), (0, 90, 20),
-]
-PACIFICA_PALETTE_2 = [
-    (0, 15, 60), (0, 30, 95), (0, 55, 140), (0, 85, 185),
-    (0, 120, 225), (0, 160, 255), (0, 195, 255), (0, 230, 255),
-    (0, 255, 245), (0, 255, 210), (0, 255, 165), (0, 235, 120),
-    (0, 205, 80), (0, 160, 50), (0, 115, 30), (0, 70, 15),
-]
-PACIFICA_PALETTE_3 = [
-    (0, 5, 85), (0, 18, 125), (0, 38, 175), (0, 65, 220),
-    (0, 100, 255), (0, 145, 255), (0, 190, 255), (0, 230, 255),
-    (0, 255, 255), (0, 255, 215), (0, 245, 160), (0, 220, 110),
-    (0, 180, 70), (0, 135, 45), (0, 90, 25), (0, 50, 10),
-]
-
-
-def _pacifica_color_from_palette(palette, idx8, bri):
-    pos = (idx8 & 0xFF) / 256.0 * 15.0
-    i0 = int(pos)
-    i1 = min(15, i0 + 1)
-    f = pos - i0
-    c0 = palette[i0]
-    c1 = palette[i1]
-    b = bri / 255.0
-    return (
-        (c0[0] + (c1[0] - c0[0]) * f) * b,
-        (c0[1] + (c1[1] - c0[1]) * f) * b,
-        (c0[2] + (c1[2] - c0[2]) * f) * b,
-    )
-
-
-def _beatsin(bpm, low, high, time_ms, phase_deg=0.0):
-    omega = (2.0 * math.pi * bpm / 60000.0) * time_ms + math.radians(phase_deg)
-    sin_val = 0.5 + 0.5 * math.sin(omega)
-    return low + (high - low) * sin_val
-
-
-def _beat(bpm, time_ms):
-    period_ms = 60000.0 / max(0.001, float(bpm))
-    phase = (time_ms % period_ms) / period_ms
-    return int(phase * 65536.0)
-
-
-def startup_animation(ledstrip, ledsettings, duration_ms=4000, midiports=None):
+def startup_animation(ledstrip, ledsettings, duration_ms=3000, midiports=None):
     """
-    Pacifica Ocean Waves Startup Animation (FastLED by Mark Kriegsman & Mary Corey March).
-    Enhanced for WS2812B:
-      - 4 multi-scale oceanic wave layers rolling across the keyboard.
-      - 100% saturated color spectrum (Sapphire -> Azure -> Electric Cyan -> Emerald).
-      - Zero white bleaching: wave crests are brilliant luminous aquamarine surges.
-      - Full brightness range mapped directly from user settings.
-      - Zero-latency interrupt: aborts immediately (< 20ms) if pianist plays notes.
-    """
-    strip = getattr(ledstrip, "strip", None)
-    if strip is None:
-        return
-
-    num_pixels = strip.numPixels()
-    if not num_pixels or num_pixels <= 0:
-        return
-
-    user_brightness = calculate_brightness(ledsettings)
-    master_dim = max(0.2, min(1.0, float(user_brightness)))
-
-    frame_interval = 0.020
-    total_frames = max(30, int((duration_ms / 1000.0) / frame_interval))
-
-    sCIStart1 = 0.0
-    sCIStart2 = 0.0
-    sCIStart3 = 0.0
-    sCIStart4 = 0.0
-
-    for frame in range(total_frames):
-        if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
-            logger.info("Startup animation interrupted by incoming MIDI notes")
-            break
-
-        time_ms = frame * 20.0
-        progress = frame / float(total_frames)
-
-        # Swell in (0 -> 22%) and dissolve out (75% -> 100%)
-        if progress < 0.22:
-            envelope = math.sin((progress / 0.22) * math.pi * 0.5)
-        elif progress > 0.75:
-            envelope = math.cos(((progress - 0.75) / 0.25) * math.pi * 0.5)
-        else:
-            envelope = 1.0
-
-        # Layer speed counters
-        speedfactor1 = _beatsin(3, 179, 269, time_ms)
-        speedfactor2 = _beatsin(4, 179, 269, time_ms)
-        deltams1 = (20.0 * speedfactor1) / 256.0
-        deltams2 = (20.0 * speedfactor2) / 256.0
-        deltams21 = (deltams1 + deltams2) * 0.5
-
-        sCIStart1 += deltams1 * _beatsin(10, 10, 13, time_ms) * 0.1
-        sCIStart2 -= deltams21 * _beatsin(7, 8, 11, time_ms) * 0.1
-        sCIStart3 -= deltams1 * _beatsin(5, 5, 7, time_ms) * 0.1
-        sCIStart4 -= deltams2 * _beatsin(3, 4, 6, time_ms) * 0.1
-
-        # Layer parameters: bright, vibrant, saturated
-        wscale1 = _beatsin(3, 11 * 256, 14 * 256, time_ms)
-        bri1 = _beatsin(10, 130, 240, time_ms)
-        ioff1 = -(_beat(301, time_ms) >> 8)
-
-        wscale2 = _beatsin(4, 6 * 256, 9 * 256, time_ms)
-        bri2 = _beatsin(17, 90, 190, time_ms)
-        ioff2 = (_beat(401, time_ms) >> 8)
-
-        wscale3 = 6 * 256
-        bri3 = _beatsin(9, 60, 140, time_ms)
-        ioff3 = -(_beat(503, time_ms) >> 8)
-
-        wscale4 = 5 * 256
-        bri4 = _beatsin(8, 40, 100, time_ms)
-        ioff4 = (_beat(601, time_ms) >> 8)
-
-        basethreshold = _beatsin(9, 90, 130, time_ms)
-
-        for i in range(num_pixels):
-            if not check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
-                continue
-
-            # Layer 1
-            ang1 = ioff1 + i * 4.0
-            s1 = (math.sin(math.radians(ang1 * 360.0 / 256.0)) + 1.0) * 0.5
-            cs1 = s1 * (wscale1 / 512.0 + 20.0) + (wscale1 / 512.0 + 20.0)
-            ci1 = int(sCIStart1 + i * cs1) & 0xFF
-            c1 = _pacifica_color_from_palette(PACIFICA_PALETTE_1, ci1, bri1)
-
-            # Layer 2
-            ang2 = ioff2 + i * 5.0
-            s2 = (math.sin(math.radians(ang2 * 360.0 / 256.0)) + 1.0) * 0.5
-            cs2 = s2 * (wscale2 / 512.0 + 20.0) + (wscale2 / 512.0 + 20.0)
-            ci2 = int(sCIStart2 + i * cs2) & 0xFF
-            c2 = _pacifica_color_from_palette(PACIFICA_PALETTE_2, ci2, bri2)
-
-            # Layer 3
-            ang3 = ioff3 + i * 3.5
-            s3 = (math.sin(math.radians(ang3 * 360.0 / 256.0)) + 1.0) * 0.5
-            cs3 = s3 * (wscale3 / 512.0 + 20.0) + (wscale3 / 512.0 + 20.0)
-            ci3 = int(sCIStart3 + i * cs3) & 0xFF
-            c3 = _pacifica_color_from_palette(PACIFICA_PALETTE_3, ci3, bri3)
-
-            # Layer 4
-            ang4 = ioff4 + i * 4.5
-            s4 = (math.sin(math.radians(ang4 * 360.0 / 256.0)) + 1.0) * 0.5
-            cs4 = s4 * (wscale4 / 512.0 + 20.0) + (wscale4 / 512.0 + 20.0)
-            ci4 = int(sCIStart4 + i * cs4) & 0xFF
-            c4 = _pacifica_color_from_palette(PACIFICA_PALETTE_3, ci4, bri4)
-
-            # Base oceanic background + dynamic wave layers (ZERO red -> 100% pure saturated cyan/blue/emerald)
-            g = min(255.0, 4.0 + c1[1] + c2[1] + c3[1] + c4[1])
-            b = min(255.0, 14.0 + c1[2] + c2[2] + c3[2] + c4[2])
-
-            # Wave crest highlights: luminous electric aquamarine surge where waves intersect (never white)
-            wave_light = (g + b) * 0.5
-            threshold = basethreshold + math.sin((time_ms * 0.005 + i * 0.15)) * 12.0
-            if wave_light > threshold:
-                overage = wave_light - threshold
-                g = min(255.0, g + overage * 1.5)
-                b = min(255.0, b + overage * 2.0)
-
-            final_r = 0
-            final_g = int(clamp(g * master_dim * envelope, 0, 255))
-            final_b = int(clamp(b * master_dim * envelope, 0, 255))
-
-            strip.setPixelColor(i, Color(final_r, final_g, final_b))
-
-        strip.show()
-        time.sleep(frame_interval)
-
-    fastColorWipe(strip, True, ledsettings)
-
-
-def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms=1700):
-    """
-    Double Meteor Collision & Stardust Sparkles (Tweaking4All Meteor Rain + Spark Burst).
-    Enhanced for WS2812B:
-      - Phase 1 (0 -> 38%): Two fast meteors shoot inward toward Middle C:
-          * Left Meteor (A0): Blazing solar gold & molten amber flame (100% saturated, blue=0).
-          * Right Meteor (C8): Electric neon cyan & deep royal sapphire (100% saturated, red=0).
-      - Phase 2 (38%): Meteors collide at Middle C with a vibrant chromatic fusion bloom
-        (intense amber + electric cyan + royal magenta fusion core, zero white bleaching).
-      - Phase 3 (38% -> 100%): Burst of rich, saturated crystalline embers scattering across
-        the piano keys (amber fire, electric cyan, royal magenta, emerald), shimmering and fading.
-      - Zero latency: Aborts immediately (< 20ms) if pianist plays a note.
+    Rainbow sweep startup animation using the project's native wheel() RGB palette.
+    A rainbow wave expands symmetrically from the keyboard center to the edges,
+    pulses brightly, then dissolves smoothly into the backlight state.
+    Aborts immediately (< 20ms) if pianist plays notes.
     """
     strip = getattr(ledstrip, "strip", None)
     if strip is None:
@@ -1032,21 +844,123 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
 
     center = (num_pixels - 1) / 2.0
     frame_interval = 0.020
+    total_frames = max(30, int((duration_ms / 1000.0) / frame_interval))
+
+    for frame in range(total_frames):
+        if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
+            logger.info("Startup animation interrupted by incoming MIDI notes")
+            break
+
+        progress = frame / float(total_frames)
+
+        # Envelope: fade in (0-15%), full (15-70%), fade out (70-100%)
+        if progress < 0.15:
+            envelope = math.sin((progress / 0.15) * math.pi * 0.5)
+        elif progress > 0.70:
+            envelope = math.cos(((progress - 0.70) / 0.30) * math.pi * 0.5)
+        else:
+            envelope = 1.0
+
+        # Expansion: LEDs light up from center outward
+        reach = progress * 1.3  # overshoot so full keyboard is lit before fade-out
+        reach = min(reach, 1.0)
+
+        # Rainbow phase shifts over time for a rolling wave effect
+        time_offset = frame * 3.0
+
+        for i in range(num_pixels):
+            if not check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
+                continue
+
+            # Distance from center, normalized 0..1
+            dist = abs(i - center) / max(1.0, center)
+
+            if dist > reach:
+                strip.setPixelColor(i, Color(0, 0, 0))
+                continue
+
+            # Smooth edge falloff at the expansion front
+            if reach > 0.01:
+                edge_fade = max(0.0, 1.0 - (dist / reach))
+                edge_fade = min(1.0, edge_fade * 3.0)  # sharp edge
+            else:
+                edge_fade = 0.0
+
+            # Rainbow color from position + time (same wheel palette as the project)
+            wheel_pos = int((i * 256.0 / num_pixels + time_offset)) % 255
+            if wheel_pos < 85:
+                r = wheel_pos * 3
+                g = 255 - wheel_pos * 3
+                b = 0
+            elif wheel_pos < 170:
+                wp = wheel_pos - 85
+                r = 255 - wp * 3
+                g = 0
+                b = wp * 3
+            else:
+                wp = wheel_pos - 170
+                r = 0
+                g = wp * 3
+                b = 255 - wp * 3
+
+            bri = master_dim * envelope * edge_fade
+            final_r = int(clamp(r * bri, 0, 255))
+            final_g = int(clamp(g * bri, 0, 255))
+            final_b = int(clamp(b * bri, 0, 255))
+
+            strip.setPixelColor(i, Color(final_r, final_g, final_b))
+
+        strip.show()
+        time.sleep(frame_interval)
+
+    fastColorWipe(strip, True, ledsettings)
+
+
+def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms=1700):
+    """
+    Dual converging meteor animation for piano connection feedback.
+    Two comets (red from left, blue from right) race toward Middle C,
+    collide in a bright burst, and scatter colored sparks across the keyboard.
+    Uses the project's native red/green/blue color palette.
+    Drains the MIDI queue on entry to avoid false interruption from connection handshake messages.
+    """
+    strip = getattr(ledstrip, "strip", None)
+    if strip is None:
+        return
+
+    num_pixels = strip.numPixels()
+    if not num_pixels or num_pixels <= 0:
+        return
+
+    # Drain any MIDI messages generated by the connection handshake itself
+    if midiports and getattr(midiports, "midi_queue", None):
+        while len(midiports.midi_queue) > 0:
+            try:
+                midiports.midi_queue.popleft()
+            except IndexError:
+                break
+
+    user_brightness = calculate_brightness(ledsettings)
+    master_dim = max(0.2, min(1.0, float(user_brightness)))
+
+    center = (num_pixels - 1) / 2.0
+    frame_interval = 0.020
     total_frames = max(35, int((duration_ms / 1000.0) / frame_interval))
     impact_frame = int(total_frames * 0.38)
+    # Grace period: don't check for MIDI interruption during the first few frames
+    grace_frames = min(8, impact_frame)
 
     trails = [(0.0, 0.0, 0.0)] * num_pixels
 
-    # Meteor colors: Left = blazing solar fire (B=0), Right = electric neon cyan (R=0)
-    c_gold_head = (255, 120, 0)
-    c_gold_body = (255, 50, 0)
-    c_gold_tail = (210, 15, 0)
+    # Project-native colors: Red meteor (left) and Blue meteor (right)
+    c_red_head = (255, 60, 20)
+    c_red_body = (220, 20, 0)
+    c_red_tail = (140, 5, 0)
 
-    c_cyan_head = (0, 240, 255)
-    c_cyan_body = (0, 120, 255)
-    c_cyan_tail = (0, 25, 210)
+    c_blue_head = (30, 80, 255)
+    c_blue_body = (10, 30, 220)
+    c_blue_tail = (0, 10, 140)
 
-    # Particle class for impact burst
     class Spark:
         def __init__(self, pos, vel, color, lifetime):
             self.pos = float(pos)
@@ -1059,36 +973,37 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
     sparks = []
 
     for frame in range(total_frames):
-        if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
+        # Check for real pianist playing (skip grace period at start)
+        if frame > grace_frames and midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
             logger.info("Piano connection animation interrupted by playing")
             break
 
-        # Base trail decay with Tweaking4All random spark decay
+        # Trail decay with random spark drops (Tweaking4All style)
         decay = 0.74
         for i in range(num_pixels):
             tr, tg, tb = trails[i]
-            # Random natural spark drop
             f = decay * (0.55 if random.random() < 0.22 else 1.0)
             trails[i] = (tr * f, tg * f, tb * f)
 
         if frame <= impact_frame:
-            # Phase 1: Dual Converging Meteors
+            # Phase 1: Dual converging meteors
             sub_prog = frame / float(impact_frame)
             eased = math.pow(sub_prog, 1.45)
             head_l = eased * center
             head_r = (num_pixels - 1) - eased * center
 
             span = 5
+            # Left meteor (red)
             for i in range(max(0, int(head_l - span)), min(num_pixels, int(head_l + span + 1))):
                 dist = abs(i - head_l)
                 if dist < 1.0:
-                    col = c_gold_head
+                    col = c_red_head
                     intensity = 1.0 - dist * 0.25
                 elif dist < 2.5:
-                    col = c_gold_body
+                    col = c_red_body
                     intensity = 1.0 - (dist - 1.0) / 2.5
                 else:
-                    col = c_gold_tail
+                    col = c_red_tail
                     intensity = max(0.0, 1.0 - dist / float(span))
                 tr, tg, tb = trails[i]
                 trails[i] = (
@@ -1097,16 +1012,17 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
                     min(255.0, tb + col[2] * intensity),
                 )
 
+            # Right meteor (blue)
             for i in range(max(0, int(head_r - span)), min(num_pixels, int(head_r + span + 1))):
                 dist = abs(i - head_r)
                 if dist < 1.0:
-                    col = c_cyan_head
+                    col = c_blue_head
                     intensity = 1.0 - dist * 0.25
                 elif dist < 2.5:
-                    col = c_cyan_body
+                    col = c_blue_body
                     intensity = 1.0 - (dist - 1.0) / 2.5
                 else:
-                    col = c_cyan_tail
+                    col = c_blue_tail
                     intensity = max(0.0, 1.0 - dist / float(span))
                 tr, tg, tb = trails[i]
                 trails[i] = (
@@ -1116,40 +1032,33 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
                 )
 
             if frame == impact_frame:
-                # Trigger chromatic impact burst: 100% saturated sparks
+                # Impact burst: saturated sparks in project colors (R, G, B)
                 for _ in range(40):
                     vel = random.uniform(-4.5, 4.5)
                     if random.random() < 0.35:
                         vel *= random.uniform(1.3, 2.0)
                     lifetime = random.uniform(18.0, 48.0)
                     pick = random.random()
-                    if pick < 0.40:
-                        # Solar gold/amber ember (B = 0)
-                        col = (255, random.randint(70, 130), 0)
-                    elif pick < 0.75:
-                        # Electric neon cyan ember (R = 0)
-                        col = (0, random.randint(190, 255), 255)
-                    elif pick < 0.90:
-                        # Vivid royal magenta / violet fusion ember (G = 0)
-                        col = (255, 0, random.randint(150, 240))
+                    if pick < 0.35:
+                        col = (255, random.randint(30, 80), 0)       # red/orange
+                    elif pick < 0.65:
+                        col = (0, random.randint(40, 100), 255)      # blue
+                    elif pick < 0.85:
+                        col = (0, 255, random.randint(30, 100))      # green
                     else:
-                        # Tropical emerald / seafoam ember (R = 0)
-                        col = (0, 255, random.randint(80, 160))
+                        col = (255, random.randint(180, 255), 0)     # yellow/gold
                     sparks.append(Spark(center, vel, col, lifetime))
 
-                # Chromatic impact flash (rich saturated fusion shockwave without white bleach)
+                # Impact flash: magenta/purple blend at collision point (red + blue = project's two meteor colors)
                 for i in range(max(0, int(center - 6)), min(num_pixels, int(center + 7))):
                     dist = abs(i - center)
                     flash_intensity = max(0.0, 1.0 - dist / 6.0)
-                    if dist < 1.2:
-                        # Fusion core: vivid hyper-magenta (collision point)
-                        f_r, f_g, f_b = (240.0, 0.0, 255.0)
+                    if dist < 1.5:
+                        f_r, f_g, f_b = (200.0, 50.0, 255.0)   # magenta core
                     elif i < center:
-                        # Solar comet shockwave: intense amber flame
-                        f_r, f_g, f_b = (255.0, 130.0, 0.0)
+                        f_r, f_g, f_b = (255.0, 40.0, 40.0)    # red shockwave
                     else:
-                        # Cyan comet shockwave: intense electric azure
-                        f_r, f_g, f_b = (0.0, 220.0, 255.0)
+                        f_r, f_g, f_b = (40.0, 60.0, 255.0)    # blue shockwave
                     tr, tg, tb = trails[i]
                     trails[i] = (
                         min(255.0, tr + f_r * flash_intensity),
@@ -1158,16 +1067,15 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
                     )
 
         else:
-            # Phase 2: Stardust Sparkle Dispersion
+            # Phase 2: Spark dispersion
             for spark in sparks:
                 spark.age += 1.0
                 spark.pos += spark.vel
-                spark.vel *= 0.93  # air drag
+                spark.vel *= 0.93
 
                 if spark.age < spark.lifetime and 0 <= spark.pos < num_pixels:
                     led_idx = int(spark.pos)
                     progress_spark = spark.age / spark.lifetime
-                    # Exponential fade with shimmering twinkle
                     shimmer = 0.75 + 0.25 * math.sin(spark.twinkle_seed + spark.age * 0.8)
                     bri = math.pow(1.0 - progress_spark, 1.6) * shimmer
 
