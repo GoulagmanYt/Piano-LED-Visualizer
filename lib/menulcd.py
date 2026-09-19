@@ -1,14 +1,18 @@
+import datetime
+import math
 import os
 from subprocess import call
+import threading
+import time
 from xml.dom import minidom
 import webcolors as wc
 from PIL import ImageFont, Image, ImageDraw
-import time
 from lib import LCD_Config, LCD_1in44, LCD_1in3
 from lib.functions import *
 from lib.rpi_drivers import GPIO
 import lib.colormaps as cmap
 from lib.log_setup import logger
+from lib.led_animations import get_registry
 
 
 # ============================================================================
@@ -113,6 +117,7 @@ class MenuLCD:
 
         self.update_songs()
         self.update_ports()
+        self.update_sequence_list()
         self.update_led_note_offsets()
         self.speed_multiplier = 1
 
@@ -144,11 +149,6 @@ class MenuLCD:
         self.last_activity = time.time()
         self.is_idle_animation_running = False
         self.is_animation_running = False
-        
-        # Track current animation for speed change restart
-        self.current_animation_name = None
-        self.current_animation_param = None
-        self.was_idle_animation = False
         
         # Load menu title image
         self.menu_title_image = None
@@ -389,7 +389,6 @@ class MenuLCD:
         ret = True
         try:
             sequences_tree = minidom.parse("config/sequences.xml")
-            self.update_songs()
             i = 0
             while True:
                 try:
@@ -414,7 +413,6 @@ class MenuLCD:
 
     def update_ports(self):
         ports = list(dict.fromkeys(mido.get_input_names()))
-        self.update_sequence_list()
 
         port_texts = ["Input", "Playback"]
         for index, port_text in enumerate(port_texts):
@@ -470,7 +468,6 @@ class MenuLCD:
 
     def update_multicolor(self, colors_list):
         i = 0
-        self.update_ports()
         rgb_names = ["Red", "Green", "Blue"]
         mc = self.DOMTree.getElementsByTagName("Multicolor")[0]
         mc_multicolor = self.DOMTree.createElement("LED_Color")
@@ -766,7 +763,6 @@ class MenuLCD:
                     value = self.ledsettings.pulse_flicker_strength
                 elif choice == "Flicker Speed":
                     # Convert radians/sec to Hz for display
-                    import math
                     hz = self.ledsettings.pulse_flicker_speed / (2 * math.pi)
                     value = f"{hz:.2f} Hz"
         
@@ -905,10 +901,13 @@ class MenuLCD:
         # displaying brightness value
         
         if self.current_location == "Brightness":
-
-            # Compute the current draw
-            miliamps = int(self.ledstrip.led_number) * (60 / (100 / float(self.ledstrip.brightness_percent)))
-            amps = round(float(miliamps) / 1000.0, 2)
+            # Compute the current draw (safely avoiding division by zero)
+            brightness = float(getattr(self.ledstrip, "brightness_percent", 0) or 0)
+            if brightness > 0:
+                miliamps = int(self.ledstrip.led_number) * (60 / (100 / brightness))
+                amps = round(float(miliamps) / 1000.0, 2)
+            else:
+                amps = 0.0
 
             # Render the text on three lines at (10, 50)
             draw.multiline_text(
@@ -1334,10 +1333,16 @@ class MenuLCD:
         if cpu_history is None:
             cpu_history = []
 
-        if card_space is None:
-            card_space.used = 0
-            card_space.total = 0
-            card_space.percent = 0
+        card_used_gb = 0.0
+        card_total_gb = 0.0
+        card_pct = 0
+        if card_space is not None and not isinstance(card_space, (int, float)):
+            try:
+                card_used_gb = round(getattr(card_space, "used", 0) / (1024.0 ** 3), 1)
+                card_total_gb = round(getattr(card_space, "total", 0) / (1024.0 ** 3), 1)
+                card_pct = getattr(card_space, "percent", 0)
+            except Exception:
+                pass
 
         self.image = Image.new("RGB", (self.LCD.width, self.LCD.height), self.background_color)
         self.draw = ImageDraw.Draw(self.image)
@@ -1417,8 +1422,7 @@ class MenuLCD:
 
         if self.screensaver_settings["sd_card_space"] == "1":
             self.draw.text((self.scale(1), top_offset),
-                           "SD: " + str(round(card_space.used / (1024.0 ** 3), 1)) + "/" + str(
-                               round(card_space.total / (1024.0 ** 3), 1)) + "(" + str(card_space.percent) + "%)",
+                           f"SD: {card_used_gb}/{card_total_gb}({card_pct}%)",
                            fill=self.text_color, font=font)
             top_offset += info_height_font
 
@@ -1597,7 +1601,6 @@ class MenuLCD:
 
         if location == "LED_animations":
             self.is_animation_running = True
-            from lib.led_animations import get_registry
             registry = get_registry()
             
             if choice == "Clear":
@@ -1619,7 +1622,6 @@ class MenuLCD:
                 )
         if location == "Chords":
             chord = self.ledsettings.scales.index(choice)
-            from lib.led_animations import get_registry
             registry = get_registry()
             # Track current animation
             self.current_animation_name = "Chords"
@@ -1637,7 +1639,6 @@ class MenuLCD:
         
         # Handle animation speed change
         if location == "Animation_Speed":
-            from lib.led_animations import get_registry
             registry = get_registry()
             
             # Map choice to speed value
@@ -1659,7 +1660,6 @@ class MenuLCD:
                     # Stop current animation
                     self.is_animation_running = False
                     self.is_idle_animation_running = False
-                    import time
                     time.sleep(0.2)
                     
                     # Restart with new speed
@@ -1930,7 +1930,6 @@ class MenuLCD:
                 self.usersettings.change_setting_value("pulse_flicker_strength", self.ledsettings.pulse_flicker_strength)
 
             if self.current_choice == "Flicker Speed":
-                import math
                 # Adjust in 0.1 Hz increments, convert to radians/sec for storage
                 hz_adjustment = value * 0.1 * self.speed_multiplier
                 current_hz = self.ledsettings.pulse_flicker_speed / (2 * math.pi)
@@ -1954,11 +1953,9 @@ class MenuLCD:
                     self.usersettings.change_setting_value("led_animation_speed", str(speed_ms))
                     # Restart animation if running
                     if (self.is_animation_running or self.is_idle_animation_running) and self.current_animation_name:
-                        from lib.led_animations import get_registry
                         registry = get_registry()
                         self.is_animation_running = False
                         self.is_idle_animation_running = False
-                        import time
                         time.sleep(0.2)
                         is_idle = self.was_idle_animation
                         registry.start_animation(
