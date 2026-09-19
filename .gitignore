@@ -6,3 +6,5 @@ config/settings.xml
 webinterface/node_modules
 visualizer.log
 score_log.txt*
+.maintenance/
+.venv/
