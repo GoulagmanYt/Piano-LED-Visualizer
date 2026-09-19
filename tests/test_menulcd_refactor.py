@@ -141,6 +141,39 @@ class TestMenuLCDRefactor(unittest.TestCase):
         menu.update_multicolor([])
         menu.update_ports.assert_not_called()
 
+    def test_item_slider_info_ranges(self):
+        menu = self._create_mock_menu()
+        
+        # Color channel 0..255
+        info = menu._get_item_slider_info("RGB", "Red", "128")
+        self.assertIsNotNone(info)
+        ratio, color = info
+        self.assertAlmostEqual(ratio, 128 / 255.0, places=3)
+        self.assertEqual(color, (255, 60, 60))
+
+        # Green channel
+        info = menu._get_item_slider_info("Custom_RGB", "Green", "255")
+        self.assertIsNotNone(info)
+        ratio, color = info
+        self.assertAlmostEqual(ratio, 1.0, places=3)
+        self.assertEqual(color, (60, 230, 70))
+
+        # Percentage 0..100%
+        info = menu._get_item_slider_info("Brightness", "Brightness", "75%")
+        self.assertIsNotNone(info)
+        ratio, color = info
+        self.assertAlmostEqual(ratio, 0.75, places=3)
+
+        # Time delay 0..60 min
+        info = menu._get_item_slider_info("Start_delay", "Delay", "30")
+        self.assertIsNotNone(info)
+        ratio, color = info
+        self.assertAlmostEqual(ratio, 0.50, places=3)
+
+        # Non-continuous item returns None
+        info = menu._get_item_slider_info("Main", "Settings", None)
+        self.assertIsNone(info)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -870,6 +870,74 @@ class MenuLCD:
                 value = learn_values.get(choice)
             return str(value) if value is not None else None
 
+    def _get_item_slider_info(self, location, choice, value_text):
+        """
+        Determine if a menu item represents an adjustable continuous range.
+        Returns (ratio, slider_color) where ratio is 0.0..1.0, or None.
+        """
+        if value_text is None:
+            return None
+
+        # Color channels 0..255
+        is_color_channel = choice in ("Red", "Green", "Blue")
+        is_color_loc = location in (
+            "RGB", "Pointer_Color_RGB", "Backlight_Color", "Custom_RGB",
+            "Color_for_slow_speed", "Color_for_fast_speed",
+            "Gradient_start", "Gradient_end",
+            "Color_in_scale", "Color_not_in_scale",
+        ) or "RGB_Color" in location
+
+        if is_color_channel and is_color_loc:
+            try:
+                val = float(value_text)
+                ratio = max(0.0, min(1.0, val / 255.0))
+                if choice == "Red":
+                    color = (255, 60, 60)
+                elif choice == "Green":
+                    color = (60, 230, 70)
+                else:
+                    color = (60, 140, 255)
+                return (ratio, color)
+            except (ValueError, TypeError):
+                pass
+
+        # Percentage 0..100% (Brightness, Backlight Brightness, Start/End point, Tempo)
+        if location in ("Brightness", "Backlight_Brightness") or choice in ("Start point", "End point", "Set tempo"):
+            try:
+                s = str(value_text).rstrip("%").strip()
+                val = float(s)
+                ratio = max(0.0, min(1.0, val / 100.0))
+                return (ratio, self.theme.pointer_color)
+            except (ValueError, TypeError):
+                pass
+
+        # Time delays 0..60 minutes (Screensaver delay, screen off, led animation delay, idle timeout)
+        if location in ("Start_delay", "Turn_off_screen_delay", "Led_animation_delay", "Idle_timeout"):
+            try:
+                val = float(value_text)
+                ratio = max(0.0, min(1.0, val / 60.0))
+                return (ratio, self.theme.pointer_color)
+            except (ValueError, TypeError):
+                pass
+
+        # Pulse settings
+        if location == "Pulse":
+            if choice == "Flicker Strength":
+                try:
+                    val = float(value_text)
+                    return (max(0.0, min(1.0, val / 100.0)), self.theme.pointer_color)
+                except (ValueError, TypeError):
+                    pass
+            elif choice == "Animation Distance":
+                try:
+                    val = float(value_text)
+                    max_led = float(max(1, getattr(self.ledstrip, "led_number", 144)))
+                    return (max(0.0, min(1.0, val / max_led)), self.theme.pointer_color)
+                except (ValueError, TypeError):
+                    pass
+
+        return None
+
     def show(self, position="default", back_pointer_location=None):
         selected_sid = None
         if self.screen_on == 0:
@@ -1113,6 +1181,23 @@ class MenuLCD:
                     value_right_margin += learn_color_extra_px  # Add space for color box
                 value_x = item_x1 - value_right_margin - value_width
                 draw.text((value_x, text_y), value_text, fill=self.text_color, font=self.font)
+
+                # Visual Gauge / Slider Bar for continuous values (Brightness, RGB, Delays, etc.)
+                slider_info = self._get_item_slider_info(self.current_location, sid, value_text)
+                if slider_info is not None:
+                    ratio, slider_color = slider_info
+                    slider_h = max(2, scale(2))
+                    slider_y = item_y1 - slider_h - scale(2)
+                    bar_pad_x = padding_h_px
+                    track_x0 = item_x0 + bar_pad_x
+                    track_x1 = item_x1 - bar_pad_x
+                    track_w = track_x1 - track_x0
+                    if track_w > 4:
+                        track_bg = (50, 50, 60) if is_selected else (30, 30, 38)
+                        draw.rectangle([(track_x0, slider_y), (track_x1, slider_y + slider_h - 1)], fill=track_bg)
+                        fill_w = int(track_w * ratio)
+                        if fill_w > 0:
+                            draw.rectangle([(track_x0, slider_y), (track_x0 + fill_w, slider_y + slider_h - 1)], fill=slider_color)
             else:
                 # Just draw label centered vertically
                 label_max_width = item_x1 - item_x0 - scale(theme.item_padding_h * 2)

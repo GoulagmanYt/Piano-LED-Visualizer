@@ -67,15 +67,15 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-echo "Configuring visualizer.service override..."
+echo "Configuring visualizer.service override for instant boot and real-time scheduling..."
 OVERRIDE_DIR="/etc/systemd/system/visualizer.service.d"
 OVERRIDE_FILE="${OVERRIDE_DIR}/override.conf"
 run install -d "$OVERRIDE_DIR"
 backup_file "$OVERRIDE_FILE"
 run install -m 0644 /dev/stdin "$OVERRIDE_FILE" <<EOF
 [Unit]
-After=network-online.target plv-lowlatency.service
-Wants=network-online.target plv-lowlatency.service
+After=local-fs.target plv-lowlatency.service
+Wants=plv-lowlatency.service
 
 [Service]
 WorkingDirectory=${PLV_DIR}/
@@ -97,12 +97,37 @@ LimitNICE=-10
 LimitMEMLOCK=64M
 EOF
 
-echo "Disabling reversible background services..."
-for unit in bluetooth.service ModemManager.service triggerhappy.service triggerhappy.socket apt-daily.timer apt-daily-upgrade.timer; do
+echo "Disabling reversible background and boot-delaying services for Fast Boot..."
+for unit in bluetooth.service ModemManager.service triggerhappy.service triggerhappy.socket \
+            apt-daily.timer apt-daily-upgrade.timer \
+            NetworkManager-wait-online.service keyboard-setup.service rpc-statd-notify.service e2scrub_reap.service; do
   if unit_exists "$unit"; then
-    run systemctl disable --now "$unit" || true
+    run systemctl disable --now "$unit" 2>/dev/null || run systemctl disable "$unit" 2>/dev/null || true
   fi
 done
+
+echo "Configuring Fast Boot parameters in config.txt..."
+BOOT_CONFIG="/boot/firmware/config.txt"
+[ -f "$BOOT_CONFIG" ] || BOOT_CONFIG="/boot/config.txt"
+if [ -f "$BOOT_CONFIG" ]; then
+  # Turbo clock at 1000MHz for the first 30 seconds of boot
+  if ! grep -q "^initial_turbo=" "$BOOT_CONFIG"; then
+    echo "initial_turbo=30" | run tee -a "$BOOT_CONFIG" >/dev/null
+  fi
+  # Disable rainbow splash screen delay
+  if ! grep -q "^disable_splash=" "$BOOT_CONFIG"; then
+    echo "disable_splash=1" | run tee -a "$BOOT_CONFIG" >/dev/null
+  fi
+  # Disable boot delay
+  if ! grep -q "^boot_delay=" "$BOOT_CONFIG"; then
+    echo "boot_delay=0" | run tee -a "$BOOT_CONFIG" >/dev/null
+  fi
+fi
+
+# Make helper scripts executable
+if [ -d "${PLV_DIR}/scripts" ]; then
+  run chmod +x "${PLV_DIR}/scripts"/*.sh 2>/dev/null || true
+fi
 
 echo "Disabling NetworkManager Wi-Fi power save..."
 run install -d /etc/NetworkManager/conf.d

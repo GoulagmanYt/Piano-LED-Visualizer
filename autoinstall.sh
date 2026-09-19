@@ -152,10 +152,10 @@ enable_spi_interface() {
 
 # Function to install required packages
 install_packages() {
-  execute_command "sudo apt-get install -y ruby git wget iw python3-pip autotools-dev libtool autoconf libasound2 libavahi-client3 libavahi-common3 libc6 libfmt9 libgcc-s1 libstdc++6 python3 libopenblas-dev libavahi-client-dev libasound2-dev libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev libatlas-base-dev libopenjp2-7 libtiff6 libjack0 libjack-dev fonts-freefont-ttf gcc make build-essential scons swig abcmidi" "check_internet"
+  execute_command "sudo apt-get install -y ruby git wget iw python3-pip autotools-dev libtool autoconf libasound2 libavahi-client3 libavahi-common3 libc6 libfmt9 libgcc-s1 libstdc++6 python3 libopenblas-dev libavahi-client-dev libasound2-dev libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev libatlas-base-dev libopenjp2-7 libtiff6 libjack0 libjack-dev fonts-freefont-ttf gcc make build-essential scons swig abcmidi overlayroot" "check_internet"
 }
 
-# Function to disable audio output
+# Function to disable audio output and configure fast boot
 disable_audio_output() {
   echo 'blacklist snd_bcm2835' | sudo tee -a /etc/modprobe.d/snd-blacklist.conf > /dev/null
   local boot_config="/boot/firmware/config.txt"
@@ -163,6 +163,12 @@ disable_audio_output() {
     boot_config="/boot/config.txt"
   fi
   sudo sed -i 's/^dtparam=audio=on/#dtparam=audio=on/' "$boot_config"
+  for cfg in "initial_turbo=30" "disable_splash=1" "boot_delay=0"; do
+    key=$(echo "$cfg" | cut -d= -f1)
+    if ! grep -q "^${key}=" "$boot_config"; then
+      echo "$cfg" | sudo tee -a "$boot_config" > /dev/null
+    fi
+  done
 }
 
 # Function to install RTP-midi server
@@ -218,6 +224,7 @@ EOF
 
 apply_default_runtime_tuning() {
   echo "Applying default Raspberry Pi runtime tuning..."
+  execute_command "sudo chmod +x ${APP_DIR}/scripts/*.sh 2>/dev/null || true"
   execute_command "sudo bash ${APP_DIR}/scripts/configure_rtpmidi_stability.sh rtpmidid"
   execute_command "sudo env PLV_DIR=${APP_DIR} bash ${APP_DIR}/scripts/configure_pi_low_latency.sh"
   execute_command "sudo systemctl enable visualizer.service rtpmidid.service plv-lowlatency.service"
@@ -227,6 +234,15 @@ apply_default_runtime_tuning() {
   execute_command "systemctl is-active rtpmidid.service"
   execute_command "systemctl is-active plv-lowlatency.service"
   execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} status --short --branch"
+  echo ""
+  echo "======================================================================"
+  echo "PLV TUNING : Fast Boot activé (~12s)."
+  echo "Pour activer la protection Safe Power Off (OverlayFS lecture seule) :"
+  echo "  sudo bash ${APP_DIR}/scripts/enable_safe_poweroff.sh"
+  echo "Pour repasser en mode écriture :"
+  echo "  sudo bash ${APP_DIR}/scripts/disable_safe_poweroff.sh"
+  echo "======================================================================"
+  echo ""
 }
 
 finish_installation() {
