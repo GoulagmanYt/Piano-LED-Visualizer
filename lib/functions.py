@@ -823,55 +823,242 @@ def rainbowCycle(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
-def startup_animation(ledstrip, ledsettings, duration_ms=2000, max_leds=30):
-    strip = ledstrip.strip
-    total_pixels = strip.numPixels()
+def startup_animation(ledstrip, ledsettings, duration_ms=3800, midiports=None):
+    """
+    Fluid, elegant startup animation for the visualizer.
+    Features:
+      - Phase 1 (0 -> 45%): Symmetric dual-pulse expansion from keyboard center to edges
+        with smooth chromatic color shifts (cyan -> violet -> magenta).
+      - Phase 2 (45% -> 75%): Harmonic inward shimmer wave across all keys.
+      - Phase 3 (75% -> 100%): Warm organic dissolve into black or configured backlight.
+      - Responsive: Breaks instantly if any MIDI input is detected.
+    """
+    strip = getattr(ledstrip, "strip", None)
+    if strip is None:
+        return
 
-    num_red_leds = max_leds // 3
-    num_blue_leds = max_leds // 3
-    num_green_leds = max_leds - num_red_leds - num_blue_leds
+    num_pixels = strip.numPixels()
+    if not num_pixels or num_pixels <= 0:
+        return
 
-    start_red_led = (total_pixels - max_leds) // 2
-    start_blue_led = start_red_led + num_red_leds
-    start_green_led = start_blue_led + num_blue_leds
+    user_brightness = calculate_brightness(ledsettings)
+    master_dim = max(0.15, min(1.0, user_brightness / 255.0))
 
-    brightness = 0.0
+    center = (num_pixels - 1) / 2.0
+    half_len = max(1.0, center)
 
-    num_steps = 200
+    frame_interval = 0.020
+    total_frames = max(30, int((duration_ms / 1000.0) / frame_interval))
 
-    step_delay = duration_ms / num_steps / 1000.0
+    def _color_lerp(c1, c2, t):
+        t = max(0.0, min(1.0, t))
+        return (
+            int(c1[0] + (c2[0] - c1[0]) * t),
+            int(c1[1] + (c2[1] - c1[1]) * t),
+            int(c1[2] + (c2[2] - c1[2]) * t),
+        )
 
-    brightness_increment = 1.0 / num_steps
+    c_cyan = (0, 220, 255)
+    c_indigo = (130, 50, 255)
+    c_rose = (255, 50, 160)
+    c_gold = (255, 190, 60)
 
-    for step in range(num_steps):
-        if brightness < 0:
+    trails = [(0.0, 0.0, 0.0)] * num_pixels
+
+    for frame in range(total_frames):
+        if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
+            logger.info("Startup animation interrupted by incoming MIDI notes")
             break
-        red = int(255 * brightness)
-        blue = int(255 * brightness)
-        green = int(255 * brightness)
 
-        for i in range(start_red_led, start_blue_led):
+        progress = frame / float(total_frames)
+
+        decay_factor = 0.82
+        for i in range(num_pixels):
+            tr, tg, tb = trails[i]
+            trails[i] = (tr * decay_factor, tg * decay_factor, tb * decay_factor)
+
+        if progress < 0.45:
+            sub_prog = progress / 0.45
+            eased_prog = 1.0 - math.pow(1.0 - sub_prog, 2.6)
+            wave_dist = eased_prog * half_len
+
+            head_l = center - wave_dist
+            head_r = center + wave_dist
+
+            if sub_prog < 0.5:
+                head_color = _color_lerp(c_cyan, c_indigo, sub_prog * 2.0)
+            else:
+                head_color = _color_lerp(c_indigo, c_rose, (sub_prog - 0.5) * 2.0)
+
+            sigma = 2.4
+            sigma_sq2 = 2.0 * sigma * sigma
+            span = int(math.ceil(sigma * 3.0))
+
+            for head in (head_l, head_r):
+                start_i = max(0, int(math.floor(head - span)))
+                end_i = min(num_pixels, int(math.ceil(head + span + 1)))
+                for i in range(start_i, end_i):
+                    dist_sq = (i - head) ** 2
+                    intensity = math.exp(-dist_sq / sigma_sq2)
+                    tr, tg, tb = trails[i]
+                    trails[i] = (
+                        min(255.0, tr + head_color[0] * intensity),
+                        min(255.0, tg + head_color[1] * intensity),
+                        min(255.0, tb + head_color[2] * intensity),
+                    )
+
+        elif progress < 0.75:
+            sub_prog = (progress - 0.45) / 0.30
+            wave_phase = sub_prog * math.pi * 4.0
+
+            for i in range(num_pixels):
+                norm_pos = i / float(num_pixels)
+                wave_val = 0.5 + 0.5 * math.sin(norm_pos * math.pi * 3.0 - wave_phase)
+                shimmer = 0.7 + 0.3 * math.sin(norm_pos * math.pi * 7.0 + wave_phase * 1.5)
+                amp = wave_val * shimmer * (1.0 - math.pow(sub_prog - 0.5, 2) * 2.5)
+                amp = max(0.0, min(1.0, amp))
+
+                col = _color_lerp(c_cyan, c_gold, norm_pos)
+                tr, tg, tb = trails[i]
+                trails[i] = (
+                    max(tr, col[0] * amp),
+                    max(tg, col[1] * amp),
+                    max(tb, col[2] * amp),
+                )
+
+        else:
+            sub_prog = (progress - 0.75) / 0.25
+            dissolve = max(0.0, 0.5 * (1.0 + math.cos(sub_prog * math.pi)))
+            for i in range(num_pixels):
+                tr, tg, tb = trails[i]
+                trails[i] = (tr * dissolve, tg * dissolve, tb * dissolve)
+
+        for i in range(num_pixels):
             if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
-                strip.setPixelColor(i, Color(red, 0, 0))
-        for i in range(start_blue_led, start_green_led):
-            if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
-                strip.setPixelColor(i, Color(0, 0, blue))
-        for i in range(start_green_led, start_green_led + num_green_leds):
-            if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
-                strip.setPixelColor(i, Color(0, green, 0))
+                tr, tg, tb = trails[i]
+                r = int(tr * master_dim)
+                g = int(tg * master_dim)
+                b = int(tb * master_dim)
+                strip.setPixelColor(i, Color(r, g, b))
 
         strip.show()
-        brightness += brightness_increment
+        time.sleep(frame_interval)
 
-        if brightness > 0.5:
-            brightness_increment *= -1
+    fastColorWipe(strip, True, ledsettings)
 
-        time.sleep(int(step_delay))
 
-    for i in range(total_pixels):
-        strip.setPixelColor(i, 0)
+def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms=1600):
+    """
+    Stylish, dynamic handshake animation when the digital piano connects.
+    Features:
+      - Phase 1 (0 -> 50%): Dual emerald/mint comets gliding from ends inward to center.
+      - Phase 2 (50% -> 72%): Radial warm-white / jade bloom radiating outward.
+      - Phase 3 (72% -> 100%): Soft exponential release to ready state.
+      - Zero latency: Aborts immediately if pianist plays a note.
+    """
+    strip = getattr(ledstrip, "strip", None)
+    if strip is None:
+        return
 
-    strip.show()
+    num_pixels = strip.numPixels()
+    if not num_pixels or num_pixels <= 0:
+        return
+
+    user_brightness = calculate_brightness(ledsettings)
+    master_dim = max(0.2, min(1.0, user_brightness / 255.0))
+
+    center = (num_pixels - 1) / 2.0
+    half_len = max(1.0, center)
+
+    frame_interval = 0.020
+    total_frames = max(25, int((duration_ms / 1000.0) / frame_interval))
+
+    def _color_lerp(c1, c2, t):
+        t = max(0.0, min(1.0, t))
+        return (
+            int(c1[0] + (c2[0] - c1[0]) * t),
+            int(c1[1] + (c2[1] - c1[1]) * t),
+            int(c1[2] + (c2[2] - c1[2]) * t),
+        )
+
+    c_mint = (0, 255, 150)
+    c_cyan = (0, 200, 255)
+    c_white_bloom = (240, 255, 230)
+
+    trails = [(0.0, 0.0, 0.0)] * num_pixels
+
+    for frame in range(total_frames):
+        if midiports and getattr(midiports, "midi_queue", None) and len(midiports.midi_queue) > 0:
+            logger.info("Piano connection animation interrupted by playing")
+            break
+
+        progress = frame / float(total_frames)
+
+        decay_factor = 0.80
+        for i in range(num_pixels):
+            tr, tg, tb = trails[i]
+            trails[i] = (tr * decay_factor, tg * decay_factor, tb * decay_factor)
+
+        if progress < 0.50:
+            sub_prog = progress / 0.50
+            eased = math.pow(sub_prog, 1.3)
+            head_l = eased * center
+            head_r = (num_pixels - 1) - eased * center
+
+            head_color = _color_lerp(c_mint, c_cyan, sub_prog)
+
+            sigma = 2.2
+            sigma_sq2 = 2.0 * sigma * sigma
+            span = int(math.ceil(sigma * 3.0))
+
+            for head in (head_l, head_r):
+                start_i = max(0, int(math.floor(head - span)))
+                end_i = min(num_pixels, int(math.ceil(head + span + 1)))
+                for i in range(start_i, end_i):
+                    dist_sq = (i - head) ** 2
+                    intensity = math.exp(-dist_sq / sigma_sq2)
+                    tr, tg, tb = trails[i]
+                    trails[i] = (
+                        min(255.0, tr + head_color[0] * intensity),
+                        min(255.0, tg + head_color[1] * intensity),
+                        min(255.0, tb + head_color[2] * intensity),
+                    )
+
+        elif progress < 0.72:
+            sub_prog = (progress - 0.50) / 0.22
+            radius = sub_prog * half_len * 1.1
+            bloom_width = 4.0 + sub_prog * 8.0
+
+            for i in range(num_pixels):
+                dist = abs(i - center)
+                diff = abs(dist - radius)
+                if diff < bloom_width:
+                    intensity = (1.0 - (diff / bloom_width)) * (1.0 - sub_prog * 0.4)
+                    core_mix = max(0.0, 1.0 - sub_prog * 1.5)
+                    color = _color_lerp(c_mint, c_white_bloom, core_mix)
+                    tr, tg, tb = trails[i]
+                    trails[i] = (
+                        min(255.0, tr + color[0] * intensity),
+                        min(255.0, tg + color[1] * intensity),
+                        min(255.0, tb + color[2] * intensity),
+                    )
+
+        else:
+            sub_prog = (progress - 0.72) / 0.28
+            fade = math.exp(-sub_prog * 3.5)
+            for i in range(num_pixels):
+                tr, tg, tb = trails[i]
+                trails[i] = (tr * fade, tg * fade, tb * fade)
+
+        for i in range(num_pixels):
+            if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
+                tr, tg, tb = trails[i]
+                strip.setPixelColor(i, Color(int(tr * master_dim), int(tg * master_dim), int(tb * master_dim)))
+
+        strip.show()
+        time.sleep(frame_interval)
+
+    fastColorWipe(strip, True, ledsettings)
 
 
 def theaterChaseRainbow(ledstrip, ledsettings, menu, speed_ms=None):

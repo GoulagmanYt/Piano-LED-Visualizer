@@ -10,7 +10,7 @@ import time
 from lib.argument_parser import ArgumentParser
 from lib.component_initializer import ComponentInitializer
 from lib.functions import fastColorWipe, screensaver, \
-    manage_idle_animation, stop_animations
+    manage_idle_animation, stop_animations, piano_connected_animation
 from lib.gpio_handler import GPIOHandler
 from lib.led_effects_processor import LEDEffectsProcessor
 from lib.ledsettings import LedSettings
@@ -143,8 +143,25 @@ class VisualizerApp:
         return result
 
     def handle_input_connected(self, port_name):
-        # Never overwrite a played frame from a connection-notification thread.
         logger.info("MIDI input detected: %s", port_name)
+        threading.Thread(
+            target=self._play_connection_animation,
+            args=(port_name,),
+            daemon=True,
+        ).start()
+
+    def _play_connection_animation(self, port_name):
+        if not self._input_detected_blink_lock.acquire(blocking=False):
+            return
+        try:
+            ci = getattr(self, "ci", None)
+            if ci is None:
+                return
+            piano_connected_animation(ci.ledstrip, ci.ledsettings, ci.midiports)
+        except Exception as error:
+            logger.warning("Could not play piano connection animation: %s", error)
+        finally:
+            self._input_detected_blink_lock.release()
 
     def handle_shutdown(self, signum, frame):
         self.stop_event.set()

@@ -111,8 +111,7 @@ class ComponentInitializer:
         cmap.update_multicolor(self.ledsettings.multicolor_range, self.ledsettings.multicolor)
         cmap.set_current_gamma(self.ledstrip.led_gamma)
 
-        t = threading.Thread(target=startup_animation, args=(self.ledstrip, self.ledsettings))
-        t.start()
+        fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
 
         self.midiports.add_instance(self.menu)
         self.ledsettings.add_instance(self.menu, self.ledstrip)
@@ -126,4 +125,9 @@ class ComponentInitializer:
         # Start MIDI device monitoring for auto-connection
         self.midiports.start_midi_monitor()
 
-        fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
+        t = threading.Thread(
+            target=startup_animation,
+            args=(self.ledstrip, self.ledsettings, 3800, self.midiports),
+            daemon=True,
+        )
+        t.start()
