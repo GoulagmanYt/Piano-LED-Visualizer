@@ -503,10 +503,11 @@ def get_note_position(note, ledstrip, ledsettings):
     density = ledstrip.leds_per_meter / 72
     note_pos_raw = int(density * (note - 20) - note_offset)
 
+    max_idx = max(0, ledstrip.led_number - 1)
     if ledstrip.reverse:
-        return max(0, ledstrip.led_number - note_pos_raw)
+        return max(0, min(max_idx, ledstrip.led_number - note_pos_raw))
     else:
-        return max(0, note_pos_raw)
+        return max(0, min(max_idx, note_pos_raw))
 
 
 # scale: 1 means in C, scale: 2 means in C#, scale: 3 means in D, etc...

@@ -19,9 +19,10 @@ def _expected_note_position(note, strip, ledsettings):
     density = strip.leds_per_meter / 72
     note_pos_raw = int(density * (note - 20) - note_offset)
 
+    max_idx = max(0, strip.led_number - 1)
     if strip.reverse:
-        return max(0, strip.led_number - note_pos_raw)
-    return max(0, note_pos_raw)
+        return max(0, min(max_idx, strip.led_number - note_pos_raw))
+    return max(0, min(max_idx, note_pos_raw))
 
 
 def _strip(led_number=176, leds_per_meter=144, shift=0, reverse=0):

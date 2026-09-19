@@ -604,6 +604,17 @@ class MidiPorts:
 
     def _resolve_input_target(self, requested_port, available_inputs):
         if requested_port and requested_port != "default":
+            if not is_valid_input_port(requested_port):
+                fallback = pick_default_input_port(available_inputs)
+                if fallback:
+                    self.usersettings.change_setting_value("input_port", fallback)
+                    self.last_resolved_input_port = fallback
+                    self.last_resolution_reason["input"] = "Self-healed invalid input port to real device"
+                    return {
+                        "selected_port": fallback,
+                        "status": PortResolutionStatus.AUTO_SELECTED,
+                        "reason": self.last_resolution_reason["input"],
+                    }
             resolution = resolve_input_port(requested_port, available_inputs)
             self.last_resolved_input_port = resolution.selected_port
             self.last_resolution_reason["input"] = resolution.reason
@@ -798,6 +809,16 @@ class MidiPorts:
         self.playport = None
         self.actual_play_port = None
 
+        if selected_port is None and requested_port and requested_port != "default":
+            _refresh_port_cache()
+            available_outputs = _get_cached_output_names()
+            resolution = self._resolve_output_target(
+                requested_port,
+                available_outputs,
+                available_inputs=available_inputs,
+            )
+            selected_port = self._resolve_selected_port(resolution)
+
         if selected_port is None:
             self._safe_close_port(old_port)
             return old_port is not None
@@ -815,6 +836,14 @@ class MidiPorts:
 
         self._safe_close_port(old_port)
         return True
+
+    def _connect_port(self, port_type):
+        """Connect or reconnect input or output port."""
+        if port_type in ("output", "playport"):
+            return self._reconnect_output(force=True)
+        elif port_type in ("input", "inport"):
+            return self._reconnect_input(force=True)
+        return False
 
     def setup_ports(self):
         """Try to open the configured or first available ports."""

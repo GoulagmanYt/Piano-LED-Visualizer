@@ -117,10 +117,11 @@ class LedStrip:
         density = self.leds_per_meter / 72
         note_pos_raw = int(density * (note - 20) - note_offset)
 
+        max_idx = max(0, self.led_number - 1)
         if self.reverse:
-            note_position = max(0, self.led_number - note_pos_raw)
+            note_position = max(0, min(max_idx, self.led_number - note_pos_raw))
         else:
-            note_position = max(0, note_pos_raw)
+            note_position = max(0, min(max_idx, note_pos_raw))
 
         cache[note] = note_position
         return note_position
