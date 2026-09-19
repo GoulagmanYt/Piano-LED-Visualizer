@@ -1,4 +1,5 @@
 import threading
+from collections import deque
 from lib.rpi_drivers import Color
 import lib.colormaps as cmap
 import mido
@@ -32,25 +33,20 @@ def get_ip_address():
 
 def get_last_logs(n=100):
     file_path = 'visualizer.log'
-    # If the file does not exist, create it with write permissions
+    if not os.path.exists(file_path):
+        file_path = '/home/Piano-LED-Visualizer/visualizer.log'
+
     if not os.path.exists(file_path):
         open(file_path, 'w').close()
         os.chmod(file_path, 0o644)
 
     try:
-        # Use the 'tail' command to get the last N lines of the log file
-        tail_command = ["tail", f"-n{n}", file_path]
-        result = subprocess.run(tail_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-
-        # Split the output into lines and return as a list
-        lines = result.stdout.splitlines()
-        string = ""
-        for line in lines:
-            string += "\r\n" + line
-        return string
-    except subprocess.CalledProcessError as e:
-        # Handle any errors that occur during the 'tail' command execution
-        return [f"Error: {e.stderr}"]
+        line_count = max(1, int(n if n is not None else 100))
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as log_file:
+            lines = deque(log_file, maxlen=line_count)
+        return "".join(f"\r\n{line.rstrip()}" for line in lines)
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def find_between(s, start, end):

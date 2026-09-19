@@ -44,6 +44,9 @@ function initialize_homepage() {
     
     // Populate timezone dropdown
     populate_timezones();
+    if (typeof initializeThemeControls === 'function') {
+        initializeThemeControls();
+    }
 }
 
 /**
@@ -58,28 +61,34 @@ function populate_timezones() {
     const xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function () {
         if (this.readyState === 4 && this.status === 200) {
-            try {
-                const response = JSON.parse(this.responseText);
-                if (response.success && response.timezones) {
-                    // Clear existing options except the first one (UTC placeholder)
-                    const currentValue = timezoneSelect.value;
-                    timezoneSelect.innerHTML = '';
-                    
-                    // Add all timezones
-                    response.timezones.forEach(function(timezone) {
-                        const option = document.createElement('option');
-                        option.value = timezone;
-                        option.textContent = timezone;
-                        timezoneSelect.appendChild(option);
-                    });
-                    
-                    // Restore current value if it exists
-                    if (currentValue && Array.from(timezoneSelect.options).some(opt => opt.value === currentValue)) {
-                        timezoneSelect.value = currentValue;
+            const response = JSON.parse(this.responseText);
+            if (response.success && response.timezones) {
+                const currentTimezone = response.current_timezone;
+                timezoneSelect.innerHTML = "";
+                
+                // Add default option
+                const defaultOption = document.createElement("option");
+                defaultOption.value = "";
+                defaultOption.textContent = "-- Select Timezone --";
+                timezoneSelect.appendChild(defaultOption);
+                
+                // Add timezones
+                response.timezones.forEach(tz => {
+                    const option = document.createElement("option");
+                    option.value = tz;
+                    option.textContent = tz;
+                    if (tz === currentTimezone) {
+                        option.selected = true;
                     }
-                }
-            } catch (e) {
-                console.warn("Error parsing timezones response:", e);
+                    timezoneSelect.appendChild(option);
+                });
+                
+                // Add change event listener
+                timezoneSelect.onchange = function() {
+                    if (this.value) {
+                        change_timezone(this.value);
+                    }
+                };
             }
         }
     };
@@ -90,6 +99,65 @@ function populate_timezones() {
 /**
  * Initialize Chart.js charts for CPU and LED FPS
  */
+function getHomepageChartPalette() {
+    const fallbackCpu = 'rgba(37, 99, 235, 0.85)';
+    const fallbackCpuFill = 'rgba(37, 99, 235, 0.18)';
+    const fallbackFps = 'rgba(245, 158, 11, 0.85)';
+    const fallbackFpsFill = 'rgba(245, 158, 11, 0.18)';
+
+    if (typeof getThemeRgba !== 'function') {
+        return {
+            cpuBorder: fallbackCpu,
+            cpuFill: fallbackCpuFill,
+            fpsBorder: fallbackFps,
+            fpsFill: fallbackFpsFill
+        };
+    }
+
+    return {
+        cpuBorder: getThemeRgba('--theme-accent-rgb', 0.9),
+        cpuFill: getThemeRgba('--theme-accent-rgb', 0.18),
+        fpsBorder: getThemeRgba('--theme-secondary-rgb', 0.9),
+        fpsFill: getThemeRgba('--theme-secondary-rgb', 0.18)
+    };
+}
+
+function destroyHomepageCharts() {
+    if (window.cpuChart) {
+        window.cpuChart.destroy();
+        window.cpuChart = null;
+    }
+    if (window.ledFpsChart) {
+        window.ledFpsChart.destroy();
+        window.ledFpsChart = null;
+    }
+}
+
+function resizeHomepageCharts() {
+    const cpuCanvas = document.getElementById('cpu_chart');
+    const cpuCard = cpuCanvas ? cpuCanvas.closest('a') : null;
+    const ledCanvas = document.getElementById('led_fps_chart');
+    const ledCard = ledCanvas ? ledCanvas.closest('a') : null;
+
+    if (cpuCanvas && cpuCard) {
+        const cpuRect = cpuCard.getBoundingClientRect();
+        cpuCanvas.width = cpuRect.width;
+        cpuCanvas.height = cpuRect.height;
+        if (window.cpuChart) {
+            window.cpuChart.resize();
+        }
+    }
+
+    if (ledCanvas && ledCard) {
+        const ledRect = ledCard.getBoundingClientRect();
+        ledCanvas.width = ledRect.width;
+        ledCanvas.height = ledRect.height;
+        if (window.ledFpsChart) {
+            window.ledFpsChart.resize();
+        }
+    }
+}
+
 function initializeHomepageCharts() {
     // Check if Chart.js is available
     if (typeof Chart === 'undefined') {
@@ -97,6 +165,9 @@ function initializeHomepageCharts() {
         return;
     }
     
+    destroyHomepageCharts();
+    const palette = getHomepageChartPalette();
+
     const chartOptions = {
         responsive: true,
         maintainAspectRatio: false,
@@ -134,26 +205,9 @@ function initializeHomepageCharts() {
         }
     };
     
-    // Helper function to resize chart canvas to fill parent card
-    function resizeChartCanvas(canvas, card) {
-        if (card && canvas) {
-            const rect = card.getBoundingClientRect();
-            canvas.width = rect.width;
-            canvas.height = rect.height;
-        }
-    }
-    
     // CPU Chart
     const cpuCtx = document.getElementById('cpu_chart');
     if (cpuCtx) {
-        const cpuCard = cpuCtx.closest('a');
-        const isDark = document.documentElement.classList.contains('dark');
-        
-        // Resize canvas to fill card
-        setTimeout(() => {
-            resizeChartCanvas(cpuCtx, cpuCard);
-        }, 50);
-        
         window.cpuChart = new Chart(cpuCtx, {
             type: 'line',
             data: {
@@ -161,8 +215,8 @@ function initializeHomepageCharts() {
                 datasets: [{
                     label: 'CPU Usage %',
                     data: [],
-                    borderColor: isDark ? 'rgba(59, 130, 246, 0.8)' : 'rgba(37, 99, 235, 0.8)',
-                    backgroundColor: isDark ? 'rgba(59, 130, 246, 0.2)' : 'rgba(37, 99, 235, 0.2)',
+                    borderColor: palette.cpuBorder,
+                    backgroundColor: palette.cpuFill,
                     fill: true
                 }]
             },
@@ -177,27 +231,11 @@ function initializeHomepageCharts() {
                 }
             }
         });
-        
-        // Resize on window resize
-        window.addEventListener('resize', function() {
-            resizeChartCanvas(cpuCtx, cpuCard);
-            if (window.cpuChart) {
-                window.cpuChart.resize();
-            }
-        });
     }
     
     // LED FPS Chart
     const ledFpsCtx = document.getElementById('led_fps_chart');
     if (ledFpsCtx) {
-        const fpsCard = ledFpsCtx.closest('a');
-        const isDark = document.documentElement.classList.contains('dark');
-        
-        // Resize canvas to fill card
-        setTimeout(() => {
-            resizeChartCanvas(ledFpsCtx, fpsCard);
-        }, 50);
-        
         window.ledFpsChart = new Chart(ledFpsCtx, {
             type: 'line',
             data: {
@@ -205,22 +243,23 @@ function initializeHomepageCharts() {
                 datasets: [{
                     label: 'LED FPS',
                     data: [],
-                    borderColor: isDark ? 'rgba(251, 191, 36, 0.8)' : 'rgba(234, 179, 8, 0.8)',
-                    backgroundColor: isDark ? 'rgba(251, 191, 36, 0.2)' : 'rgba(234, 179, 8, 0.2)',
+                    borderColor: palette.fpsBorder,
+                    backgroundColor: palette.fpsFill,
                     fill: true
                 }]
             },
             options: chartOptions
         });
-        
-        // Resize on window resize
-        window.addEventListener('resize', function() {
-            resizeChartCanvas(ledFpsCtx, fpsCard);
-            if (window.ledFpsChart) {
-                window.ledFpsChart.resize();
-            }
-        });
     }
+
+    if (!window.homepageChartsResizeHandler) {
+        window.homepageChartsResizeHandler = function () {
+            resizeHomepageCharts();
+        };
+        window.addEventListener('resize', window.homepageChartsResizeHandler);
+    }
+
+    setTimeout(resizeHomepageCharts, 50);
 }
 
 function initialize_led_settings() {

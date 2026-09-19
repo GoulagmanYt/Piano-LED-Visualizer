@@ -50,6 +50,9 @@ function updateChart(chartId, value) {
 
 function remove_page_indicators() {
     document.getElementById("home").classList.remove("glass-light");
+    if (document.getElementById("appearance")) {
+        document.getElementById("appearance").classList.remove("glass-light");
+    }
     document.getElementById("ledsettings").classList.remove("glass-light");
     document.getElementById("songs").classList.remove("glass-light");
     document.getElementById("sequences").classList.remove("glass-light");
@@ -575,6 +578,31 @@ function get_settings(home = true) {
         if (this.readyState === 4 && this.status === 200) {
             let response = JSON.parse(this.responseText);
             config_settings = response;
+
+            if (typeof applyThemeSettings === 'function') {
+                const THEME_KEYS = [
+                    'web_theme_mode', 'web_theme_preset', 'web_theme_accent',
+                    'web_theme_background_color', 'web_theme_surface_color',
+                    'web_theme_icon_color', 'web_theme_badge_color',
+                    'web_theme_badge_text_color', 'web_theme_surface',
+                    'web_theme_radius', 'web_theme_glow', 'web_theme_contrast',
+                    'web_theme_background'
+                ];
+                const themeData = {};
+                let hasThemeKey = false;
+                THEME_KEYS.forEach(function(k) {
+                    if (Object.prototype.hasOwnProperty.call(response, k) && response[k] !== null && response[k] !== undefined) {
+                        themeData[k] = response[k];
+                        hasThemeKey = true;
+                    }
+                });
+                if (hasThemeKey) {
+                    applyThemeSettings(themeData, {
+                        persist: true,
+                        syncControls: home || document.getElementById('web_theme_mode') !== null
+                    });
+                }
+            }
 
             if (home) {
                 const practiceToolUrlEl = document.getElementById("practice_tool_url");

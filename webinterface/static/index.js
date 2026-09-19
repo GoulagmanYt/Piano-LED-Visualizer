@@ -70,6 +70,12 @@ function loadAjax(subpage) {
                         get_homepage_data_loop();
                         get_settings(false);
                         break;
+                    case "appearance":
+                        clearInterval(homepage_interval);
+                        if (typeof initializeThemeControls === 'function') {
+                            initializeThemeControls();
+                        }
+                        break;
                     case "ledsettings":
                         populate_colormaps(["velocityrainbow_colormap","rainbow_colormap"]);
                         initialize_led_settings();

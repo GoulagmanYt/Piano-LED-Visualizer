@@ -150,6 +150,20 @@
 	<led_pin>18</led_pin>
 	<led_channel>0</led_channel>
 
+	<web_theme_mode>dark</web_theme_mode>
+	<web_theme_preset>aurora</web_theme_preset>
+	<web_theme_accent>#22d3ee</web_theme_accent>
+	<web_theme_background_color>#334155</web_theme_background_color>
+	<web_theme_surface_color>#cbd5e1</web_theme_surface_color>
+	<web_theme_icon_color>#94a3b8</web_theme_icon_color>
+	<web_theme_badge_color>#0f766e</web_theme_badge_color>
+	<web_theme_badge_text_color>#f8fafc</web_theme_badge_text_color>
+	<web_theme_surface>glass</web_theme_surface>
+	<web_theme_radius>rounded</web_theme_radius>
+	<web_theme_glow>normal</web_theme_glow>
+	<web_theme_contrast>balanced</web_theme_contrast>
+	<web_theme_background>ambient</web_theme_background>
+
     <hotspot_password>visualizer</hotspot_password>
 
     <web_listen_ip></web_listen_ip>

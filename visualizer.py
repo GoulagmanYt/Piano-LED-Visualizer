@@ -69,6 +69,7 @@ class VisualizerApp:
         
         # Initialize state manager first
         self.state_manager = StateManager(self.ci.usersettings)
+        self.ci.midiports.state_manager = self.state_manager
         
         self.gpio_handler = GPIOHandler(self.args, self.ci.midiports, self.ci.menu,
                                         self.ci.ledstrip, self.ci.ledsettings,
@@ -256,6 +257,9 @@ class VisualizerApp:
 
             event_loop_time = loop_start - self.event_loop_stamp
             self.event_loop_stamp = loop_start
+
+            # Sync sustain pedal state between processors
+            self.led_effects_processor.last_sustain = self.midi_event_processor.last_sustain
 
             midiports.refresh_queue_diagnostics(now_perf=loop_start)
             fade_started = time.perf_counter()
