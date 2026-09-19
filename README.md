@@ -37,9 +37,9 @@ The original visualizer was designed primarily for older single-core Pis (Zero 1
 - **Memory Optimization**: Completely zero swap usage, reducing SD card wear. Unloaded unused DRM 3D and HDMI video drivers to free precious RAM.
 
 ### 🛡️ 3. Robust Web Interface & 100% Test Coverage
-- Restored the clean, fast-loading original base web UI (no bloated theme generators or style re-computations).
-- Fully validated with **153 unit tests** running natively on target hardware.
-- Safe, rollback-capable visualizer updates via `reliable_update.py`.
+- **Modernized Backend & Web APIs**: Streamlined endpoints with rock-solid error handling, zero memory leaks, and clean state management.
+- **Fully Validated**: Backed by **153 unit tests** running natively on target hardware.
+- **Safe Self-Healing Updates**: Rollback-capable visualizer updates via `reliable_update.py` with health checks.
 
 ---
 
