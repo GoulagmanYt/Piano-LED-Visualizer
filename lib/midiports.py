@@ -10,6 +10,7 @@ from lib.log_setup import logger
 from lib.midiport_resolver import (
     PortResolutionStatus,
     descriptive_port_name,
+    is_valid_input_port,
     is_valid_output_port,
     pick_default_input_port,
     pick_default_output_port,
