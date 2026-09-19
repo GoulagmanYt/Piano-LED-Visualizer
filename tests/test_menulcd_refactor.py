@@ -114,7 +114,6 @@ class TestMenuLCDRefactor(unittest.TestCase):
         menu = self._create_mock_menu()
         menu.current_location = "Brightness"
         menu.ledstrip.brightness_percent = 0
-        menu.font = MagicMock()
 
         # Calling show() must not raise ZeroDivisionError
         try:
