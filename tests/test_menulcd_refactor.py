@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
 from collections import namedtuple
+import os
 import unittest
 from unittest.mock import MagicMock, patch
+from xml.dom import minidom
+from PIL import ImageFont
 
 from lib.menulcd import MenuLCD
 
@@ -18,7 +21,9 @@ class TestMenuLCDRefactor(unittest.TestCase):
         menu.background_color = (0, 0, 0)
         menu.text_color = "White"
         menu.lcd_ttf = "dummy.ttf"
-        menu._get_font_cached = MagicMock(return_value=MagicMock())
+        default_font = ImageFont.load_default()
+        menu.font = default_font
+        menu._get_font_cached = MagicMock(return_value=default_font)
         menu.rotate_image = lambda img: img
         menu.screensaver_settings = {
             "time": "0",
@@ -54,8 +59,11 @@ class TestMenuLCDRefactor(unittest.TestCase):
         menu._get_menu_title_art = MagicMock(return_value=None)
         menu._font_height = MagicMock(return_value=12)
         menu.screen_on = 1
-        menu.DOMTree = MagicMock()
-        menu.DOMTree.getElementsByTagName.return_value = []
+        menu_path = "config/menu.xml" if os.path.exists("config/menu.xml") else "../config/menu.xml"
+        menu.DOMTree = minidom.parse(menu_path)
+        menu.current_location = "menu"
+        menu.scroll_offset = 0
+        menu.pointer_position = 0
         return menu
 
     def test_screensaver_card_space_none_does_not_crash(self):
