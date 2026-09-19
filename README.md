@@ -31,20 +31,12 @@ The original visualizer was designed primarily for older single-core Pis (Zero 1
 - **Self-Healing USB Ports**: Automatic background detection and reconnect without stalling active playback.
 - **LED Clamp Guards**: Strict array boundary protection preventing index out-of-bounds crashes regardless of strip density or transpose offsets.
 
-### 🌊 2. Iconic Open-Source Animations
-We ditched crude static blocks and harsh flashing lights in favor of celebrated community-tested algorithms:
-- **Startup Animation — *Pacifica Ocean Waves*** *(FastLED by Mark Kriegsman & Mary Corey March)*:
-  A 4-second boot sequence featuring 4 independent sinusoidal layers in deep ocean hues (turquoise, seafoam, aqua, mother-of-pearl) with sparkling whitecap crests where waves intersect, followed by an organic dissolve.
-- **Piano Connection Animation — *Double Meteor Collision & Stardust Burst*** *(Tweaking4All)*:
-  When your piano connects via USB or RTP-MIDI, two incandescent comets (solar gold and diamond blue) shoot inward from A0 and C8, colliding at Middle C in a brilliant flash that scatters a shower of twinkling stardust embers across the keyboard.
-- **Absolute MIDI Priority**: Both animations abort instantly (< 20 ms) if you press a key, so you never wait to play.
-
-### 🌿 3. CPU & Thermal Optimizations
+### 🌿 2. CPU & Thermal Optimizations
 - **Idle Render Loop De-spinning**: Cut background polling wakeups from 500 Hz down to an event-driven 40 Hz watchdog. Python idle CPU dropped from **17.6% down to 5.6%**.
 - **`schedutil` Kernel Governor**: Dynamic frequency scaling aligned with the Linux kernel CFS scheduler.
 - **Memory Optimization**: Completely zero swap usage, reducing SD card wear. Unloaded unused DRM 3D and HDMI video drivers to free precious RAM.
 
-### 🛡️ 4. Robust Web Interface & 100% Test Coverage
+### 🛡️ 3. Robust Web Interface & 100% Test Coverage
 - Restored the clean, fast-loading original base web UI (no bloated theme generators or style re-computations).
 - Fully validated with **153 unit tests** running natively on target hardware.
 - Safe, rollback-capable visualizer updates via `reliable_update.py`.
@@ -124,32 +116,6 @@ This visualizer is tailor-made to pair with [GoulagmanYt/RTP-OSC-Midi-tool](http
 
 > [!CAUTION]
 > **5V Power Warning**: Ensure your power supply is strictly **5V**. Using a 9V or 12V supply will instantly destroy both your LED strip and the Raspberry Pi.
-
----
-
-## 🔌 Wiring Diagram
-
-```
-                 +-----------------------+
-                 | 5V DC Power Supply    |
-                 +-----------+-----------+
-                             |
-                   +---------+---------+
-                   |                   |
-                 +5V                  GND
-                   |                   |
-+------------------+---+     +---------+--------------------+
-| WS2812B LED Strip    |     | Raspberry Pi Zero 2 W        |
-|                      |     |                              |
-| +5V  <---------------+     | Pin 6  (GND) <---------------+
-| GND  <---------------+-----+ Pin 18 (GPIO 18 / PWM0) ----> DIN (Data)
-| DIN  <---------------------+                              |
-+----------------------+     +------------------------------+
-```
-
-- **Data Line**: Connect the strip's `DIN` to **GPIO 18 (Physical Pin 12)** on the Raspberry Pi.
-- **Common Ground**: You **MUST** connect the GND from the power supply, the LED strip, and the Raspberry Pi together.
-- **Power Injection**: Feed 5V directly to the strip's +5V line (never route the high LED current through the Pi board).
 
 ---
 
