@@ -303,7 +303,9 @@ class VisualizerApp:
             if should_update:
                 time.sleep(sleep_interval)
             else:
-                activity.wait(min(0.05, max(0.001, sleep_interval)))
+                # Quiescent idle wait: unblocks immediately (<50us) via activity.set() on MIDI,
+                # or times out after 25ms without spinning CPU cores.
+                activity.wait(0.025)
 
     def update_fps_stats(self):
         now = time.perf_counter()
