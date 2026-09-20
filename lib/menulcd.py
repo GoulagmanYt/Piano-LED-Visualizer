@@ -210,8 +210,7 @@ class MenuLCD:
 
             # Named colors (via webcolors), with simple grey fallback
             try:
-                from webcolors import name_to_rgb
-                rgb = name_to_rgb(low)
+                rgb = wc.name_to_rgb(low)
                 return (rgb.red, rgb.green, rgb.blue)
             except Exception:
                 if low in ("grey", "gray"):
