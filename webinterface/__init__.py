@@ -127,20 +127,30 @@ def start_server(loop):
             app_state.websocket_midi_clients.discard(websocket)
             logger.info(f"WebSocket MIDI client disconnected. Active clients: {len(app_state.websocket_midi_clients)}")
 
+    def is_connection_closed(ws):
+        if hasattr(ws, "closed"):
+            return ws.closed
+        state = getattr(ws, "state", None)
+        if state is not None:
+            return state.name in ("CLOSED", "CLOSING")
+        return False
+
     async def ledemu_recv(websocket):
         async for message in websocket:
             try:
-                msg = json.loads(message)
-                if msg["cmd"] == "pause":
+                if isinstance(message, str):
+                    msg = json.loads(message)
+                else:
+                    msg = {}
+                cmd = msg.get("cmd") if isinstance(msg, dict) else None
+                if cmd == "pause":
                     app_state.ledemu_pause = True
-                elif msg["cmd"] == "resume":
+                elif cmd == "resume":
                     app_state.ledemu_pause = False
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            except websockets.exceptions.WebSocketException:
-                pass
+            except (websockets.exceptions.ConnectionClosed, websockets.exceptions.WebSocketException):
+                break
             except Exception as e:
-                logger.warning(e)
+                logger.warning(f"LED emulator receive error: {e}")
                 return
 
     async def ledemu(websocket):
@@ -153,7 +163,7 @@ def start_server(loop):
                                                   "reverse": app_state.ledstrip.reverse}}))
 
             previous_leds = None
-            while not websocket.closed and websocket in app_state.ledemu_clients:  # Check both conditions
+            while not is_connection_closed(websocket) and websocket in app_state.ledemu_clients:  # Check both conditions
                 try:
                     ledstrip = app_state.ledstrip
                     await asyncio.sleep(1 / ledstrip.WEBEMU_FPS)
@@ -162,7 +172,7 @@ def start_server(loop):
                         continue
 
                     # Check connection is still open before sending
-                    if websocket.closed:
+                    if is_connection_closed(websocket):
                         break
 
                     current_leds = ledstrip.strip.getPixels()
