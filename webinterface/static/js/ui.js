@@ -1865,6 +1865,11 @@ function set_step_properties(sequence, step) {
     xhttp.send();
 }
 
+function clean_port_key(port) {
+    if (!port) return "";
+    return port.toString().replace(/\s+\d+:\d+$/, '').replace(/\s+\(\d+\)$/, '').trim().toLowerCase();
+}
+
 function get_ports() {
     const xhttp = new XMLHttpRequest();
     xhttp.timeout = 5000;
@@ -1872,21 +1877,28 @@ function get_ports() {
         if (this.readyState === 4 && this.status === 200) {
             let response = JSON.parse(this.responseText);
             
-            // Update old dropdowns if they exist
-            if (document.getElementById('active_input') != null) {
-                const active_input_select = document.getElementById('active_input');
-                const secondary_input_select = document.getElementById('secondary_input');
-                const playback_select = document.getElementById('playback_input');
-                const length = active_input_select.options.length;
-                for (let i = length - 1; i >= 0; i--) {
-                    active_input_select.options[i] = null;
-                    secondary_input_select.options[i] = null;
-                    playback_select.options[i] = null;
-                }
+            // Update dropdowns if they exist
+            const active_input_select = document.getElementById('active_input');
+            const secondary_input_select = document.getElementById('secondary_input');
+            const playback_select = document.getElementById('playback_input');
+
+            if (active_input_select && secondary_input_select && playback_select) {
+                // Clear each dropdown completely to avoid duplicates/accumulation
+                active_input_select.innerHTML = "";
+                secondary_input_select.innerHTML = "";
+                playback_select.innerHTML = "";
+
                 const inputPorts = response["input_ports"] || response["ports_list"] || [];
                 const outputPorts = response["output_ports"] || [];
 
-                inputPorts.forEach(function (item, index) {
+                // Deduplicate and populate input ports
+                const seenInputs = new Set();
+                inputPorts.forEach(function (item) {
+                    if (!item) return;
+                    const key = clean_port_key(item);
+                    if (seenInputs.has(key)) return;
+                    seenInputs.add(key);
+
                     const opt = document.createElement('option');
                     const opt2 = document.createElement('option');
                     opt.appendChild(document.createTextNode(item));
@@ -1896,24 +1908,77 @@ function get_ports() {
                     active_input_select.appendChild(opt);
                     secondary_input_select.appendChild(opt2);
                 });
+
+                // Deduplicate and populate playback ports
+                const seenOutputs = new Set();
                 const noneOpt = document.createElement('option');
                 noneOpt.appendChild(document.createTextNode("None (Disabled)"));
                 noneOpt.value = "None";
                 playback_select.appendChild(noneOpt);
+                seenOutputs.add("none");
 
-                outputPorts.forEach(function (item, index) {
+                outputPorts.forEach(function (item) {
+                    if (!item) return;
+                    const key = clean_port_key(item);
+                    if (seenOutputs.has(key)) return;
+                    seenOutputs.add(key);
+
                     const opt3 = document.createElement('option');
                     opt3.appendChild(document.createTextNode(item));
                     opt3.value = item;
                     playback_select.appendChild(opt3);
                 });
-                active_input_select.value = response["input_port"];
-                secondary_input_select.value = response["secondary_input_port"];
+
+                // Set active input selection
+                const cfgInput = response["input_port"];
+                if (cfgInput) {
+                    const match = Array.from(active_input_select.options).find(o => clean_port_key(o.value) === clean_port_key(cfgInput));
+                    if (match) {
+                        active_input_select.value = match.value;
+                    } else {
+                        const opt = document.createElement('option');
+                        opt.value = cfgInput;
+                        opt.textContent = cfgInput + " (Disconnected)";
+                        active_input_select.appendChild(opt);
+                        active_input_select.value = cfgInput;
+                    }
+                }
+
+                // Set secondary input selection
+                const cfgSec = response["secondary_input_port"];
+                if (cfgSec && cfgSec !== "default") {
+                    const match = Array.from(secondary_input_select.options).find(o => clean_port_key(o.value) === clean_port_key(cfgSec));
+                    if (match) {
+                        secondary_input_select.value = match.value;
+                    } else {
+                        const opt = document.createElement('option');
+                        opt.value = cfgSec;
+                        opt.textContent = cfgSec + " (Disconnected)";
+                        secondary_input_select.appendChild(opt);
+                        secondary_input_select.value = cfgSec;
+                    }
+                } else {
+                    secondary_input_select.value = cfgSec || "";
+                }
+
+                // Set playback selection
                 const configuredPlay = response["play_port"];
                 if (!configuredPlay || configuredPlay.toLowerCase() === "none" || configuredPlay.toLowerCase() === "disabled") {
                     playback_select.value = "None";
                 } else {
-                    playback_select.value = response["actual_play_port"] || response["play_port"];
+                    const targetPlay = response["actual_play_port"] || configuredPlay;
+                    const match = Array.from(playback_select.options).find(o => 
+                        o.value !== "None" && clean_port_key(o.value) === clean_port_key(targetPlay)
+                    );
+                    if (match) {
+                        playback_select.value = match.value;
+                    } else {
+                        const opt = document.createElement('option');
+                        opt.value = targetPlay;
+                        opt.textContent = targetPlay + " (Offline)";
+                        playback_select.appendChild(opt);
+                        playback_select.value = targetPlay;
+                    }
                 }
             }
             
@@ -1969,10 +2034,19 @@ function load_rtpmidi_peers(preferredTarget) {
             noneOpt.textContent = "None (Disabled)";
             select.appendChild(noneOpt);
 
+            const seenPeers = new Set();
+            seenPeers.add("none");
+
             const discovered = data.discovered_peers || [];
             discovered.forEach(peer => {
+                const val = peer.name || peer.hostname;
+                if (!val) return;
+                const key = val.toLowerCase();
+                if (seenPeers.has(key)) return;
+                seenPeers.add(key);
+
                 const opt = document.createElement('option');
-                opt.value = peer.name || peer.hostname;
+                opt.value = val;
                 opt.textContent = `${peer.name} (${peer.hostname}:${peer.port})`;
                 select.appendChild(opt);
             });
