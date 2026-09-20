@@ -467,8 +467,12 @@ def screensaver(menu, midiports, saving, ledstrip, ledsettings, state_manager=No
             if len(midiports.midi_queue) != 0 or (state_manager and state_manager.is_active_use()):
                 menu.screensaver_is_running = False
                 saving.start_time = time.perf_counter()
-                menu.screen_status = 1
-                GPIO.output(24, 1)
+                was_off = (getattr(menu, 'screen_status', 1) == 0)
+                if hasattr(menu, "wake_screen"):
+                    menu.wake_screen(reinit_registers=was_off)
+                else:
+                    menu.screen_status = 1
+                    GPIO.output(24, 1)
                 midiports.ensure_ports_ready()
                 midiports.last_activity = time.time()
                 menu.show()
@@ -478,8 +482,12 @@ def screensaver(menu, midiports, saving, ledstrip, ledsettings, state_manager=No
         if GPIO.input(KEY2) == 0:
             menu.screensaver_is_running = False
             saving.start_time = time.perf_counter()
-            menu.screen_status = 1
-            GPIO.output(24, 1)
+            was_off = (getattr(menu, 'screen_status', 1) == 0)
+            if hasattr(menu, "wake_screen"):
+                menu.wake_screen(reinit_registers=was_off)
+            else:
+                menu.screen_status = 1
+                GPIO.output(24, 1)
             midiports.ensure_ports_ready()
             menu.show()
             break

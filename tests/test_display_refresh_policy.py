@@ -37,6 +37,18 @@ class TestDisplayRefreshPolicy(unittest.TestCase):
         self.assertTrue(first)
         self.assertTrue(second)
 
+    def test_reset_static_menu_enables_refresh(self):
+        policy = DisplayRefreshPolicy()
+
+        first = policy.should_show_static_menu(elapsed_time=20, hold_time=16, scroll_needed=False, should_refresh=True)
+        second = policy.should_show_static_menu(elapsed_time=20, hold_time=16, scroll_needed=False, should_refresh=True)
+        self.assertTrue(first)
+        self.assertFalse(second)
+
+        policy.reset_static_menu()
+        third = policy.should_show_static_menu(elapsed_time=20, hold_time=16, scroll_needed=False, should_refresh=True)
+        self.assertTrue(third)
+
 
 if __name__ == "__main__":
     unittest.main()

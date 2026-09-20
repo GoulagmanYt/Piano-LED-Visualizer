@@ -555,14 +555,42 @@ class MenuLCD:
         return int(round(size * self.LCD.font_scale))
 
     def disable_screen(self):
-        GPIO.output(24, 0)
+        try:
+            GPIO.output(24, 0)
+        except Exception as e:
+            logger.debug(f"Error disabling backlight: {e}")
         self.screen_on = 0
+        self.screen_status = 0
         self.usersettings.change_setting_value("screen_on", 0)
 
     def enable_screen(self):
-        GPIO.output(24, 1)
         self.screen_on = 1
+        self.screen_status = 1
         self.usersettings.change_setting_value("screen_on", 1)
+        self.wake_screen(reinit_registers=True)
+        self.show()
+
+    def wake_screen(self, reinit_registers=False):
+        """
+        Safely wake and recover the LCD hardware from sleep or glitch states.
+        Re-asserts backlight (GPIO 24) and ST7735 display-on registers.
+        """
+        try:
+            GPIO.output(24, 1)
+            self.screen_status = 1
+
+            if hasattr(self, "LCD") and self.LCD is not None:
+                if reinit_registers:
+                    # Full hardware reset & register re-initialization
+                    self.LCD.LCD_Init()
+                else:
+                    # Gentle wake-up commands: Sleep Out (0x11) and Display ON (0x29)
+                    if hasattr(self.LCD, "LCD_WriteReg"):
+                        self.LCD.LCD_WriteReg(0x11)  # Sleep Out
+                        time.sleep(0.01)
+                        self.LCD.LCD_WriteReg(0x29)  # Display ON
+        except Exception as e:
+            logger.warning(f"Error waking LCD screen: {e}")
 
     def _draw_rounded_rect(self, xy, radius, fill=None, outline=None, width=1):
         """Draw an anti-aliased rounded rectangle (fill + optional outline)."""

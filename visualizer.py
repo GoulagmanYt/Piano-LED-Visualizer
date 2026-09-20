@@ -116,6 +116,8 @@ class VisualizerApp:
         self.ledshow_timestamp = time.time()
         self._last_menu_tick = 0.0
         self.display_refresh_policy = DisplayRefreshPolicy()
+        self._last_lcd_keepalive = time.time()
+        self._screensaver_was_running = False
 
     def _instrument_strip_show(self):
         strip = self.ci.ledstrip.strip
@@ -218,6 +220,12 @@ class VisualizerApp:
                 self.check_settings_changes(ci.usersettings, now)
                 ci.platform.manage_hotspot(ci.hotspot, ci.usersettings, ci.midiports, False, now)
                 self.gpio_handler.process_gpio_keys()
+                # Watchdog keepalive for LCD display: re-affirm display state every 300 seconds
+                if now - self._last_lcd_keepalive > 300.0:
+                    self._last_lcd_keepalive = now
+                    if getattr(ci.menu, "screen_on", 1) == 1 and not getattr(ci.menu, "screensaver_is_running", False):
+                        if hasattr(ci.menu, "wake_screen"):
+                            ci.menu.wake_screen(reinit_registers=False)
             except Exception:
                 logger.exception("Housekeeping failed")
             self.stop_event.wait(0.1 if getattr(self, 'state_manager', None) and self.state_manager.is_active_use() else 0.05)
@@ -329,13 +337,28 @@ class VisualizerApp:
 
     def check_screensaver(self, midiports, menu, current_time=None):
         ci = self.ci
-        
+
+        was_running = getattr(self, "_screensaver_was_running", False)
+        is_running = getattr(menu, "screensaver_is_running", False)
+
         # Stop screensaver during active use
-        if self.state_manager.is_active_use() and menu.screensaver_is_running:
+        if self.state_manager.is_active_use() and is_running:
             menu.screensaver_is_running = False
+            is_running = False
+            was_off = (getattr(menu, "screen_status", 1) == 0)
+            if hasattr(menu, "wake_screen"):
+                menu.wake_screen(reinit_registers=was_off)
+            self.display_refresh_policy.reset_static_menu()
             menu.show()
+            self._screensaver_was_running = False
             return
-        
+
+        # If screensaver stopped from within its thread (e.g. KEY2 or MIDI queue)
+        if was_running and not is_running:
+            self.display_refresh_policy.reset_static_menu()
+
+        self._screensaver_was_running = is_running
+
         # Check if screensaver should start using state manager
         if self.state_manager.should_run_screensaver(menu):
             if self._screensaver_thread is None or not self._screensaver_thread.is_alive():
