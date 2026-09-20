@@ -13,8 +13,14 @@ from lib.midiport_resolver import (
     filter_valid_input_ports,
     filter_valid_output_ports,
     is_fake_rtp_port,
+    is_port_disabled,
 )
-from lib.rtpmidi_diagnostics import get_rtpmidid_network_diagnostics
+from lib.rtpmidi_diagnostics import (
+    get_rtpmidid_network_diagnostics,
+    get_rtpmidi_peers,
+    connect_rtpmidi_peer,
+    disconnect_rtpmidi_peer,
+)
 import lib.colormaps as cmap
 import psutil
 import threading
@@ -2311,6 +2317,44 @@ def get_ports():
     return jsonify(response)
 
 
+@webinterface.route('/api/rtpmidi_peers', methods=['GET'])
+def api_rtpmidi_peers():
+    peers = get_rtpmidi_peers()
+    return jsonify(peers)
+
+
+@webinterface.route('/api/rtpmidi_connect', methods=['POST', 'GET'])
+def api_rtpmidi_connect():
+    payload = request.get_json(silent=True) or {}
+    hostname = payload.get("hostname") or request.values.get("hostname")
+    port = payload.get("port") or request.values.get("port", 5004)
+    name = payload.get("name") or request.values.get("name")
+    result = connect_rtpmidi_peer(hostname, port, name)
+    if result.get("success"):
+        if hostname and app_state.usersettings:
+            app_state.usersettings.change_setting_value("reliable_midi_host", str(hostname))
+            if port:
+                try:
+                    app_state.usersettings.change_setting_value("reliable_midi_port", str(port))
+                except Exception:
+                    pass
+        if app_state.midiports:
+            app_state.midiports.reconnect_ports(force=True)
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
+@webinterface.route('/api/rtpmidi_disconnect', methods=['POST', 'GET'])
+def api_rtpmidi_disconnect():
+    payload = request.get_json(silent=True) or {}
+    peer_id = payload.get("peer_id") if payload.get("peer_id") is not None else request.values.get("peer_id")
+    result = disconnect_rtpmidi_peer(peer_id)
+    if result.get("success") and app_state.midiports:
+        app_state.midiports.reconnect_ports(force=True)
+    status_code = 200 if result.get("success") else 400
+    return jsonify(result), status_code
+
+
 @webinterface.route('/api/get_runtime_diagnostics', methods=['GET'])
 def get_runtime_diagnostics():
     rtp_diagnostics = app_state.midiports.get_rtp_diagnostics() if app_state.midiports else {}
@@ -2528,7 +2572,7 @@ def configured_ports_missing_from_available(available_ports, *configured_ports):
     ports = set(available_ports or [])
     missing = []
     for configured_port in configured_ports:
-        if not configured_port or configured_port == "default":
+        if not configured_port or configured_port == "default" or is_port_disabled(configured_port):
             continue
         if configured_port not in ports and configured_port not in missing:
             missing.append(configured_port)

@@ -22,6 +22,14 @@ class PortResolutionStatus(str, Enum):
     RESOLVED_COMPATIBLE = "resolved_compatible"
     AUTO_SELECTED = "auto_selected"
     UNAVAILABLE = "unavailable"
+    DISABLED = "disabled"
+
+
+def is_port_disabled(port_name: str | None) -> bool:
+    if not port_name:
+        return False
+    lowered = str(port_name).strip().lower()
+    return lowered in ("none", "disabled", "off", "aucun", "désactivé", "desactive")
 
 
 @dataclass(frozen=True)
@@ -194,6 +202,14 @@ def _resolve_port(
     exclude_fake_rtp: bool,
     available_inputs: list[str] | None = None,
 ) -> PortResolution:
+    if is_port_disabled(requested_port):
+        return PortResolution(
+            requested_port=requested_port,
+            selected_port=None,
+            status=PortResolutionStatus.DISABLED,
+            reason="Port explicitly disabled",
+        )
+
     if not requested_port or requested_port == "default":
         return PortResolution(
             requested_port=requested_port,

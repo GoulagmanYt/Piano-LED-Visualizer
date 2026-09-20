@@ -10,6 +10,7 @@ from lib.log_setup import logger
 from lib.midiport_resolver import (
     PortResolutionStatus,
     descriptive_port_name,
+    is_port_disabled,
     is_valid_input_port,
     is_valid_output_port,
     pick_default_input_port,
@@ -631,12 +632,26 @@ class MidiPorts:
         }
 
     def _resolve_output_target(self, requested_port, available_outputs, available_inputs=None):
+        if is_port_disabled(requested_port):
+            self.last_resolved_play_port = None
+            self.last_resolution_reason["play"] = "Playback port disabled by configuration"
+            return {
+                "selected_port": None,
+                "status": PortResolutionStatus.DISABLED,
+                "reason": self.last_resolution_reason["play"],
+            }
+
         if requested_port and requested_port != "default":
             resolution = resolve_output_port(
                 requested_port,
                 available_outputs,
                 available_inputs=available_inputs,
             )
+            if resolution.status == PortResolutionStatus.DISABLED:
+                self.last_resolved_play_port = None
+                self.last_resolution_reason["play"] = resolution.reason
+                return resolution
+
             if resolution.selected_port:
                 self.last_resolved_play_port = resolution.selected_port
                 self.last_resolution_reason["play"] = resolution.reason
@@ -827,7 +842,7 @@ class MidiPorts:
         try:
             self.playport = mido.open_output(selected_port)
             self.actual_play_port = selected_port
-            if requested_port != selected_port:
+            if requested_port != selected_port and not is_port_disabled(requested_port):
                 self.usersettings.change_setting_value("play_port", selected_port)
             logger.info("Play port active: %s", selected_port)
         except Exception as e:
@@ -887,7 +902,7 @@ class MidiPorts:
             elif port == "playport":
                 self.usersettings.change_setting_value("play_port", portname)
                 self._reconnect_output(force=True)
-                if self.actual_play_port is None:
+                if self.actual_play_port is None and not is_port_disabled(portname):
                     raise RuntimeError(f"Unable to activate play port '{portname}'")
             self.menu.render_message("Changing " + port + " to:", portname, 1500)
             self.menu.show()

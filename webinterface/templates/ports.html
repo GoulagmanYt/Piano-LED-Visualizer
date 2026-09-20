@@ -95,8 +95,87 @@
                 </div>
             </div>
         </div>
-        </div>
     </div>
+
+    <!-- RTP MIDI Network Sessions Card -->
+    <div class="glass shadow-glass-lg rounded-glass intro-y transition-smooth m-1 mb-6 p-4 md:p-5">
+        <div class="w-full flex items-center mb-4">
+            <div class="flex items-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.14 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+                </svg>
+                <span class="font-semibold text-sm" data-translate="rtpmidi_sessions">RTP MIDI Network Sessions</span>
+            </div>
+            <div class="ml-auto flex items-center space-x-2">
+                <span id="rtp_daemon_badge" class="text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">rtpmidid active</span>
+                <button onclick="load_rtpmidi_peers()" 
+                        class="h-8 outline-none glass-light hover:glass font-medium text-xs py-1 px-3 rounded-glass transition-smooth-fast inline-flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5 mr-1">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"></path>
+                    </svg>
+                    <span data-translate="scan_peers">Scan</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <!-- Discovered Sessions on LAN -->
+            <div class="glass-light rounded-glass p-3">
+                <label class="block text-xs font-semibold mb-2 text-gray-600 dark:text-gray-300" data-translate="discovered_rtp_sessions">
+                    Discovered Network Sessions (mDNS)
+                </label>
+                <div class="flex gap-2">
+                    <div class="relative flex-1">
+                        <select id="rtp_discovered_select" class="h-10 block appearance-none w-full glass-light py-2 px-3 pr-8 rounded-glass text-xs leading-tight transition-smooth-fast">
+                            <option value="">Scanning network...</option>
+                        </select>
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700 dark:text-gray-200">
+                            <svg class="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                                <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                            </svg>
+                        </div>
+                    </div>
+                    <button id="rtp_connect_discovered_btn" onclick="connect_selected_discovered_rtp()"
+                            class="h-10 outline-none bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-4 rounded-glass transition-smooth-fast whitespace-nowrap">
+                        <span data-translate="connect">Connect</span>
+                    </button>
+                </div>
+                <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-2" data-translate="rtp_discovered_hint">
+                    Select any discovered peer (like OSCMidi or DAW) to connect without typing host/port.
+                </p>
+            </div>
+
+            <!-- Manual Custom RTP Connection -->
+            <div class="glass-light rounded-glass p-3">
+                <label class="block text-xs font-semibold mb-2 text-gray-600 dark:text-gray-300" data-translate="manual_rtp_connection">
+                    Manual Connection (Host & Port)
+                </label>
+                <div class="grid grid-cols-12 gap-2">
+                    <input id="rtp_manual_host" type="text" placeholder="IP / Hostname (ex: 192.168.1.50)"
+                           class="col-span-6 h-10 px-3 glass-light rounded-glass text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <input id="rtp_manual_port" type="number" value="5004" placeholder="Port"
+                           class="col-span-3 h-10 px-2 glass-light rounded-glass text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <button id="rtp_connect_manual_btn" onclick="connect_manual_rtp()"
+                            class="col-span-3 h-10 outline-none bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-2 rounded-glass transition-smooth-fast whitespace-nowrap">
+                        <span data-translate="connect">Connect</span>
+                    </button>
+                </div>
+                <div class="mt-2">
+                    <input id="rtp_manual_name" type="text" placeholder="Session Name (optional, ex: MyDAW)"
+                           class="w-full h-8 px-3 glass-light rounded-glass text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
+            </div>
+        </div>
+
+        <!-- Active RTP Connections Table -->
+        <div>
+            <div class="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2" data-translate="connected_rtp_peers">
+                Active Connected RTP Sessions
+            </div>
+            <div id="rtp_connected_list" class="space-y-2">
+                <div class="text-xs text-gray-500 p-2 text-center glass-light rounded-glass">No active RTP session connected</div>
+            </div>
+        </div>
     </div>
 
     <!-- Unified Ports and Connections Section -->

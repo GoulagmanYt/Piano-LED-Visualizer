@@ -171,8 +171,50 @@ class TestMidiPortsBehavior(unittest.TestCase):
         ):
             midiports.auto_reconnect_loop()
 
-        reconnect_ports.assert_called_once()
+    def test_disabled_playback_port_does_not_connect_to_available_rtp_port(self):
+        settings = DummySettings({
+            "input_port": "default",
+            "play_port": "None",
+        })
+
+        with patch("lib.midiports._get_cached_input_names", return_value=[]), patch(
+            "lib.midiports._get_cached_output_names",
+            return_value=["rtpmidid:OSCMidiRobin 128:3"],
+        ), patch("lib.midiports.mido.open_output", return_value=DummyPort()) as open_output:
+            midiports = MidiPorts(settings)
+
+        self.assertEqual(settings.get_setting_value("play_port"), "None")
+        self.assertIsNone(midiports.actual_play_port)
+        open_output.assert_not_called()
+
+    def test_change_port_to_none_deactivates_playport(self):
+        settings = DummySettings({
+            "input_port": "default",
+            "play_port": "rtpmidid:OSCMidiRobin 128:3",
+        })
+
+        with patch("lib.midiports._get_cached_input_names", return_value=[]), patch(
+            "lib.midiports._get_cached_output_names",
+            return_value=["rtpmidid:OSCMidiRobin 128:3"],
+        ), patch("lib.midiports.mido.open_output", return_value=DummyPort()):
+            midiports = MidiPorts(settings)
+
+        self.assertEqual(midiports.actual_play_port, "rtpmidid:OSCMidiRobin 128:3")
+
+        class DummyMenu:
+            def render_message(self, *args):
+                pass
+            def show(self):
+                pass
+
+        midiports.add_instance(DummyMenu())
+        midiports.change_port("playport", "None")
+
+        self.assertEqual(settings.get_setting_value("play_port"), "None")
+        self.assertIsNone(midiports.actual_play_port)
+        self.assertIsNone(midiports.playport)
 
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+

@@ -1896,6 +1896,11 @@ function get_ports() {
                     active_input_select.appendChild(opt);
                     secondary_input_select.appendChild(opt2);
                 });
+                const noneOpt = document.createElement('option');
+                noneOpt.appendChild(document.createTextNode("None (Disabled)"));
+                noneOpt.value = "None";
+                playback_select.appendChild(noneOpt);
+
                 outputPorts.forEach(function (item, index) {
                     const opt3 = document.createElement('option');
                     opt3.appendChild(document.createTextNode(item));
@@ -1904,7 +1909,12 @@ function get_ports() {
                 });
                 active_input_select.value = response["input_port"];
                 secondary_input_select.value = response["secondary_input_port"];
-                playback_select.value = response["actual_play_port"] || response["play_port"];
+                const configuredPlay = response["play_port"];
+                if (!configuredPlay || configuredPlay.toLowerCase() === "none" || configuredPlay.toLowerCase() === "disabled") {
+                    playback_select.value = "None";
+                } else {
+                    playback_select.value = response["actual_play_port"] || response["play_port"];
+                }
             }
             
             // Update raw textarea
@@ -1918,10 +1928,177 @@ function get_ports() {
             
             const checkbox = document.getElementById("midi_events_checkbox");
             if (checkbox) checkbox.checked = String(response["midi_logging"]) === "1";
+
+            if (document.getElementById('rtp_discovered_select') != null) {
+                load_rtpmidi_peers();
+            }
         }
     };
     xhttp.open("GET", "/api/get_ports", true);
     xhttp.send();
+}
+
+function load_rtpmidi_peers() {
+    const discoveredSelect = document.getElementById('rtp_discovered_select');
+    const connectedList = document.getElementById('rtp_connected_list');
+    const badge = document.getElementById('rtp_daemon_badge');
+    if (!discoveredSelect && !connectedList) return;
+
+    fetch('/api/rtpmidi_peers', { cache: 'no-store' })
+        .then(response => response.json())
+        .then(data => {
+            if (badge) {
+                if (data.daemon_running) {
+                    badge.className = "text-xs px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 font-medium";
+                    badge.textContent = "rtpmidid active";
+                } else {
+                    badge.className = "text-xs px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 font-medium";
+                    badge.textContent = "rtpmidid stopped";
+                }
+            }
+
+            if (discoveredSelect) {
+                discoveredSelect.innerHTML = "";
+                const discovered = data.discovered_peers || [];
+                if (discovered.length === 0) {
+                    const opt = document.createElement('option');
+                    opt.value = "";
+                    opt.textContent = "No session discovered on LAN";
+                    discoveredSelect.appendChild(opt);
+                } else {
+                    discovered.forEach(peer => {
+                        const opt = document.createElement('option');
+                        opt.value = JSON.stringify({ hostname: peer.hostname, port: peer.port, name: peer.name });
+                        opt.textContent = `${peer.name} (${peer.hostname}:${peer.port})`;
+                        discoveredSelect.appendChild(opt);
+                    });
+                }
+            }
+
+            if (connectedList) {
+                connectedList.innerHTML = "";
+                const connected = data.connected_peers || [];
+                if (connected.length === 0) {
+                    connectedList.innerHTML = '<div class="text-xs text-gray-500 p-3 text-center glass-light rounded-glass">No active RTP session connected</div>';
+                } else {
+                    connected.forEach(peer => {
+                        const row = document.createElement('div');
+                        row.className = "flex items-center justify-between p-2.5 glass-light rounded-glass text-xs";
+                        const latencyStr = (peer.latency_ms !== null && peer.latency_ms !== undefined) ? ` (${Number(peer.latency_ms).toFixed(1)} ms)` : '';
+                        row.innerHTML = `
+                            <div class="flex items-center space-x-2">
+                                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                                <div>
+                                    <span class="font-semibold text-gray-800 dark:text-gray-200">${peer.name}</span>
+                                    <span class="text-gray-500 text-[11px] ml-1">${peer.hostname}:${peer.port}${latencyStr}</span>
+                                </div>
+                            </div>
+                            <button onclick="disconnect_rtpmidi(${peer.id})"
+                                    class="px-2.5 py-1 text-[11px] font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-glass transition-smooth-fast">
+                                Disconnect
+                            </button>
+                        `;
+                        connectedList.appendChild(row);
+                    });
+                }
+            }
+        })
+        .catch(err => {
+            console.warn("Failed to fetch RTP MIDI peers:", err);
+        });
+}
+
+function connect_selected_discovered_rtp() {
+    const select = document.getElementById('rtp_discovered_select');
+    if (!select || !select.value) {
+        showAlert("Select a discovered peer first", "warning");
+        return;
+    }
+    let peerInfo;
+    try {
+        peerInfo = JSON.parse(select.value);
+    } catch(e) {
+        return;
+    }
+    const btn = document.getElementById('rtp_connect_discovered_btn');
+    if (btn) btn.disabled = true;
+
+    const params = new URLSearchParams({
+        hostname: peerInfo.hostname,
+        port: peerInfo.port || 5004,
+        name: peerInfo.name || ''
+    });
+    fetch('/api/rtpmidi_connect?' + params.toString(), { method: 'POST', cache: 'no-store' })
+        .then(response => response.json())
+        .then(res => {
+            if (btn) btn.disabled = false;
+            if (res.success) {
+                showAlert(`Connected to RTP peer ${peerInfo.name}`, "success");
+                load_rtpmidi_peers();
+                get_ports();
+            } else {
+                showAlert(res.error || "Failed to connect RTP peer", "error");
+            }
+        })
+        .catch(err => {
+            if (btn) btn.disabled = false;
+            showAlert("Connection request failed: " + err, "error");
+        });
+}
+
+function connect_manual_rtp() {
+    const hostInput = document.getElementById('rtp_manual_host');
+    const portInput = document.getElementById('rtp_manual_port');
+    const nameInput = document.getElementById('rtp_manual_name');
+    const host = hostInput ? hostInput.value.trim() : '';
+    const port = portInput ? portInput.value.trim() || '5004' : '5004';
+    const name = nameInput ? nameInput.value.trim() : '';
+
+    if (!host) {
+        showAlert("Enter an IP address or hostname", "warning");
+        return;
+    }
+    const btn = document.getElementById('rtp_connect_manual_btn');
+    if (btn) btn.disabled = true;
+
+    const params = new URLSearchParams({ hostname: host, port: port, name: name });
+    fetch('/api/rtpmidi_connect?' + params.toString(), { method: 'POST', cache: 'no-store' })
+        .then(response => response.json())
+        .then(res => {
+            if (btn) btn.disabled = false;
+            if (res.success) {
+                showAlert(`Connected to RTP peer ${host}:${port}`, "success");
+                if (hostInput) hostInput.value = '';
+                if (nameInput) nameInput.value = '';
+                load_rtpmidi_peers();
+                get_ports();
+            } else {
+                showAlert(res.error || "Failed to connect RTP peer", "error");
+            }
+        })
+        .catch(err => {
+            if (btn) btn.disabled = false;
+            showAlert("Connection request failed: " + err, "error");
+        });
+}
+
+function disconnect_rtpmidi(peerId) {
+    if (peerId === undefined || peerId === null) return;
+    const params = new URLSearchParams({ peer_id: peerId });
+    fetch('/api/rtpmidi_disconnect?' + params.toString(), { method: 'POST', cache: 'no-store' })
+        .then(response => response.json())
+        .then(res => {
+            if (res.success) {
+                showAlert("Disconnected RTP peer", "success");
+                load_rtpmidi_peers();
+                get_ports();
+            } else {
+                showAlert(res.error || "Failed to disconnect RTP peer", "error");
+            }
+        })
+        .catch(err => {
+            showAlert("Disconnect request failed: " + err, "error");
+        });
 }
 
 function get_logs() {

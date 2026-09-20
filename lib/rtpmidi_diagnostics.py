@@ -150,3 +150,153 @@ def get_rtpmidid_network_diagnostics(play_port, *, timeout=1.5):
         return parse_rtpmidid_status(parse_rtpmidid_cli_output(output), play_port=play_port)
     except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError) as exc:
         return _default_diagnostics(f"Unable to read rtpmidid status: {exc}")
+
+
+def get_rtpmidi_peers(*, timeout=2.0):
+    """Query rtpmidid for discovered and connected RTP MIDI peers."""
+    try:
+        output = subprocess.check_output(
+            ["rtpmidid-cli", "status"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+        )
+        payload = parse_rtpmidid_cli_output(output)
+        result = _extract_result(payload)
+        
+        # Discovered peers via mDNS/Avahi
+        mdns = result.get("mdns") or {}
+        remote_announcements = mdns.get("remote_announcements", []) or []
+        discovered = []
+        for announcement in remote_announcements:
+            if isinstance(announcement, dict):
+                discovered.append({
+                    "name": announcement.get("name") or "Unknown",
+                    "hostname": announcement.get("hostname") or "",
+                    "port": int(announcement.get("port") or 5004),
+                })
+
+        # Connected or configured router peers
+        router = result.get("router") or []
+        connected = []
+        seen_ids = set()
+
+        for peer in router:
+            if not isinstance(peer, dict):
+                continue
+            peer_type = peer.get("type")
+            peer_id = peer.get("id")
+
+            if peer_type == "network_rtpmidi_client_t":
+                peer_info = peer.get("peer") or {}
+                remote = peer_info.get("remote") or {}
+                latency = peer_info.get("latency_ms") or {}
+                connected.append({
+                    "id": peer_id,
+                    "name": peer.get("name") or remote.get("name") or "Unnamed",
+                    "hostname": remote.get("hostname") or "",
+                    "port": int(remote.get("port") or 5004),
+                    "status": str(peer_info.get("status", "connected")),
+                    "latency_ms": latency.get("average"),
+                })
+                if peer_id is not None:
+                    seen_ids.add(peer_id)
+
+            elif peer_type == "local_alsa_listener_t" and peer.get("endpoints"):
+                # Outgoing configured session / waiting session
+                for ep in peer.get("endpoints", []):
+                    if isinstance(ep, dict):
+                        raw_name = (peer.get("name") or "Remote Peer").replace("[WATING]", "").replace("<->", "").strip()
+                        connected.append({
+                            "id": peer_id,
+                            "name": raw_name or "Remote Peer",
+                            "hostname": ep.get("hostname") or "",
+                            "port": int(ep.get("port") or 5004),
+                            "status": str(peer.get("status", "WAITING")),
+                            "latency_ms": None,
+                        })
+                        if peer_id is not None:
+                            seen_ids.add(peer_id)
+
+            # Check for incoming connected peers on listeners
+            for inc in peer.get("peers", []):
+                if isinstance(inc, dict):
+                    inc_id = inc.get("id") or peer_id
+                    if inc_id in seen_ids:
+                        continue
+                    remote = inc.get("remote") or {}
+                    latency = inc.get("latency_ms") or {}
+                    connected.append({
+                        "id": inc_id,
+                        "name": inc.get("name") or remote.get("name") or peer.get("name") or "Incoming Peer",
+                        "hostname": remote.get("hostname") or "",
+                        "port": int(remote.get("port") or 5004),
+                        "status": str(inc.get("status", "connected")),
+                        "latency_ms": latency.get("average"),
+                    })
+                    if inc_id is not None:
+                        seen_ids.add(inc_id)
+
+        return {
+            "success": True,
+            "daemon_running": True,
+            "discovered_peers": discovered,
+            "connected_peers": connected,
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "daemon_running": False,
+            "error": str(exc),
+            "discovered_peers": [],
+            "connected_peers": [],
+        }
+
+
+def connect_rtpmidi_peer(hostname: str, port: int = 5004, name: str | None = None, *, timeout=3.0):
+    """Connect to a remote RTP MIDI peer via rtpmidid-cli."""
+    if not hostname:
+        return {"success": False, "error": "Hostname or IP address is required"}
+    
+    clean_host = str(hostname).strip()
+    try:
+        clean_port = int(port or 5004)
+    except (ValueError, TypeError):
+        clean_port = 5004
+
+    cmd = ["rtpmidid-cli", "connect", f"hostname={clean_host}", f"port={clean_port}"]
+    if name:
+        cmd.append(f"name={str(name).strip()}")
+
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+        parsed = parse_rtpmidid_cli_output(output)
+        if "error" in parsed and parsed["error"]:
+            return {"success": False, "error": str(parsed["error"])}
+        return {"success": True, "result": parsed.get("result", ["ok"])}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def disconnect_rtpmidi_peer(peer_id: int | str, *, timeout=3.0):
+    """Disconnect a remote RTP MIDI peer by its router ID."""
+    if peer_id is None:
+        return {"success": False, "error": "Peer ID is required"}
+    try:
+        pid = int(peer_id)
+    except (ValueError, TypeError):
+        return {"success": False, "error": f"Invalid Peer ID: {peer_id}"}
+
+    try:
+        output = subprocess.check_output(
+            ["rtpmidid-cli", "router.remove", str(pid)],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+        )
+        parsed = parse_rtpmidid_cli_output(output)
+        if "error" in parsed and parsed["error"]:
+            return {"success": False, "error": str(parsed["error"])}
+        return {"success": True, "result": parsed.get("result", ["ok"])}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}

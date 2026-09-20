@@ -6,7 +6,15 @@ import unittest
 sys.path.append("./")
 sys.path.append("../")
 
-from lib.rtpmidi_diagnostics import parse_rtpmidid_cli_output, parse_rtpmidid_status
+from unittest.mock import patch
+
+from lib.rtpmidi_diagnostics import (
+    connect_rtpmidi_peer,
+    disconnect_rtpmidi_peer,
+    get_rtpmidi_peers,
+    parse_rtpmidid_cli_output,
+    parse_rtpmidid_status,
+)
 
 
 DISCONNECTED_STATUS = {
@@ -114,6 +122,108 @@ class TestRtpMidiDiagnostics(unittest.TestCase):
         self.assertEqual(diagnostics["rtpmidi_peer_status"], "CONNECTED")
         self.assertEqual(diagnostics["rtpmidi_remote_host"], "PC_Robin-2.local:5004")
         self.assertIsNone(diagnostics["rtpmidi_error_reason"])
+
+    def test_get_rtpmidi_peers_parses_discovered_and_connected(self):
+        fake_output = """{
+  "id": null,
+  "result": {
+    "mdns": {
+      "remote_announcements": [
+        {"hostname": "192.168.1.50", "name": "Studio_DAW", "port": 5004}
+      ]
+    },
+    "router": [
+      {
+        "id": 12,
+        "name": "Studio_DAW",
+        "type": "network_rtpmidi_client_t",
+        "peer": {
+          "status": "CONNECTED",
+          "remote": {"hostname": "192.168.1.50", "name": "Studio_DAW", "port": 5004},
+          "latency_ms": {"average": 4.2}
+        }
+      }
+    ]
+  }
+}"""
+        with patch("subprocess.check_output", return_value=fake_output):
+            peers = get_rtpmidi_peers()
+
+        self.assertTrue(peers["success"])
+        self.assertTrue(peers["daemon_running"])
+        self.assertEqual(len(peers["discovered_peers"]), 1)
+        self.assertEqual(peers["discovered_peers"][0]["name"], "Studio_DAW")
+        self.assertEqual(len(peers["connected_peers"]), 1)
+        self.assertEqual(peers["connected_peers"][0]["id"], 12)
+        self.assertEqual(peers["connected_peers"][0]["latency_ms"], 4.2)
+
+    def test_connect_rtpmidi_peer_invokes_cli(self):
+        with patch("subprocess.check_output", return_value='{"id": null, "result": ["ok"]}') as mock_cmd:
+            res = connect_rtpmidi_peer("192.168.1.50", 5004, "Studio_DAW")
+
+        self.assertTrue(res["success"])
+        mock_cmd.assert_called_once_with(
+            ["rtpmidid-cli", "connect", "hostname=192.168.1.50", "port=5004", "name=Studio_DAW"],
+            stderr=-2,
+            text=True,
+            timeout=3.0,
+        )
+
+    def test_disconnect_rtpmidi_peer_invokes_cli(self):
+        with patch("subprocess.check_output", return_value='{"id": null, "result": ["ok"]}') as mock_cmd:
+            res = disconnect_rtpmidi_peer(12)
+
+        self.assertTrue(res["success"])
+        mock_cmd.assert_called_once_with(
+            ["rtpmidid-cli", "router.remove", "12"],
+            stderr=-2,
+            text=True,
+            timeout=3.0,
+        )
+
+    def test_get_rtpmidi_peers_parses_waiting_endpoints_and_incoming_peers(self):
+        fake_output = """{
+  "id": null,
+  "result": {
+    "router": [
+      {
+        "id": 11,
+        "name": "[WATING] <-> OSCMidi",
+        "type": "local_alsa_listener_t",
+        "status": "WAITING",
+        "endpoints": [
+          {"hostname": "192.168.1.92", "port": "5004"}
+        ]
+      },
+      {
+        "id": 2,
+        "name": "PianoLedVisualizer",
+        "type": "network_rtpmidi_multi_listener_t",
+        "peers": [
+          {
+            "id": 88,
+            "name": "RemotePad",
+            "remote": {"hostname": "192.168.1.33", "port": 5004},
+            "status": "CONNECTED",
+            "latency_ms": {"average": 1.8}
+          }
+        ]
+      }
+    ]
+  }
+}"""
+        with patch("subprocess.check_output", return_value=fake_output):
+            peers = get_rtpmidi_peers()
+
+        self.assertTrue(peers["success"])
+        self.assertEqual(len(peers["connected_peers"]), 2)
+        p1 = next(p for p in peers["connected_peers"] if p["id"] == 11)
+        self.assertEqual(p1["name"], "OSCMidi")
+        self.assertEqual(p1["hostname"], "192.168.1.92")
+        self.assertEqual(p1["status"], "WAITING")
+        p2 = next(p for p in peers["connected_peers"] if p["id"] == 88)
+        self.assertEqual(p2["name"], "RemotePad")
+        self.assertEqual(p2["latency_ms"], 1.8)
 
 
 if __name__ == "__main__":
