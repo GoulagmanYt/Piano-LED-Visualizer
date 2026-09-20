@@ -1,6 +1,16 @@
 import time
 
 class GPIOnull():
+    BCM = 11
+    BOARD = 10
+    IN = 1
+    OUT = 0
+    LOW = 0
+    HIGH = 1
+    PUD_UP = 2
+    PUD_DOWN = 1
+    PUD_OFF = 0
+
     def __init__(self):
         pass
 
@@ -14,7 +24,7 @@ class GPIOnull():
         if pin == 12: # SENSECOVER
             return 1
         else:
-            return None
+            return 0
 
 class SPInull():
     def __getattr__(self, name):

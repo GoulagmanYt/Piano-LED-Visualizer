@@ -1,10 +1,6 @@
 import time
 
-try:
-    from RPi import GPIO
-except ImportError:
-    from unittest.mock import MagicMock
-    GPIO = MagicMock()
+from lib.rpi_drivers import GPIO
 
 from lib.functions import fastColorWipe
 

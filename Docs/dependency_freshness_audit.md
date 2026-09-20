@@ -1,12 +1,12 @@
 # Audit de dépendances et rapport de fraîcheur
 
-Date d'audit: 2026-04-19
+Date d'audit: 2026-09-20 (Mise à jour Priorité 1 appliquée)
 
 ## Périmètre et méthode
 
 Ce rapport couvre uniquement les dépendances directes réellement utilisées par le dépôt:
 
-- dépendances Python déclarées dans `requirements.txt`
+- dépendances Python déclarées dans `requirements.txt` et `requirements-dev.txt`
 - dépendance Node directe déclarée dans `webinterface/package.json`
 - bibliothèques front vendoriées effectivement chargées par `webinterface/templates/index.html`
 
@@ -28,25 +28,25 @@ Les références runtime ont été confirmées dans le code:
 
 | Dépendance | Version locale / contrainte | Dernière version officielle | Écart | État | Risque | Notes de compatibilité | Source |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `RPi.GPIO` | non figé | `0.7.1` | indéterminé au runtime | `à figer / support amont incertain / obsolescence probable` | moyen | Pas de pin: installation non reproductible. Dépendance matérielle Raspberry Pi, à valider sur l'OS et l'archi cible. | [PyPI](https://pypi.org/project/RPi.GPIO/) |
+| `RPi.GPIO` | `~=0.7.1` | `0.7.1` | aucun | `figé / support amont RPi 5 incertain` | moyen | Figé pour reproductibilité. Obsolète sur Pi 5 (RP1), abstraction `rpi-lgpio` recommandée. | [PyPI](https://pypi.org/project/RPi.GPIO/) |
 | `webcolors` | `~=25.10.0` | `25.10.0` | aucun | `à jour` | élevé | Montée validée par smoke test sur `hex_to_rgb` et `name_to_rgb`, qui sont les API utilisées par le dépôt. | [PyPI](https://pypi.org/project/webcolors/) |
 | `psutil` | `~=7.2.2` | `7.2.2` | aucun | `à jour` | moyen | Montée validée sur les appels `Process()`, `memory_full_info()`, `cpu_percent()` et `virtual_memory()`. | [PyPI](https://pypi.org/project/psutil/) |
 | `mido` | `~=1.3.3` | `1.3.3` | aucun | `à jour` | faible | Contrainte alignée sur la dernière version PyPI. | [PyPI](https://pypi.org/project/mido/) |
-| `Pillow` | `~=12.2.0` | `12.2.0` | aucun | `à jour` | élevé | Montée validée sur les opérations utilisées par le dépôt: `Image.open/new`, `resize`, et `Image.Resampling.LANCZOS`. | [PyPI](https://pypi.org/project/Pillow/) |
-| `python-rtmidi` | non figé | `1.5.8` | indéterminé au runtime | `à figer / support amont incertain / obsolescence probable` | moyen | Pas de pin. Dépendance native, sensible aux wheels disponibles et aux toolchains de build. | [PyPI](https://pypi.org/project/python-rtmidi/) |
+| `Pillow` | `~=12.3.0` | `12.3.0` | aucun | `à jour` | élevé | Montée validée sur `Image.open/new`, `resize`, et `Image.Resampling.LANCZOS`. | [PyPI](https://pypi.org/project/Pillow/) |
+| `python-rtmidi` | `~=1.5.8` | `1.5.8` | aucun | `figé / à jour` | moyen | Figé pour reproductibilité. Dépendance native C++. | [PyPI](https://pypi.org/project/python-rtmidi/) |
 | `rpi-ws281x` | `~=5.0.0` | `5.0.0` | aucun | `à jour` | faible | Version alignée. Garder une validation matérielle sur Raspberry Pi avant tout upgrade futur. | [PyPI](https://pypi.org/project/rpi-ws281x/) |
 | `spidev` | `~=3.8` | `3.8` | aucun | `à jour` | moyen | Contrainte alignée, mais validation matérielle Raspberry Pi toujours nécessaire. | [PyPI](https://pypi.org/project/spidev/) |
-| `numpy` | `~=2.4.4` | `2.4.4` | aucun | `à jour` | élevé | Montée validée sur les primitives utilisées par le dépôt (`asarray`, `abs`, `argmin`, `interp`, `loadtxt`). | [PyPI](https://pypi.org/project/numpy/) |
+| `numpy` | `~=2.4.4` | `2.5.3` | mineur | `à jour (branche 2.x)` | élevé | Montée validée sur les primitives utilisées par le dépôt (`asarray`, `abs`, `argmin`, `interp`, `loadtxt`). | [PyPI](https://pypi.org/project/numpy/) |
 | `Flask` | `~=3.1.3` | `3.1.3` | aucun | `à jour` | élevé | Montée traitée avec `Werkzeug`; smoke test OK sur l'instanciation `Flask` et `app.json.sort_keys`. | [PyPI](https://pypi.org/project/Flask/) |
 | `waitress` | `~=3.0.2` | `3.0.2` | aucun | `à jour` | faible | Contrainte alignée sur la dernière version PyPI. | [PyPI](https://pypi.org/project/waitress/) |
-| `websockets` | `~=16.0` | `16.0` | aucun | `à jour` | moyen | Montée validée par smoke test avec `websockets.serve(...)`, connexion réelle, et lecture du chemin via `websocket.request.path`. | [PyPI](https://pypi.org/project/websockets/) |
+| `websockets` | `~=17.1` | `17.1` | aucun | `à jour` | moyen | Montée validée par smoke test avec `websockets.serve(...)`, connexion réelle, et lecture du chemin via `websocket.request.path`. | [PyPI](https://pypi.org/project/websockets/) |
 | `Werkzeug` | `~=3.1.8` | `3.1.8` | aucun | `à jour` | élevé | Montée traitée avec `Flask`; smoke test OK sur `safe_join`. | [PyPI](https://pypi.org/project/Werkzeug/) |
 
 ## Dépendance Node directe
 
 | Dépendance | Déclarée | Verrouillée | Dernière version officielle | Écart | État | Risque | Notes de compatibilité | Source |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `tailwindcss` | `^4.2.2` | `4.2.2` | `4.2.2` | aucun | `à jour` | élevé | Migration appliquée: CLI v4, `@import \"tailwindcss\"`, `@config`, et safelist convertie en `@source inline(...)`. Build `static/tailwind.css` validé. | [npm](https://www.npmjs.com/package/tailwindcss) |
+| `tailwindcss` | `^4.3.3` | `4.3.3` | `4.3.3` | aucun | `à jour` | élevé | Migration appliquée: CLI v4, `@import "tailwindcss"`, `@config`, et safelist convertie en `@source inline(...)`. Build `static/tailwind.css` validé. | [npm](https://www.npmjs.com/package/tailwindcss) |
 
 ## Bibliothèques front vendoriées réellement chargées
 
@@ -65,10 +65,10 @@ Les références runtime ont été confirmées dans le code:
 
 ## Artefacts front suspects ou redondants
 
-| Fichier | Version locale | Constat | Impact |
-| --- | --- | --- | --- |
-| `webinterface/static/js/lib/Chart.bundle.min.js` | `4.5.1` | Duplique fonctionnellement `chart.min.js` et n'est pas référencé par `webinterface/templates/index.html`. | Dette de packaging, poids inutile, risque de confusion lors des mises à jour. |
-| `webinterface/static/js/lib/chartjs-plugin-zoom.min.js` | `2.0.1` | Plus ancien que `chartjs-plugin-zoom.js` (`2.2.0`) et non chargé par le template. | Dette de packaging, risque d'erreur humaine si un futur template référence le mauvais fichier. |
+| Fichier | Statut | Constat |
+| --- | --- | --- |
+| `webinterface/static/js/lib/Chart.bundle.min.js` | Supprimé | Dupliquait fonctionnellement `chart.min.js` et n'était pas référencé. |
+| `webinterface/static/js/lib/chartjs-plugin-zoom.min.js` | Supprimé | Plus ancien que `chartjs-plugin-zoom.js` (`2.2.0`) et non chargé par le template. |
 
 ## Notes de compatibilité importantes
 

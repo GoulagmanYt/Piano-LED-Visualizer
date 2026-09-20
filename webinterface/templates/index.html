@@ -1,5 +1,5 @@
 <!doctype html>
-<html class="dark" xmlns:x-transition="" lang="eng">
+<html class="dark" lang="eng">
 <head>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -199,7 +199,8 @@
 
         <!-- Sidebar backdrop -->
         <div
-                x-show.in.out.opacity="isSidebarOpen"
+                x-show="isSidebarOpen"
+                x-transition.opacity
                 class="fixed inset-0 z-10 bg-black/20 lg:hidden"
         ></div>
 
@@ -630,7 +631,7 @@
 
 <!-- Load External Libraries -->
 <script src="../static/alpine.min.js" defer></script>
-<script src="../static/jquery-1.11.1.min.js" defer></script>
+<script src="../static/jquery-3.7.1.min.js" defer></script>
 <script src="../static/html-midi-player.js" defer></script>
 <script src="../static/abc2svg-1.js" defer></script>
 <script src="../static/abc2web.js" defer></script>
@@ -674,6 +675,12 @@
             isSearchBoxOpen: false,
         }
     }
+    window.setup = setup;
+    document.addEventListener('alpine:init', () => {
+        if (typeof Alpine !== 'undefined') {
+            Alpine.data('setup', setup);
+        }
+    });
 
     function setCookie(name, value, days) {
         var expires = "";

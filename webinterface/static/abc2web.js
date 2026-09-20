@@ -566,7 +566,9 @@ var opt, onYouTubeIframeAPIReady, msc_credits, media_height, times_arr, offset_j
         e.stopPropagation();
         e.preventDefault();
         $('body').toggleClass('indrag', false);
-        var files = e.dataTransfer.files;
+        var dt = e.dataTransfer || (e.originalEvent && e.originalEvent.dataTransfer);
+        var files = dt ? dt.files : [];
+        if (!files || !files.length) return;
         if (/video|audio/.test(files [0].type))    // xml => 'text/xml', abc => ''
             readMedia('dd', files)
         else readLocalFile('dd', files);
@@ -1913,12 +1915,15 @@ var opt, onYouTubeIframeAPIReady, msc_credits, media_height, times_arr, offset_j
         $('#woff').change(function () {
             noprogress = $(this).prop('checked');
         });
-        $.event.props.push("dataTransfer");          // make jQuery copy the dataTransfer attribute
+        if ($.event && $.event.props) {
+            $.event.props.push("dataTransfer");          // make jQuery copy the dataTransfer attribute (jQuery 1.x)
+        }
         $('body').on('drop', doDrop);
         $('body').on('dragover', function (e) {   // this handler makes the element accept drops and generate drop-events
             e.stopPropagation();
             e.preventDefault();  // the preventDefault is obligatory for drag/drop!
-            e.dataTransfer.dropEffect = 'copy';         // show a plus sign to indicate the file is copied
+            var dt = e.dataTransfer || (e.originalEvent && e.originalEvent.dataTransfer);
+            if (dt) dt.dropEffect = 'copy';         // show a plus sign to indicate the file is copied
         });
         $('body').on('dragenter dragleave', function () {
             $(this).toggleClass('indrag');
