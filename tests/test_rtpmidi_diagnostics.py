@@ -162,7 +162,7 @@ class TestRtpMidiDiagnostics(unittest.TestCase):
             res = connect_rtpmidi_peer("192.168.1.50", 5004, "Studio_DAW")
 
         self.assertTrue(res["success"])
-        mock_cmd.assert_called_once_with(
+        mock_cmd.assert_any_call(
             ["rtpmidid-cli", "connect", "hostname=192.168.1.50", "port=5004", "name=Studio_DAW"],
             stderr=-2,
             text=True,

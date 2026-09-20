@@ -121,11 +121,32 @@ def is_valid_output_port(port_name: str | None, available_inputs: list[str] | No
     return True
 
 
-def filter_valid_output_ports(available_ports: list[str], available_inputs: list[str] | None = None) -> list[str]:
-    return [
+def filter_valid_output_ports(
+    available_ports: list[str],
+    available_inputs: list[str] | None = None,
+    preferred_port: str | None = None,
+) -> list[str]:
+    valid = [
         port_name for port_name in available_ports
         if is_valid_output_port(port_name, available_inputs=available_inputs)
     ]
+    # Group by stable key to avoid displaying duplicate ports with different ALSA slot IDs
+    # (e.g. 'rtpmidid:OSCMidi 128:2' and 'rtpmidid:OSCMidi 128:3')
+    grouped: dict[str, list[str]] = {}
+    for port in valid:
+        key = _stable_port_key(port)
+        grouped.setdefault(key, []).append(port)
+
+    deduped = []
+    for key, candidates in grouped.items():
+        if len(candidates) == 1:
+            deduped.append(candidates[0])
+        else:
+            if preferred_port and preferred_port in candidates:
+                deduped.append(preferred_port)
+            else:
+                deduped.append(candidates[0])
+    return deduped
 
 
 def port_is_present(actual_port: str | None, available_ports: list[str]) -> bool:

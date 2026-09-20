@@ -2301,6 +2301,7 @@ def get_ports():
     runtime_diagnostics = app_state.midiports.get_runtime_diagnostics() if app_state.midiports else {}
     actual_play_port = diagnostics.get("actual_play_port") or configured_play
     rtpmidi_network_diagnostics = get_rtpmidid_network_diagnostics(actual_play_port)
+    rtp_autoconnect = app_state.usersettings.get_setting_value("rtp_autoconnect") if app_state.usersettings else "None"
     response = build_get_ports_response(
         raw_input_ports=raw_input_ports,
         raw_output_ports=raw_output_ports,
@@ -2312,6 +2313,7 @@ def get_ports():
         rtp_diagnostics=diagnostics,
         runtime_diagnostics=runtime_diagnostics,
         rtpmidi_network_diagnostics=rtpmidi_network_diagnostics,
+        rtp_autoconnect=rtp_autoconnect,
     )
 
     return jsonify(response)
@@ -2353,6 +2355,54 @@ def api_rtpmidi_disconnect():
         app_state.midiports.reconnect_ports(force=True)
     status_code = 200 if result.get("success") else 400
     return jsonify(result), status_code
+
+
+@webinterface.route('/api/set_rtp_autoconnect', methods=['POST', 'GET'])
+def api_set_rtp_autoconnect():
+    payload = request.get_json(silent=True) or {}
+    target = payload.get("target") or request.values.get("target", "None")
+    target_str = str(target).strip()
+    if app_state.usersettings:
+        app_state.usersettings.change_setting_value("rtp_autoconnect", target_str)
+
+    if is_port_disabled(target_str):
+        # Disconnect any connected RTP session
+        peers_info = get_rtpmidi_peers(timeout=1.5)
+        for peer in peers_info.get("connected_peers", []):
+            peer_id = peer.get("id")
+            if peer_id is not None:
+                disconnect_rtpmidi_peer(peer_id, timeout=1.5)
+        if app_state.midiports:
+            app_state.midiports.reconnect_ports(force=True)
+        return jsonify({"success": True, "target": "None", "connected": False})
+
+    # User specified a target peer (e.g. "OSCMidi" or hostname)
+    peers_info = get_rtpmidi_peers(timeout=2.0)
+    discovered = peers_info.get("discovered_peers", [])
+    matched_peer = None
+    for p in discovered:
+        if p.get("name") == target_str or p.get("hostname") == target_str:
+            matched_peer = p
+            break
+
+    if matched_peer:
+        host = matched_peer.get("hostname")
+        port = matched_peer.get("port", 5004)
+        name = matched_peer.get("name")
+    else:
+        host = target_str
+        port = 5004
+        name = target_str
+
+    res = connect_rtpmidi_peer(host, port, name)
+    if res.get("success"):
+        if app_state.usersettings:
+            app_state.usersettings.change_setting_value("reliable_midi_host", str(host))
+        if app_state.midiports:
+            app_state.midiports.reconnect_ports(force=True)
+        return jsonify({"success": True, "target": target_str, "connected": True, "result": res})
+    else:
+        return jsonify({"success": False, "error": res.get("error", "Failed to connect")}), 400
 
 
 @webinterface.route('/api/get_runtime_diagnostics', methods=['GET'])
@@ -2591,11 +2641,16 @@ def build_get_ports_response(
     rtp_diagnostics,
     runtime_diagnostics,
     rtpmidi_network_diagnostics=None,
+    rtp_autoconnect=None,
 ):
     raw_input_ports = list(dict.fromkeys(raw_input_ports or []))
     raw_output_ports = list(dict.fromkeys(raw_output_ports or []))
     input_ports = filter_valid_input_ports(raw_input_ports)
-    output_ports = filter_valid_output_ports(raw_output_ports, available_inputs=raw_input_ports)
+    output_ports = filter_valid_output_ports(
+        raw_output_ports,
+        available_inputs=raw_input_ports,
+        preferred_port=configured_play,
+    )
     rtp_diagnostics = dict(rtp_diagnostics or {})
     network_diagnostics = dict(rtpmidi_network_diagnostics or {})
     rtp_diagnostics.update(network_diagnostics)
@@ -2607,6 +2662,7 @@ def build_get_ports_response(
         "input_port": configured_input,
         "secondary_input_port": configured_secondary_input,
         "play_port": configured_play,
+        "rtp_autoconnect": str(rtp_autoconnect or "None"),
         "unavailable_configured_input_ports": configured_ports_missing_from_available(
             input_ports,
             configured_input,

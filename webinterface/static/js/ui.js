@@ -1929,8 +1929,8 @@ function get_ports() {
             const checkbox = document.getElementById("midi_events_checkbox");
             if (checkbox) checkbox.checked = String(response["midi_logging"]) === "1";
 
-            if (document.getElementById('rtp_discovered_select') != null) {
-                load_rtpmidi_peers();
+            if (document.getElementById('rtp_autoconnect_select') != null) {
+                load_rtpmidi_peers(response["rtp_autoconnect"]);
             }
         }
     };
@@ -1938,11 +1938,17 @@ function get_ports() {
     xhttp.send();
 }
 
-function load_rtpmidi_peers() {
-    const discoveredSelect = document.getElementById('rtp_discovered_select');
-    const connectedList = document.getElementById('rtp_connected_list');
+let _current_rtp_autoconnect_target = "None";
+
+function load_rtpmidi_peers(preferredTarget) {
+    const select = document.getElementById('rtp_autoconnect_select');
     const badge = document.getElementById('rtp_daemon_badge');
-    if (!discoveredSelect && !connectedList) return;
+    const statusText = document.getElementById('rtp_status_text');
+    if (!select) return;
+
+    if (preferredTarget !== undefined) {
+        _current_rtp_autoconnect_target = preferredTarget;
+    }
 
     fetch('/api/rtpmidi_peers', { cache: 'no-store' })
         .then(response => response.json())
@@ -1957,49 +1963,45 @@ function load_rtpmidi_peers() {
                 }
             }
 
-            if (discoveredSelect) {
-                discoveredSelect.innerHTML = "";
-                const discovered = data.discovered_peers || [];
-                if (discovered.length === 0) {
-                    const opt = document.createElement('option');
-                    opt.value = "";
-                    opt.textContent = "No session discovered on LAN";
-                    discoveredSelect.appendChild(opt);
-                } else {
-                    discovered.forEach(peer => {
-                        const opt = document.createElement('option');
-                        opt.value = JSON.stringify({ hostname: peer.hostname, port: peer.port, name: peer.name });
-                        opt.textContent = `${peer.name} (${peer.hostname}:${peer.port})`;
-                        discoveredSelect.appendChild(opt);
-                    });
+            select.innerHTML = "";
+            const noneOpt = document.createElement('option');
+            noneOpt.value = "None";
+            noneOpt.textContent = "None (Disabled)";
+            select.appendChild(noneOpt);
+
+            const discovered = data.discovered_peers || [];
+            discovered.forEach(peer => {
+                const opt = document.createElement('option');
+                opt.value = peer.name || peer.hostname;
+                opt.textContent = `${peer.name} (${peer.hostname}:${peer.port})`;
+                select.appendChild(opt);
+            });
+
+            // If configured target isn't in discovered, preserve it as an option
+            if (_current_rtp_autoconnect_target && 
+                _current_rtp_autoconnect_target.toLowerCase() !== "none" && 
+                _current_rtp_autoconnect_target.toLowerCase() !== "disabled") {
+                const exists = Array.from(select.options).some(o => o.value.toLowerCase() === _current_rtp_autoconnect_target.toLowerCase());
+                if (!exists) {
+                    const customOpt = document.createElement('option');
+                    customOpt.value = _current_rtp_autoconnect_target;
+                    customOpt.textContent = _current_rtp_autoconnect_target;
+                    select.appendChild(customOpt);
                 }
             }
 
-            if (connectedList) {
-                connectedList.innerHTML = "";
+            select.value = _current_rtp_autoconnect_target || "None";
+
+            if (statusText) {
                 const connected = data.connected_peers || [];
-                if (connected.length === 0) {
-                    connectedList.innerHTML = '<div class="text-xs text-gray-500 p-3 text-center glass-light rounded-glass">No active RTP session connected</div>';
+                if (connected.length > 0) {
+                    const c = connected[0];
+                    const lat = (c.latency_ms !== null && c.latency_ms !== undefined) ? ` (${Number(c.latency_ms).toFixed(1)} ms)` : '';
+                    statusText.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>Connected to <b>${c.name}</b>${lat}`;
+                } else if (_current_rtp_autoconnect_target && _current_rtp_autoconnect_target !== "None") {
+                    statusText.innerHTML = `<span class="text-amber-400">Target: ${_current_rtp_autoconnect_target} (Waiting for peer on LAN...)</span>`;
                 } else {
-                    connected.forEach(peer => {
-                        const row = document.createElement('div');
-                        row.className = "flex items-center justify-between p-2.5 glass-light rounded-glass text-xs";
-                        const latencyStr = (peer.latency_ms !== null && peer.latency_ms !== undefined) ? ` (${Number(peer.latency_ms).toFixed(1)} ms)` : '';
-                        row.innerHTML = `
-                            <div class="flex items-center space-x-2">
-                                <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                                <div>
-                                    <span class="font-semibold text-gray-800 dark:text-gray-200">${peer.name}</span>
-                                    <span class="text-gray-500 text-[11px] ml-1">${peer.hostname}:${peer.port}${latencyStr}</span>
-                                </div>
-                            </div>
-                            <button onclick="disconnect_rtpmidi(${peer.id})"
-                                    class="px-2.5 py-1 text-[11px] font-medium text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 rounded-glass transition-smooth-fast">
-                                Disconnect
-                            </button>
-                        `;
-                        connectedList.appendChild(row);
-                    });
+                    statusText.innerHTML = `<span class="text-gray-400">Auto-connect disabled. Output will remain local unless selected.</span>`;
                 }
             }
         })
@@ -2008,96 +2010,22 @@ function load_rtpmidi_peers() {
         });
 }
 
-function connect_selected_discovered_rtp() {
-    const select = document.getElementById('rtp_discovered_select');
-    if (!select || !select.value) {
-        showAlert("Select a discovered peer first", "warning");
-        return;
-    }
-    let peerInfo;
-    try {
-        peerInfo = JSON.parse(select.value);
-    } catch(e) {
-        return;
-    }
-    const btn = document.getElementById('rtp_connect_discovered_btn');
-    if (btn) btn.disabled = true;
-
-    const params = new URLSearchParams({
-        hostname: peerInfo.hostname,
-        port: peerInfo.port || 5004,
-        name: peerInfo.name || ''
-    });
-    fetch('/api/rtpmidi_connect?' + params.toString(), { method: 'POST', cache: 'no-store' })
-        .then(response => response.json())
-        .then(res => {
-            if (btn) btn.disabled = false;
-            if (res.success) {
-                showAlert(`Connected to RTP peer ${peerInfo.name}`, "success");
-                load_rtpmidi_peers();
-                get_ports();
-            } else {
-                showAlert(res.error || "Failed to connect RTP peer", "error");
-            }
-        })
-        .catch(err => {
-            if (btn) btn.disabled = false;
-            showAlert("Connection request failed: " + err, "error");
-        });
-}
-
-function connect_manual_rtp() {
-    const hostInput = document.getElementById('rtp_manual_host');
-    const portInput = document.getElementById('rtp_manual_port');
-    const nameInput = document.getElementById('rtp_manual_name');
-    const host = hostInput ? hostInput.value.trim() : '';
-    const port = portInput ? portInput.value.trim() || '5004' : '5004';
-    const name = nameInput ? nameInput.value.trim() : '';
-
-    if (!host) {
-        showAlert("Enter an IP address or hostname", "warning");
-        return;
-    }
-    const btn = document.getElementById('rtp_connect_manual_btn');
-    if (btn) btn.disabled = true;
-
-    const params = new URLSearchParams({ hostname: host, port: port, name: name });
-    fetch('/api/rtpmidi_connect?' + params.toString(), { method: 'POST', cache: 'no-store' })
-        .then(response => response.json())
-        .then(res => {
-            if (btn) btn.disabled = false;
-            if (res.success) {
-                showAlert(`Connected to RTP peer ${host}:${port}`, "success");
-                if (hostInput) hostInput.value = '';
-                if (nameInput) nameInput.value = '';
-                load_rtpmidi_peers();
-                get_ports();
-            } else {
-                showAlert(res.error || "Failed to connect RTP peer", "error");
-            }
-        })
-        .catch(err => {
-            if (btn) btn.disabled = false;
-            showAlert("Connection request failed: " + err, "error");
-        });
-}
-
-function disconnect_rtpmidi(peerId) {
-    if (peerId === undefined || peerId === null) return;
-    const params = new URLSearchParams({ peer_id: peerId });
-    fetch('/api/rtpmidi_disconnect?' + params.toString(), { method: 'POST', cache: 'no-store' })
+function change_rtp_autoconnect(target) {
+    _current_rtp_autoconnect_target = target;
+    const params = new URLSearchParams({ target: target });
+    fetch('/api/set_rtp_autoconnect?' + params.toString(), { method: 'POST', cache: 'no-store' })
         .then(response => response.json())
         .then(res => {
             if (res.success) {
-                showAlert("Disconnected RTP peer", "success");
-                load_rtpmidi_peers();
+                showAlert(target === "None" ? "RTP Auto-connect disabled" : `Auto-connecting to ${target}...`, "success");
+                load_rtpmidi_peers(target);
                 get_ports();
             } else {
-                showAlert(res.error || "Failed to disconnect RTP peer", "error");
+                showAlert(res.error || "Failed to set RTP auto-connect", "error");
             }
         })
         .catch(err => {
-            showAlert("Disconnect request failed: " + err, "error");
+            showAlert("Auto-connect request failed: " + err, "error");
         });
 }
 

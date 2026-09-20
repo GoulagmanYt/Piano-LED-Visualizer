@@ -113,6 +113,30 @@ class TestViewsApiPorts(unittest.TestCase):
         self.assertIn("USB AudioDevice:USB AudioDevice MIDI 1 16:0", response["output_ports"])
         self.assertEqual(response["play_port"], "USB AudioDevice:USB AudioDevice MIDI 1 16:0")
 
+    def test_get_ports_response_deduplicates_multiple_instances_of_same_rtp_port(self):
+        response = build_get_ports_response(
+            raw_input_ports=["USB AudioDevice:USB AudioDevice MIDI 1 16:0"],
+            raw_output_ports=[
+                "USB AudioDevice:USB AudioDevice MIDI 1 16:0",
+                "rtpmidid:OSCMidi 128:2",
+                "rtpmidid:OSCMidi 128:3",
+            ],
+            configured_input="USB AudioDevice:USB AudioDevice MIDI 1 16:0",
+            configured_secondary_input="default",
+            configured_play="rtpmidid:OSCMidi 128:2",
+            midi_logging="0",
+            connected_ports="",
+            rtp_diagnostics={},
+            runtime_diagnostics={},
+            rtp_autoconnect="OSCMidi",
+        )
+
+        self.assertEqual(response["output_ports"], [
+            "USB AudioDevice:USB AudioDevice MIDI 1 16:0",
+            "rtpmidid:OSCMidi 128:2",
+        ])
+        self.assertEqual(response["rtp_autoconnect"], "OSCMidi")
+
 
 if __name__ == "__main__":
     unittest.main()

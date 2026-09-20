@@ -264,6 +264,21 @@ def connect_rtpmidi_peer(hostname: str, port: int = 5004, name: str | None = Non
     except (ValueError, TypeError):
         clean_port = 5004
 
+    # Check if this peer is already connected or has a stale listener to prevent duplicate ALSA ports
+    try:
+        current_peers = get_rtpmidi_peers(timeout=1.5)
+        for cp in current_peers.get("connected_peers", []):
+            same_name = name and cp.get("name") == name
+            same_host = clean_host and cp.get("hostname") == clean_host
+            if same_name or same_host:
+                if cp.get("status") in ("3", "CONNECTED"):
+                    return {"success": True, "result": ["already_connected"]}
+                old_id = cp.get("id")
+                if old_id is not None:
+                    disconnect_rtpmidi_peer(old_id, timeout=1.5)
+    except Exception:
+        pass
+
     cmd = ["rtpmidid-cli", "connect", f"hostname={clean_host}", f"port={clean_port}"]
     if name:
         cmd.append(f"name={str(name).strip()}")
