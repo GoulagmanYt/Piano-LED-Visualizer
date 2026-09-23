@@ -3,6 +3,18 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
+from functools import wraps
+
+_session_lock = threading.RLock()
+
+
+def _serialized(func):
+    @wraps(func)
+    def call(*args, **kwargs):
+        with _session_lock:
+            return func(*args, **kwargs)
+    return call
 
 
 _TRAILING_ALSA_ID_RE = re.compile(r"\s+\d+:\d+$")
@@ -178,6 +190,7 @@ def get_rtpmidi_peers(*, timeout=2.0):
 
         # Connected or configured router peers
         router = result.get("router") or []
+        routed_ids = {pid for p in router if isinstance(p, dict) for pid in (p.get("send_to") or [])}
         connected = []
         seen_ids = set()
 
@@ -198,6 +211,8 @@ def get_rtpmidi_peers(*, timeout=2.0):
                     "port": int(remote.get("port") or 5004),
                     "status": str(peer_info.get("status", "connected")),
                     "latency_ms": latency.get("average"),
+                    "kind": "client",
+                    "orphan": not peer.get("send_to") and peer_id not in routed_ids,
                 })
                 if peer_id is not None:
                     seen_ids.add(peer_id)
@@ -214,6 +229,7 @@ def get_rtpmidi_peers(*, timeout=2.0):
                             "port": int(ep.get("port") or 5004),
                             "status": str(peer.get("status", "WAITING")),
                             "latency_ms": None,
+                            "kind": "listener",
                         })
                         if peer_id is not None:
                             seen_ids.add(peer_id)
@@ -253,6 +269,7 @@ def get_rtpmidi_peers(*, timeout=2.0):
         }
 
 
+@_serialized
 def connect_rtpmidi_peer(hostname: str, port: int = 5004, name: str | None = None, *, timeout=3.0):
     """Connect to a remote RTP MIDI peer via rtpmidid-cli."""
     if not hostname:
@@ -262,20 +279,26 @@ def connect_rtpmidi_peer(hostname: str, port: int = 5004, name: str | None = Non
     try:
         clean_port = int(port or 5004)
     except (ValueError, TypeError):
-        clean_port = 5004
+        return {"success": False, "error": "Invalid RTP MIDI port"}
+    if not clean_host or not 1 <= clean_port <= 65535:
+        return {"success": False, "error": "Invalid RTP MIDI endpoint"}
 
     # Check if this peer is already connected or has a stale listener to prevent duplicate ALSA ports
     try:
         current_peers = get_rtpmidi_peers(timeout=1.5)
+        matches = []
         for cp in current_peers.get("connected_peers", []):
             same_name = name and cp.get("name") == name
-            same_host = clean_host and cp.get("hostname") == clean_host
-            if same_name or same_host:
-                if cp.get("status") in ("3", "CONNECTED"):
-                    return {"success": True, "result": ["already_connected"]}
-                old_id = cp.get("id")
-                if old_id is not None:
-                    disconnect_rtpmidi_peer(old_id, timeout=1.5)
+            same_host = cp.get("hostname") == clean_host
+            if (same_name or same_host) and cp.get("port") == clean_port:
+                if cp.get("orphan"):
+                    disconnect_rtpmidi_peer(cp["id"], timeout=1.5)
+                else:
+                    matches.append(cp)
+        if matches:
+            # A waiting listener owns the daemon's retry state. Do not replace
+            # it every monitor tick, or a slow peer can never finish connecting.
+            return {"success": True, "result": ["already_configured"]}
     except Exception:
         pass
 
@@ -293,6 +316,7 @@ def connect_rtpmidi_peer(hostname: str, port: int = 5004, name: str | None = Non
         return {"success": False, "error": str(exc)}
 
 
+@_serialized
 def disconnect_rtpmidi_peer(peer_id: int | str, *, timeout=3.0):
     """Disconnect a remote RTP MIDI peer by its router ID."""
     if peer_id is None:
@@ -315,3 +339,37 @@ def disconnect_rtpmidi_peer(peer_id: int | str, *, timeout=3.0):
         return {"success": True, "result": parsed.get("result", ["ok"])}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
+
+
+@_serialized
+def reconcile_rtpmidi_autoconnect(usersettings):
+    """Apply the saved target at startup and after peer/daemon disappearance.
+
+    Called only by the port monitor or an explicit web request, never by MIDI
+    callbacks. The deployment disables daemon-created discovery routes while
+    retaining mDNS announcements, so there is one owner of outgoing sessions.
+    """
+    target = str(usersettings.get_setting_value("rtp_autoconnect") or "None").strip()
+    info = get_rtpmidi_peers(timeout=1.5)
+    if not info.get("success"):
+        return info
+    disabled = target.lower() in {"none", "disabled", ""}
+    discovered = next((p for p in info["discovered_peers"]
+                       if target in (p["name"], p["hostname"])), None)
+    host = discovered["hostname"] if discovered else target
+    port = discovered["port"] if discovered else 5004
+    for peer in info["connected_peers"]:
+        if peer.get("kind") not in {"client", "listener"}:
+            continue
+        matches = peer.get("port") == port and (peer.get("hostname") == host or peer.get("name") == target)
+        if disabled or not matches or peer.get("orphan"):
+            result = disconnect_rtpmidi_peer(peer["id"], timeout=1.5)
+            if not result.get("success"):
+                return result
+    if disabled:
+        return {"success": True, "connected": False}
+    # A service name without a current announcement isn't a DNS hostname.
+    # Wait for discovery rather than creating endless invalid listeners.
+    if discovered is None and "." not in target and ":" not in target:
+        return {"success": True, "connected": False, "waiting": True}
+    return connect_rtpmidi_peer(host, port, discovered["name"] if discovered else target)

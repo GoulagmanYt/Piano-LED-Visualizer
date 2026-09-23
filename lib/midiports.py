@@ -90,6 +90,8 @@ class MidiPorts:
 
         # midi queues contain tuples (midi_msg, timestamp)
         self.queues = MidiQueues()
+        self.queues.set_forwarding_enabled(False)
+        self._output_lock = threading.RLock()
         self.midifile_queue = self.queues.file_queue
         self.midi_queue = self.queues.live_visualizer_queue
         self.learning_midi_queue = self.queues.live_learning_queue
@@ -188,10 +190,13 @@ class MidiPorts:
             return 0.0
         return max(0.0, (now_perf - timestamp) * 1000.0)
 
-    def refresh_queue_diagnostics(self, now_perf=None):
+    def refresh_queue_diagnostics(self, now_perf=None, force=False):
         diagnostics = self._ensure_runtime_diagnostics()
         if now_perf is None:
             now_perf = time.perf_counter()
+        if not force and now_perf < getattr(self, '_next_queue_diagnostics', 0.0):
+            return
+        self._next_queue_diagnostics = now_perf + 0.05
 
         queues = {
             "live_input": self.midi_queue,
@@ -394,8 +399,19 @@ class MidiPorts:
         return f"midi_event{msg_type} channel={channel} note={note} velocity={velocity} time={time_val}"
 
     def _flush_live_forward_queue_once(self):
+        with self._get_output_lock():
+            return self._flush_output_locked()
+
+    def _get_output_lock(self):
+        if not hasattr(self, "_output_lock"):
+            self._output_lock = threading.RLock()
+        return self._output_lock
+
+    def _flush_output_locked(self):
         port = self.playport
         if port is None:
+            if hasattr(self, "queues"):
+                self.queues.set_forwarding_enabled(False)
             return False
 
         now_perf = time.perf_counter()
@@ -458,6 +474,10 @@ class MidiPorts:
         return sent
 
     def _send_rtp_message(self, msg, send_started=None, scheduled_due_time=None):
+        with self._get_output_lock():
+            return self._send_output_locked(msg, send_started, scheduled_due_time)
+
+    def _send_output_locked(self, msg, send_started=None, scheduled_due_time=None):
         port = self.playport
         if port is None:
             return False
@@ -466,6 +486,7 @@ class MidiPorts:
 
         try:
             port.send(msg)
+            self._send_failure_since = None
             elapsed_seconds = time.perf_counter() - send_started
             elapsed_ms = elapsed_seconds * 1000.0
             self.forward_stats["live_sent"] += 1
@@ -490,6 +511,18 @@ class MidiPorts:
             self.forward_stats["live_send_errors"] += 1
             logger.debug(f"Skipping playport send: {e}")
             self._ensure_runtime_diagnostics().increment_counter("rtp_send_errors")
+            now = time.perf_counter()
+            if getattr(self, "_send_failure_since", None) is None:
+                self._send_failure_since = now
+            elif now - self._send_failure_since >= 1.0:
+                # A prolonged outage starts a fresh session, instead of
+                # retaining unbounded stale notes for a later burst.
+                if hasattr(self, "queues"):
+                    self.queues.set_forwarding_enabled(False)
+                self._silence_output(port)
+                self._safe_close_port(port)
+                self.playport = None
+                self.actual_play_port = None
             return False
 
     def _flush_websocket_publish_queue_once(self):
@@ -593,6 +626,9 @@ class MidiPorts:
             if worker is not None and worker is not threading.current_thread():
                 worker.join(timeout=2)
         for name in ("inport", "playport"):
+            if name == "playport":
+                self.queues.set_forwarding_enabled(False)
+                self._silence_output(getattr(self, name, None))
             self._safe_close_port(getattr(self, name, None))
             setattr(self, name, None)
 
@@ -722,6 +758,11 @@ class MidiPorts:
         }
 
     def _configure_input_backend_filters(self, input_port):
+        try:
+            from lib.alsa_input_buffer import enlarge_input_pools
+            enlarge_input_pools()
+        except OSError as error:
+            logger.warning("Unable to enlarge ALSA input pool: %s", error)
         backend = getattr(input_port, "_rt", None)
         ignore_types = getattr(backend, "ignore_types", None)
         if not callable(ignore_types):
@@ -793,6 +834,21 @@ class MidiPorts:
         return True
 
     def _reconnect_output(self, force=False):
+        with self._get_output_lock():
+            return self._reconnect_output_locked(force)
+
+    @staticmethod
+    def _silence_output(port):
+        if port is None:
+            return
+        try:
+            for channel in range(16):
+                for control in (64, 123, 120):
+                    port.send(mido.Message('control_change', channel=channel, control=control, value=0))
+        except Exception:
+            logger.warning("Unable to silence disconnected MIDI output")
+
+    def _reconnect_output_locked(self, force=False):
         available_inputs = _get_cached_input_names()
         available_outputs = _get_cached_output_names()
         runtime_label_changes = self._refresh_runtime_port_labels(
@@ -822,8 +878,13 @@ class MidiPorts:
             self._ensure_runtime_diagnostics().increment_counter("port_runtime_reconnects")
 
         old_port = self.playport
+        if hasattr(self, "queues"):
+            self.queues.set_forwarding_enabled(False)
         self.playport = None
         self.actual_play_port = None
+        self._silence_output(old_port)
+        self._safe_close_port(old_port)
+        old_port = None
 
         if selected_port is None and requested_port and requested_port != "default":
             _refresh_port_cache()
@@ -841,6 +902,10 @@ class MidiPorts:
 
         try:
             self.playport = mido.open_output(selected_port)
+            self._silence_output(self.playport)
+            if hasattr(self, "queues"):
+                self.queues.set_forwarding_enabled(True)
+            self.forward_backoff_until = 0.0
             self.actual_play_port = selected_port
             if requested_port != selected_port and not is_port_disabled(requested_port):
                 self.usersettings.change_setting_value("play_port", selected_port)
@@ -1004,7 +1069,7 @@ class MidiPorts:
         }
 
     def get_runtime_diagnostics(self):
-        self.refresh_queue_diagnostics()
+        self.refresh_queue_diagnostics(force=True)
         diagnostics = self._ensure_runtime_diagnostics().snapshot()
         diagnostics["rtp"] = {
             "drop_counter": self.drop_counter,
@@ -1251,6 +1316,10 @@ class MidiPorts:
 
         while self.monitor_running:
             try:
+                from lib.rtpmidi_diagnostics import reconcile_rtpmidi_autoconnect
+                reconcile_rtpmidi_autoconnect(self.usersettings)
+                if not self.monitor_running:
+                    break
                 last_input_present, last_secondary_present, last_play_present = self._auto_reconnect_once(
                     last_input_present,
                     last_secondary_present,

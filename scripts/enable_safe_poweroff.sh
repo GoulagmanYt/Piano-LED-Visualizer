@@ -4,7 +4,7 @@
 # ==============================================================================
 # Protège la carte SD contre la corruption en montant le système de fichiers
 # racine (rootfs) en lecture seule avec une couche volatile en RAM (tmpfs).
-# Vous pouvez débrancher le piano directement sans risque de corruption SD.
+# Réduit le risque lié aux coupures ; un arrêt propre reste préférable.
 # ==============================================================================
 set -euo pipefail
 
@@ -37,6 +37,14 @@ else
 fi
 
 echo "[3/3] Statut du système :"
+if [ "$(run_cmd raspi-config nonint get_overlay_now)" = "0" ]; then
+  if [ "$(run_cmd raspi-config nonint get_bootro_conf)" != "0" ]; then
+    echo "Boot n'est pas protégé. Désactivez OverlayFS, redémarrez, puis réactivez la protection."
+    exit 1
+  fi
+else
+  run_cmd raspi-config nonint enable_bootro
+fi
 if [ "$(run_cmd raspi-config nonint get_overlay_now 2>/dev/null)" = "0" ]; then
   echo "      -> Protection OverlayFS : ACTIVE (Lecture seule / RAM volatile)"
 else
@@ -45,7 +53,8 @@ fi
 
 echo ""
 echo "----------------------------------------------------------------------"
-echo "INFO : La carte SD sera protégée en lecture seule après redémarrage."
+echo "INFO : Racine protégée par OverlayFS et boot en lecture seule après redémarrage."
+echo "       Un arrêt propre reste préférable ; aucune garantie contre une panne matérielle."
 echo "       Toutes les modifications seront temporaires et en RAM."
 echo "       Pour modifier les paramètres de façon permanente ou faire une mise à jour,"
 echo "       utilisez : ./scripts/disable_safe_poweroff.sh"

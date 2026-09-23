@@ -82,6 +82,8 @@ class AsyncPixelStrip:
             self._condition.notify()
 
     def _run(self):
+        fps_started = time.perf_counter()
+        completed_frames = 0
         try:
             while True:
                 with self._condition:
@@ -106,6 +108,12 @@ class AsyncPixelStrip:
                     diagnostics.record_duration("led_transmit_complete", time.perf_counter() - started)
                     diagnostics.record_duration("frame_queue_to_complete", time.perf_counter() - submitted)
                     diagnostics.increment_counter("hardware_frames")
+                    completed_frames += 1
+                    now = time.perf_counter()
+                    if now - fps_started >= 1.0:
+                        diagnostics.set_gauge("hardware_fps_last_window", completed_frames / (now - fps_started))
+                        completed_frames = 0
+                        fps_started = now
         except Exception as error:
             self._error = error
 

@@ -75,6 +75,37 @@ class FakeMidiMessage:
 
 
 class TestMidiPorts(unittest.TestCase):
+    def test_disconnection_clears_pending_notes_and_reenable_does_not_replay(self):
+        ports = self.make_ports()
+        ports.msg_callback(FakeMidiMessage())
+        ports.playport = None
+        self.assertFalse(ports._flush_live_forward_queue_once())
+        for _ in range(1000):
+            ports.msg_callback(FakeMidiMessage())
+        self.assertEqual(len(ports.live_forward_queue), 0)
+        ports.playport = FakePlayPort()
+        ports.queues.set_forwarding_enabled(True)
+        self.assertFalse(ports._flush_live_forward_queue_once())
+        self.assertEqual(ports.playport.sent, [])
+
+    def test_prolonged_send_failure_ends_session_and_clears_backlog(self):
+        ports = self.make_ports()
+        ports.playport = FakePlayPort(fail_times=100)
+        ports.msg_callback(FakeMidiMessage())
+        ports._send_failure_since = 1.0
+        with patch('lib.midiports.time.perf_counter', return_value=3.0):
+            self.assertFalse(ports._flush_live_forward_queue_once())
+        self.assertIsNone(ports.playport)
+        self.assertFalse(ports.live_forward_queue)
+        self.assertFalse(ports.queues.forwarding_enabled)
+
+    def test_output_silence_releases_sustain_and_notes_on_every_channel(self):
+        port = FakePlayPort()
+        MidiPorts._silence_output(port)
+        self.assertEqual(len(port.sent), 48)
+        self.assertEqual({(m.channel, m.control, m.value) for m in port.sent},
+                         {(ch, cc, 0) for ch in range(16) for cc in (64, 120, 123)})
+
     def make_ports(self, *, midi_maxlen=4, websocket_maxlen=4, forward_maxlen=4):
         ports = MidiPorts.__new__(MidiPorts)
         ports.queues = MidiQueues(

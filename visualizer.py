@@ -34,6 +34,8 @@ def restart_script():
 
 class VisualizerApp:
     def __init__(self):
+        # Bound Python GIL handoff delays between MIDI, rendering and DMA.
+        sys.setswitchinterval(0.001)
         self.stop_event = threading.Event()
         self._shutdown_done = False
         self._screensaver_thread = None

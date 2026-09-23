@@ -33,8 +33,8 @@ for governor in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
   [ -e "$governor" ] || continue
   dir=$(dirname "$governor")
   available=$(cat "$dir/scaling_available_governors" 2>/dev/null || true)
-  if echo "$available" | grep -qw ondemand; then
-    echo ondemand > "$governor" 2>/dev/null || true
+  if echo "$available" | grep -qw performance; then
+    echo performance > "$governor" 2>/dev/null || true
   elif echo "$available" | grep -qw schedutil; then
     echo schedutil > "$governor" 2>/dev/null || true
   fi
@@ -55,7 +55,7 @@ run install -d /etc/systemd/system
 run install -m 0644 /dev/stdin /etc/systemd/system/plv-lowlatency.service <<'EOF'
 [Unit]
 Description=Piano LED Visualizer low-latency tuning
-After=NetworkManager.service wpa_supplicant.service
+After=local-fs.target
 Before=visualizer.service
 
 [Service]
@@ -81,6 +81,9 @@ Wants=plv-lowlatency.service
 WorkingDirectory=${PLV_DIR}/
 ExecStart=
 ExecStart=/usr/bin/python3 ${PLV_DIR}/visualizer.py
+ExecStopPost=
+ExecStopPost=/usr/bin/python3 ${PLV_DIR}/scripts/clear_leds.py
+TimeoutStopSec=15
 Restart=always
 RestartSec=1
 User=root
@@ -90,8 +93,8 @@ UMask=0002
 Nice=-10
 IOSchedulingClass=realtime
 IOSchedulingPriority=0
-CPUSchedulingPolicy=rr
-CPUSchedulingPriority=5
+CPUSchedulingPolicy=other
+CPUSchedulingPriority=0
 LimitRTPRIO=10
 LimitNICE=-10
 LimitMEMLOCK=64M
@@ -110,9 +113,11 @@ echo "Configuring Fast Boot parameters in config.txt..."
 BOOT_CONFIG="/boot/firmware/config.txt"
 [ -f "$BOOT_CONFIG" ] || BOOT_CONFIG="/boot/config.txt"
 if [ -f "$BOOT_CONFIG" ]; then
+  backup_file "$BOOT_CONFIG"
+  run sed -i 's/^\[all\]initial_turbo=/[all]\ninitial_turbo=/' "$BOOT_CONFIG"
   # Turbo clock at 1000MHz for the first 30 seconds of boot
   if ! grep -q "^initial_turbo=" "$BOOT_CONFIG"; then
-    echo "initial_turbo=30" | run tee -a "$BOOT_CONFIG" >/dev/null
+    printf '\n[all]\ninitial_turbo=30\n' | run tee -a "$BOOT_CONFIG" >/dev/null
   fi
   # Disable rainbow splash screen delay
   if ! grep -q "^disable_splash=" "$BOOT_CONFIG"; then
@@ -178,6 +183,7 @@ run journalctl --vacuum-size=16M || true
 run find /tmp -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf -- {} + 2>/dev/null || true
 
 echo "Reloading systemd and applying boot tuning..."
+run python3 "${PLV_DIR}/scripts/configure_service_safety.py"
 run systemctl daemon-reload
 run systemctl enable plv-lowlatency.service
 run systemctl start plv-lowlatency.service

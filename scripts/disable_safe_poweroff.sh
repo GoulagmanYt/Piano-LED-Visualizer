@@ -29,7 +29,12 @@ echo "[2/2] Statut actuel du système :"
 if [ "$(run_cmd raspi-config nonint get_overlay_now 2>/dev/null)" = "0" ]; then
   echo "      -> Système actuellement en OverlayFS (Lecture seule)."
   echo "         Un redémarrage est nécessaire pour repasser en mode Lecture/Écriture."
+  echo "         Relancez ce script après redémarrage pour rendre aussi boot modifiable."
 else
+  run_cmd raspi-config nonint disable_bootro
+  boot_path=/boot/firmware
+  mountpoint -q "$boot_path" || boot_path=/boot
+  run_cmd mount -o remount,rw "$boot_path"
   echo "      -> Système actuellement en mode standard Lecture/Écriture."
 fi
 

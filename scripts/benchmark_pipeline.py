@@ -29,12 +29,14 @@ class NullOutput:
 
 
 def main():
+    chord_count = int(os.environ.get('PLV_BENCHMARK_CHORDS', '2000'))
     app = VisualizerApp()
     process = psutil.Process()
     app.ci.midiports.stop_midi_monitor()
     app.ci.midiports._safe_close_port(app.ci.midiports.inport)
     app.ci.midiports._safe_close_port(app.ci.midiports.playport)
     app.ci.midiports.playport = NullOutput()
+    app.ci.midiports.queues.set_forwarding_enabled(True)
     received = 0
     sent = 0
     samples = []
@@ -52,6 +54,7 @@ def main():
         app.ci.midiports.msg_callback(message)
 
     app.ci.midiports.inport = mido.open_input('PLV-maintenance-benchmark', virtual=True, callback=receive)
+    app.ci.midiports._configure_input_backend_filters(app.ci.midiports.inport)
     name = next(name for name in mido.get_output_names() if 'PLV-maintenance-benchmark' in name)
     output = mido.open_output(name)
     app.ci.ledstrip.strip.setBrightness(12)
@@ -77,7 +80,22 @@ def main():
                 strip.show()
                 time.sleep(0.25)
             app.runtime_diagnostics.reset()
+            app.ci.midiports.reset_runtime_diagnostics()
             process.cpu_percent()
+            # Verify real sustain state, not just transmission of CC64.
+            app.ci.ledsettings.mode = 'Pedal'
+            send(mido.Message('control_change', control=64, value=127))
+            send(mido.Message('note_on', note=60, velocity=80))
+            time.sleep(0.1)
+            send(mido.Message('note_off', note=60))
+            time.sleep(0.1)
+            if not any(app.ci.ledstrip.keylist_sustained):
+                raise AssertionError('Pedal did not sustain the released note')
+            send(mido.Message('control_change', control=64, value=0))
+            time.sleep(0.3)
+            if any(app.ci.ledstrip.keylist_sustained):
+                raise AssertionError('Pedal release left sustained notes')
+            app.ci.ledsettings.mode = 'Fading'
             # Single notes include release fades and wakeup from an empty queue.
             for note in range(48, 72):
                 send(mido.Message('note_on', note=note, velocity=90))
@@ -90,9 +108,9 @@ def main():
             pedal_on = mido.Message('control_change', control=64, value=127)
             pedal_off = mido.Message('control_change', control=64, value=0)
             deadline = time.monotonic()
-            for chord in range(2000):
-                # Channel encodes chord index (modulo 16)
-                ch = chord % 16
+            for chord in range(chord_count):
+                # Pedal and notes belong to the same channel.
+                ch = 0
                 p_on = mido.Message('control_change', channel=ch, control=64, value=127)
                 p_off = mido.Message('control_change', channel=ch, control=64, value=0)
                 send(p_on)
@@ -119,19 +137,34 @@ def main():
 
     worker = threading.Thread(target=exercise, name='benchmark-source', daemon=True)
     worker.start()
+    profile = None
+    if os.environ.get('PLV_BENCHMARK_PROFILE'):
+        import cProfile
+        profile = cProfile.Profile()
+        profile.enable()
     try:
         app.run()
     finally:
+        if profile is not None:
+            profile.disable()
+            profile.dump_stats(os.environ['PLV_BENCHMARK_PROFILE'])
         worker.join(3)
         output.close()
-        report = {'sent': sent, 'received': received, 'recv_by_type': recv_by_type, 'recv_pedals': len(recv_pedal_channels), 'missing_pedals': 2000 - len(recv_pedal_channels), 'errors': errors, 'samples': samples,
+        report = {'sent': sent, 'received': received, 'recv_by_type': recv_by_type, 'recv_pedals': len(recv_pedal_channels), 'missing_pedals': chord_count + 1 - len(recv_pedal_channels), 'errors': errors, 'samples': samples,
                   'diagnostics': app.ci.midiports.get_runtime_diagnostics(),
                   'remaining_keys': sum(bool(x) for x in app.ci.ledstrip.keylist),
                   'remaining_sustain': sum(bool(x) for x in app.ci.ledstrip.keylist_sustained)}
         app.shutdown()
         report['black_buffer_after_shutdown'] = not any(app.ci.ledstrip.strip.getPixels())
         print('BENCHMARK_JSON=' + json.dumps(report), flush=True)
-    if errors or sent != received or report['remaining_keys'] or report['remaining_sustain']:
+    report_queues = report['diagnostics']['queues']
+    processed = app.runtime_diagnostics.snapshot()['counters'].get('midi_events_processed_total', 0)
+    print('BENCHMARK_PROCESSED=' + str(processed), flush=True)
+    if (errors or sent != received or processed != received
+            or any(report_queues.get(q, {}).get('current_depth', 0)
+                   for q in ('live_input', 'live_forward', 'scheduled_forward'))
+            or report['remaining_keys'] or report['remaining_sustain']
+            or not report['black_buffer_after_shutdown']):
         raise SystemExit(1)
 
 

@@ -26,12 +26,15 @@ fi
 
 if [ "$is_active" = "true" ]; then
   echo "État Actuel : [PROTÉGÉ] Le système racine est monté en OverlayFS (Lecture seule)."
-  echo "              Vous pouvez débrancher l'alimentation sans risque de corrompre la carte SD."
+  echo "              Les écritures de la racine sont volatiles ; un arrêt propre reste préférable."
 else
   echo "État Actuel : [LECTURE/ÉCRITURE] Le système est monté en mode écriture standard."
   echo "              ATTENTION : Éteindre proprement (sudo poweroff) avant de débrancher,"
   echo "              ou activez le Safe Power Off avec : ./scripts/enable_safe_poweroff.sh"
 fi
+
+echo "Partition boot :"
+findmnt -no TARGET,OPTIONS /boot/firmware 2>/dev/null || findmnt -no TARGET,OPTIONS /boot
 
 if [ "$is_conf" = "true" ]; then
   echo "Au Prochain Démarrage : Safe Power Off sera ACTIF."

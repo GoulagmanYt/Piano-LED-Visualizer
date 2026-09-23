@@ -2,6 +2,8 @@ import logging
 from logging.handlers import RotatingFileHandler, QueueHandler, QueueListener
 import queue
 import sys
+import os
+from pathlib import Path
 
 # Create a custom logger
 logger = logging.getLogger("my_app")
@@ -11,7 +13,8 @@ logger.setLevel(logging.DEBUG)
 
 # Create handlers
 console_handler = logging.StreamHandler()
-file_handler = RotatingFileHandler('/home/Piano-LED-Visualizer/visualizer.log', maxBytes=500000, backupCount=10)
+log_path = Path(os.environ.get('PLV_LOG_PATH', str(Path(__file__).resolve().parents[1] / 'visualizer.log')))
+file_handler = RotatingFileHandler(log_path, maxBytes=500000, backupCount=10, delay=True)
 
 # Set the level for handlers
 console_handler.setLevel(logging.DEBUG)

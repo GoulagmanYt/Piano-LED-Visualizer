@@ -20,6 +20,7 @@ from lib.rtpmidi_diagnostics import (
     get_rtpmidi_peers,
     connect_rtpmidi_peer,
     disconnect_rtpmidi_peer,
+    reconcile_rtpmidi_autoconnect,
 )
 import lib.colormaps as cmap
 import psutil
@@ -2335,11 +2336,6 @@ def api_rtpmidi_connect():
     if result.get("success"):
         if hostname and app_state.usersettings:
             app_state.usersettings.change_setting_value("reliable_midi_host", str(hostname))
-            if port:
-                try:
-                    app_state.usersettings.change_setting_value("reliable_midi_port", str(port))
-                except Exception:
-                    pass
         if app_state.midiports:
             app_state.midiports.reconnect_ports(force=True)
     status_code = 200 if result.get("success") else 400
@@ -2365,44 +2361,10 @@ def api_set_rtp_autoconnect():
     if app_state.usersettings:
         app_state.usersettings.change_setting_value("rtp_autoconnect", target_str)
 
-    if is_port_disabled(target_str):
-        # Disconnect any connected RTP session
-        peers_info = get_rtpmidi_peers(timeout=1.5)
-        for peer in peers_info.get("connected_peers", []):
-            peer_id = peer.get("id")
-            if peer_id is not None:
-                disconnect_rtpmidi_peer(peer_id, timeout=1.5)
-        if app_state.midiports:
-            app_state.midiports.reconnect_ports(force=True)
-        return jsonify({"success": True, "target": "None", "connected": False})
-
-    # User specified a target peer (e.g. "OSCMidi" or hostname)
-    peers_info = get_rtpmidi_peers(timeout=2.0)
-    discovered = peers_info.get("discovered_peers", [])
-    matched_peer = None
-    for p in discovered:
-        if p.get("name") == target_str or p.get("hostname") == target_str:
-            matched_peer = p
-            break
-
-    if matched_peer:
-        host = matched_peer.get("hostname")
-        port = matched_peer.get("port", 5004)
-        name = matched_peer.get("name")
-    else:
-        host = target_str
-        port = 5004
-        name = target_str
-
-    res = connect_rtpmidi_peer(host, port, name)
-    if res.get("success"):
-        if app_state.usersettings:
-            app_state.usersettings.change_setting_value("reliable_midi_host", str(host))
-        if app_state.midiports:
-            app_state.midiports.reconnect_ports(force=True)
-        return jsonify({"success": True, "target": target_str, "connected": True, "result": res})
-    else:
-        return jsonify({"success": False, "error": res.get("error", "Failed to connect")}), 400
+    res = reconcile_rtpmidi_autoconnect(app_state.usersettings)
+    if app_state.midiports:
+        app_state.midiports.reconnect_ports(force=False)
+    return jsonify(dict(res, target=target_str)), 200 if res.get('success') else 503
 
 
 @webinterface.route('/api/get_runtime_diagnostics', methods=['GET'])

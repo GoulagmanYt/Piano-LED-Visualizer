@@ -2071,9 +2071,9 @@ function load_rtpmidi_peers(preferredTarget) {
                 if (connected.length > 0) {
                     const c = connected[0];
                     const lat = (c.latency_ms !== null && c.latency_ms !== undefined) ? ` (${Number(c.latency_ms).toFixed(1)} ms)` : '';
-                    statusText.innerHTML = `<span class="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span>Connected to <b>${c.name}</b>${lat}`;
+                    statusText.textContent = `Connected to ${c.name}${lat}`;
                 } else if (_current_rtp_autoconnect_target && _current_rtp_autoconnect_target !== "None") {
-                    statusText.innerHTML = `<span class="text-amber-400">Target: ${_current_rtp_autoconnect_target} (Waiting for peer on LAN...)</span>`;
+                    statusText.textContent = `Target: ${_current_rtp_autoconnect_target} (Waiting for peer on LAN...)`;
                 } else {
                     statusText.innerHTML = `<span class="text-gray-400">Auto-connect disabled. Output will remain local unless selected.</span>`;
                 }

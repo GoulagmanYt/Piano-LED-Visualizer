@@ -134,11 +134,11 @@ class MIDIEventProcessor:
             if queues is not None:
                 batch = queues.drain_queue(
                     midipending,
-                    max_messages=min(128, max_messages - processed),
+                    max_messages=min(16, max_messages - processed),
                 )
             else:
                 batch = []
-                while midipending and len(batch) < min(128, max_messages - processed):
+                while midipending and len(batch) < min(16, max_messages - processed):
                     batch.append(midipending.popleft())
             if not batch:
                 break
@@ -149,7 +149,7 @@ class MIDIEventProcessor:
                 self._update_midi_activity(cur_time)
             saving.restart_time()
             for msg, msg_timestamp in batch:
-                diagnostics.record_duration("midi_receive_to_process", now_perf - msg_timestamp)
+                diagnostics.record_duration("midi_receive_to_process", time.perf_counter() - msg_timestamp)
                 _process_one(msg, msg_timestamp)
                 processed += 1
         diagnostics.increment_counter("midi_events_processed_total", processed)

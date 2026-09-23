@@ -37,7 +37,15 @@ class MidiQueues:
         self.drop_counter = 0
         self.drop_counts = {}
         self._lock = threading.RLock()
+        self.forwarding_enabled = True
         self.activity = threading.Event()
+
+    def set_forwarding_enabled(self, enabled):
+        """A new output connection starts a new musical session, never a replay."""
+        with self._lock:
+            self.forwarding_enabled = bool(enabled)
+            self.live_forward_queue.clear()
+            self.scheduled_forward_queue.clear()
 
     def classify_message(self, msg):
         msg_type = getattr(msg, "type", None)
@@ -129,15 +137,10 @@ class MidiQueues:
         item_forward = (msg, timestamp, source)
         
         with self._lock:
-            self.queue_with_policy(
-                self.live_visualizer_queue, item, "live", reserve_slots=self.reserved_noteoff_slots,
-            )
-            self.queue_with_policy(
-                self.live_learning_queue, item, "learning", reserve_slots=self.reserved_noteoff_slots, count_drops=False,
-            )
-            self.queue_with_policy(
-                self.live_forward_queue, item_forward, source, reserve_slots=self._reserve_slots_for(self.live_forward_queue),
-            )
+            self.live_visualizer_queue.append(item)
+            self.live_learning_queue.append(item)
+            if self.forwarding_enabled:
+                self.live_forward_queue.append(item_forward)
             if is_note:
                 self.queue_with_policy(
                     self.websocket_publish_queue,
@@ -146,12 +149,15 @@ class MidiQueues:
                     reserve_slots=self._reserve_slots_for(self.websocket_publish_queue),
                     count_drops=False,
                 )
+            self.activity.set()
             return True
 
     def enqueue_live_forward(self, msg, timestamp=None, source="forward"):
         if timestamp is None:
             timestamp = time.perf_counter()
         with self._lock:
+            if not self.forwarding_enabled:
+                return False
             return self.queue_with_policy(
                 self.live_forward_queue,
                 (msg, timestamp, source),
@@ -184,6 +190,8 @@ class MidiQueues:
             due_time = enqueued_at
         item = (msg, enqueued_at, due_time, source)
         with self._lock:
+            if not self.forwarding_enabled:
+                return False
             heapq.heappush(
                 self.scheduled_forward_queue,
                 (due_time, next(self._scheduled_sequence), item),
