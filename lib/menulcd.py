@@ -1578,7 +1578,7 @@ class MenuLCD:
         if location == "Play_MIDI":
             if choice == "Save MIDI":
                 now = datetime.datetime.now()
-                current_date = now.strftime("%Y-%m-%d %H:%M")
+                current_date = now.strftime("%Y-%m-%d_%H-%M-%S")
                 self.render_message("Recording stopped", "Saved as " + current_date, 2000)
                 self.saving.save(current_date)
                 self.update_songs()

@@ -85,3 +85,89 @@ def test_orphan_client_removed_without_removing_active_session():
          patch('lib.rtpmidi_diagnostics.disconnect_rtpmidi_peer', return_value={'success': True}) as remove:
         assert connect_rtpmidi_peer('pc.local', 5004, 'Studio')['success']
         remove.assert_called_once_with(1, timeout=1.5)
+
+
+def test_midi_recording_filename_has_no_colons_and_is_valid():
+    from lib.song_file_security import validate_song_filename
+    from lib.savemidi import SaveMIDI
+    import datetime
+
+    # Test format generated in views_api
+    now = datetime.datetime.now()
+    recorded_name = now.strftime("%Y-%m-%d_%H-%M-%S")
+    assert ":" not in recorded_name
+    valid_name = validate_song_filename(f"{recorded_name}_main.mid")
+    assert valid_name == f"{recorded_name}_main.mid"
+
+    # Test SaveMIDI sanitizes input if colons are somehow passed
+    saving = SaveMIDI()
+    saving.messages_to_save = {"main": []}
+    menu = Mock()
+    saving.add_instance(menu)
+    with patch('mido.MidiFile.save') as mock_save:
+        saving.save("2026-09-23 18:56")
+        mock_save.assert_called_once_with("Songs/2026-09-23 18-56_main.mid")
+    menu.render_message.assert_called_once_with("File saved", "2026-09-23 18-56.mid", 1500)
+
+
+def test_legacy_colon_song_migration():
+    from webinterface.views_api import _migrate_legacy_colon_song_files
+    from pathlib import Path
+
+    mock_entry = Mock()
+    mock_entry.name = "2026-09-23 18:56_main.mid"
+    with patch.object(Path, 'is_dir', return_value=True), \
+         patch.object(Path, 'iterdir', return_value=[mock_entry]), \
+         patch.object(Path, 'exists', return_value=False):
+        _migrate_legacy_colon_song_files(base_dir="FakeSongs")
+        mock_entry.rename.assert_called_once()
+        target_path = mock_entry.rename.call_args[0][0]
+        assert "2026-09-23 18-56_main.mid" in str(target_path)
+
+
+def test_usersettings_auto_heals_reliable_midi_port_5004(tmp_path):
+    from lib.usersettings import UserSettings
+    import xml.etree.ElementTree as ET
+
+    config_path = tmp_path / "settings.xml"
+    default_config_path = tmp_path / "default_settings.xml"
+
+    default_config_path.write_text("<settings><reliable_midi_port>5056</reliable_midi_port></settings>")
+    config_path.write_text("<settings><reliable_midi_port>5004</reliable_midi_port></settings>")
+
+    settings = UserSettings(config=str(config_path), default_config=str(default_config_path))
+    assert settings.get_setting_value("reliable_midi_port") == "5056"
+
+
+def test_stop_animations_leaves_flag_false():
+    from lib.functions import stop_animations
+
+    class FakeMenu:
+        is_idle_animation_running = True
+        is_animation_running = True
+        t = None
+
+    menu = FakeMenu()
+    stop_animations(menu)
+    assert menu.is_animation_running is False
+    assert menu.is_idle_animation_running is False
+
+
+def test_profile_manager_closes_connections(tmp_path):
+    import sqlite3
+    from lib.profile_manager import ProfileManager
+
+    db_path = str(tmp_path / "test_profiles.db")
+    pm = ProfileManager(db_path=db_path, songs_dir=str(tmp_path))
+
+    with pm._connect() as conn:
+        conn.execute("SELECT 1")
+        saved_conn = conn
+
+    # Attempting to execute on saved_conn outside the with block must fail because it's closed
+    try:
+        saved_conn.execute("SELECT 1")
+        assert False, "Connection should have been closed"
+    except sqlite3.ProgrammingError:
+        pass  # Expected: Cannot operate on a closed database
+

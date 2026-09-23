@@ -314,61 +314,112 @@ function update_wifi_list(response) {
     let connected_wifi = response["connected_wifi"]
     let connected_wifi_address = response["connected_wifi_address"]
 
-    document.getElementById("connected-wifi").innerHTML = connected_wifi;
-    document.getElementById("connected_wifi_address").innerHTML = "BSSID: " + connected_wifi_address;
+    document.getElementById("connected-wifi").textContent = connected_wifi;
+    document.getElementById("connected_wifi_address").textContent = "BSSID: " + connected_wifi_address;
 
     // Loop through wifi_list
     wifi_list.forEach(wifi => {
+        const essid = wifi["ESSID"] || "";
+        const address = wifi["Address"] || "";
+        const signal = wifi["Signal Strength"];
+
         const listItem = document.createElement("div");
         listItem.className = "glass-light mb-4 p-2 rounded-glass transition-smooth-fast";
 
         const partial_icon = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" ' +
-            'stroke-width="1.5" stroke="currentColor" class="w-6 h-6 absolute">' + getWifiIcon(wifi["Signal Strength"]) + '</svg>';
+            'stroke-width="1.5" stroke="currentColor" class="w-6 h-6 absolute">' + getWifiIcon(signal) + '</svg>';
 
         const full_wifi_icon = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" ' +
             'stroke-width="1.5" stroke="currentColor" class="w-6 h-6 opacity-30">' +
             '<path d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 ' +
-            '8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" /></svg>'
+            '8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" /></svg>';
 
         const wifi_icon = "<div class='relative inline-block'>" + partial_icon + full_wifi_icon + "</div>";
 
-        listItem.innerHTML =
-            `<div class="rounded-md flex items-center justify-between">
-                ${wifi_icon}
-                <div class="block">
-                    <div class="ml-4 truncate w-40">${wifi["ESSID"]}</div>
-                    <div class="ml-4 text-xs text-center opacity-50">${wifi["Address"]}</div>
-                </div>
-                <button onclick="this.classList.add('hidden');                            
-                            document.getElementById('wifi_${wifi["ESSID"]}').classList.remove('hidden');
-                            document.getElementById('wifi_password_${wifi["ESSID"]}').focus()"
-                    class="w-20 outline-none bg-blue-500 dark:bg-blue-500 py-2 font-bold rounded-glass transition-smooth-fast" data-translate="connect">
-                    ${translate("connect")}
-                </button>            
-            
-            </div>
-            <div id="wifi_${wifi["ESSID"]}" class="hidden ">
-                <div class="relative">
-                    <input id="wifi_password_${wifi["ESSID"]}" class="mt-4 h-10 block w-full dark:text-black glass-light py-2 px-2 rounded-glass leading-tight transition-smooth-fast" type="password" placeholder="Type Wi-Fi password here">
-                    <button class="absolute top-1/4 right-2" onclick="togglePasswordVisibility(this, 'wifi_password_${wifi["ESSID"]}');">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6" id="toggle-eye-${wifi["ESSID"]}">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
-                        </svg>
-                    </button>
-                </div>
-                <div class="text-xs text-red-400">
-                <div data-translate="incorrect_password">${translate("incorrect_password")}</div>
-                <br>
-                <div data-translate="if_the_hotspot">${translate("if_the_hotspot")}</div>
-                </div>
-                <button onclick="change_setting('connect_to_wifi', '${wifi["ESSID"]}', document.getElementById('wifi_password_${wifi["ESSID"]}').value);
-                    temporary_disable_button(this, 5000);"
-                    class="m-auto flex mt-2 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-md">
-                <span class="w-20" data-translate="connect">${translate("connect")}</span></button>
-            </div>
-            `;
+        const wifiRow = document.createElement("div");
+        wifiRow.className = "rounded-md flex items-center justify-between";
 
+        const iconContainer = document.createElement("div");
+        iconContainer.innerHTML = wifi_icon;
+
+        const infoBlock = document.createElement("div");
+        infoBlock.className = "block";
+        const essidDiv = document.createElement("div");
+        essidDiv.className = "ml-4 truncate w-40";
+        essidDiv.textContent = essid;
+        const addrDiv = document.createElement("div");
+        addrDiv.className = "ml-4 text-xs text-center opacity-50";
+        addrDiv.textContent = address;
+        infoBlock.appendChild(essidDiv);
+        infoBlock.appendChild(addrDiv);
+
+        const openConnectBtn = document.createElement("button");
+        openConnectBtn.className = "w-20 outline-none bg-blue-500 dark:bg-blue-500 py-2 font-bold rounded-glass transition-smooth-fast";
+        openConnectBtn.setAttribute("data-translate", "connect");
+        openConnectBtn.textContent = translate("connect");
+
+        wifiRow.appendChild(iconContainer);
+        wifiRow.appendChild(infoBlock);
+        wifiRow.appendChild(openConnectBtn);
+
+        const connectPanel = document.createElement("div");
+        connectPanel.className = "hidden";
+
+        const relativeDiv = document.createElement("div");
+        relativeDiv.className = "relative";
+
+        const passwordInput = document.createElement("input");
+        passwordInput.className = "mt-4 h-10 block w-full dark:text-black glass-light py-2 px-2 rounded-glass leading-tight transition-smooth-fast";
+        passwordInput.type = "password";
+        passwordInput.placeholder = "Type Wi-Fi password here";
+
+        const toggleEyeBtn = document.createElement("button");
+        toggleEyeBtn.className = "absolute top-1/4 right-2";
+        toggleEyeBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+            </svg>`;
+        toggleEyeBtn.addEventListener("click", () => {
+            togglePasswordVisibility(toggleEyeBtn, passwordInput);
+        });
+
+        relativeDiv.appendChild(passwordInput);
+        relativeDiv.appendChild(toggleEyeBtn);
+
+        const warningDiv = document.createElement("div");
+        warningDiv.className = "text-xs text-red-400";
+        warningDiv.innerHTML = `
+            <div data-translate="incorrect_password">${translate("incorrect_password")}</div>
+            <br>
+            <div data-translate="if_the_hotspot">${translate("if_the_hotspot")}</div>`;
+
+        const submitBtn = document.createElement("button");
+        submitBtn.className = "m-auto flex mt-2 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-md";
+        const submitSpan = document.createElement("span");
+        submitSpan.className = "w-20";
+        submitSpan.setAttribute("data-translate", "connect");
+        submitSpan.textContent = translate("connect");
+        submitBtn.appendChild(submitSpan);
+
+        submitBtn.addEventListener("click", () => {
+            change_setting('connect_to_wifi', essid, passwordInput.value);
+            temporary_disable_button(submitBtn, 5000);
+        });
+
+        openConnectBtn.addEventListener("click", () => {
+            openConnectBtn.classList.add("hidden");
+            connectPanel.classList.remove("hidden");
+            passwordInput.focus();
+        });
+
+        connectPanel.appendChild(relativeDiv);
+        connectPanel.appendChild(warningDiv);
+        connectPanel.appendChild(submitBtn);
+
+        listItem.appendChild(wifiRow);
+        listItem.appendChild(connectPanel);
         wifiListElement.appendChild(listItem);
+
         if (connected_wifi !== "No Wi-Fi interface found." && connected_wifi !== "Running as hotspot") {
             document.getElementById("disconnect-button").classList.remove("hidden");
             document.getElementById("connected_wifi_address").classList.remove("hidden");
@@ -379,7 +430,8 @@ function update_wifi_list(response) {
 }
 
 function togglePasswordVisibility(button, inputId) {
-    const passwordInput = document.getElementById(inputId);
+    const passwordInput = (typeof inputId === 'string') ? document.getElementById(inputId) : inputId;
+    if (!passwordInput) return;
     const eyeIcon = button.querySelector('svg:not(.hidden)'); // Get the currently visible icon
     const eyeSlashIcon = button.querySelector('svg.hidden'); // Get the currently hidden icon
 

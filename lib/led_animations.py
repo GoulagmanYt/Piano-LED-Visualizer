@@ -185,6 +185,15 @@ class AnimationRegistry:
         except ValueError as e:
             return False
         
+        import threading
+
+        # Stop previous animation thread if still running
+        existing_thread = getattr(menu, 't', None)
+        if existing_thread is not None and existing_thread.is_alive():
+            menu.is_idle_animation_running = False
+            menu.is_animation_running = False
+            existing_thread.join(timeout=0.5)
+
         # Set running flag
         if is_idle:
             menu.is_idle_animation_running = True
@@ -192,7 +201,6 @@ class AnimationRegistry:
             menu.is_animation_running = True
         
         # Start animation in thread
-        import threading
         menu.t = threading.Thread(target=info.function, args=args)
         menu.t.start()
         

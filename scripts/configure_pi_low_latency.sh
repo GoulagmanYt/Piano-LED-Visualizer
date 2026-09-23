@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLV_DIR="${PLV_DIR:-/home/Piano-LED-Visualizer}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PLV_DIR="${PLV_DIR:-$PROJECT_ROOT}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
 run() {
@@ -166,6 +168,9 @@ for tag, value in (("reliable_midi_host", "oscmidi-rtp.local"), ("reliable_midi_
         elem = ET.SubElement(root, tag)
         changed = True
     if not (elem.text or "").strip():
+        elem.text = value
+        changed = True
+    elif tag == "reliable_midi_port" and (elem.text or "").strip() == "5004":
         elem.text = value
         changed = True
 if changed:

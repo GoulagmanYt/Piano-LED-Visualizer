@@ -57,7 +57,7 @@
         <!-- Song Header -->
         <div class="mb-3">
             <div class="flex items-start justify-between mb-2">
-                <div class="flex-1 min-w-0 song_wrapper">
+                <div class="flex-1 min-w-0 song_wrapper" data-song-name="{{key}}">
                     <div class="flex items-center space-x-2 mb-2">
                         <svg onclick="this.closest('.song_wrapper').querySelector('.song_name').classList.remove('pointer-events-none');
                         this.closest('.song_wrapper').querySelector('.song_name').focus();
@@ -73,7 +73,7 @@
                                type="text"
                                value="{{key}}">
                         <div class="hidden song_name_actions flex items-center space-x-1">
-                            <svg onclick="change_setting('change_song_name', '{{key}}', this.closest('.song_wrapper').querySelector('.song_name').value+'.mid');
+                            <svg onclick="change_setting('change_song_name', this.closest('.song_wrapper').dataset.songName, this.closest('.song_wrapper').querySelector('.song_name').value+'.mid');
                             this.closest('.song_name_actions').classList.add('hidden');
                             this.closest('.song_name_actions').classList.remove('flex');
                             this.closest('.song_wrapper').querySelector('.song_name').classList.add('pointer-events-none');
@@ -118,11 +118,11 @@
 
         <!-- Action Buttons -->
         <div class="flex flex-wrap items-center justify-center sm:justify-between gap-2 pt-3 border-t border-white/10">
-            <div class="flex items-center space-x-2">
-                <button onclick="const midiPlayer = document.getElementById('midi_player');
-                midiPlayer.dataset.songName = '{{key}}';
+                <button data-song-name="{{key}}" onclick="const midiPlayer = document.getElementById('midi_player');
+                const song = this.dataset.songName;
+                midiPlayer.dataset.songName = song;
                 midiPlayer.src =
-                'api/change_setting?setting_name=download_song&value={{key}}';
+                'api/change_setting?setting_name=download_song&value=' + encodeURIComponent(song);
                 document.getElementById('midi_player_wrapper').classList.remove('hidden');
 
                 if (midiPlayer.__plvLoadHandler) {
@@ -131,7 +131,7 @@
                 midiPlayer.__plvLoadHandler = function (e) {
                     if(document.getElementById('player_and_songs').offsetWidth > 500 && midiPlayer.noteSequence.notes.length < 6000){
                         document.getElementById('myVisualizer').src =
-                        'api/change_setting?setting_name=download_song&value={{key}}';
+                        'api/change_setting?setting_name=download_song&value=' + encodeURIComponent(song);
                         document.getElementById('midi_visualizer_wrapper').classList.remove('hidden');
                         midiPlayer.addVisualizer(document.getElementById('myVisualizer'));
                         var note_width = document.getElementById('player_and_songs').offsetWidth / 54;
@@ -172,10 +172,11 @@
                     </svg>
                 </button>
 
-                <button onclick="document.getElementById('stop_learning').click();
-                change_setting('learning_load_song', '{{key}}');get_learning_status();
+                <button data-song-name="{{key}}" onclick="document.getElementById('stop_learning').click();
+                const song = this.dataset.songName;
+                change_setting('learning_load_song', song);get_learning_status();
                 document.getElementById('learn_midi_wrapper').classList.remove('hidden');
-                window.loadSheet('{{key}}')"
+                window.loadSheet(song)"
                         class="p-2 glass-light hover:glass rounded-glass transition-smooth-fast cursor-pointer group"
                         title="Learn" data-translate-title="learn">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-600 dark:text-gray-400 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24"
@@ -189,7 +190,7 @@
                     </svg>
                 </button>
 
-                <a href="/api/change_setting?setting_name=download_song&value={{key}}"
+                <a href="/api/change_setting?setting_name=download_song&value={{key|urlencode}}"
                    class="p-2 glass-light hover:glass rounded-glass transition-smooth-fast cursor-pointer group"
                    title="Download" data-translate-title="download">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-600 dark:text-gray-400 group-hover:text-green-500 transition-colors" fill="none" viewBox="0 0 24 24"
@@ -211,7 +212,7 @@
                           d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                 </svg>
             </button>
-            <button onclick="change_setting('remove_song', '{{key}}');
+            <button data-song-name="{{key}}" onclick="change_setting('remove_song', this.dataset.songName);
             this.closest('.song_card').classList.add('pointer-events-none', 'animate-pulse', 'opacity-50');"
                     class="p-2 glass-light hover:glass rounded-glass transition-smooth-fast cursor-pointer hidden text-red-400 font-semibold text-xs"
                     data-translate="confirm">

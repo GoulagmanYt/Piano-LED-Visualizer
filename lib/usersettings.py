@@ -28,6 +28,8 @@ class UserSettings:
         self.pending_reset = False
 
         self.copy_missing()
+        if str(self.cache.get("reliable_midi_port", "")).strip() == "5004":
+            self.change_setting_value("reliable_midi_port", "5056")
         if self.pending_changes:
             self.save_changes()
 

@@ -99,8 +99,8 @@ def connectall(usersettings=None):
         else:
             print(f"INFO: Attempting to connect {input_port} ({input_port_id}) to {secondary_input_port} ({secondary_input_port_id})")
             # Two-way connection: input -> secondary and secondary -> input
-            result1 = subprocess.run(f"aconnect {input_port_id} {secondary_input_port_id}", shell=True, capture_output=True, text=True)
-            result2 = subprocess.run(f"aconnect {secondary_input_port_id} {input_port_id}", shell=True, capture_output=True, text=True)
+            result1 = subprocess.run(["aconnect", str(input_port_id), str(secondary_input_port_id)], capture_output=True, text=True)
+            result2 = subprocess.run(["aconnect", str(secondary_input_port_id), str(input_port_id)], capture_output=True, text=True)
             
             # Check results and provide detailed feedback
             success1 = result1.returncode == 0 or "Connection is already subscribed" in result1.stderr

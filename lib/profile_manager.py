@@ -1,3 +1,4 @@
+import contextlib
 import sqlite3
 import threading
 import os
@@ -29,13 +30,18 @@ class ProfileManager:
         self._init_db()
 
     # --------------- Internal helpers ---------------
+    @contextlib.contextmanager
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         try:
-            conn.execute("PRAGMA foreign_keys = ON;")
-        except Exception:
-            pass
-        return conn
+            try:
+                conn.execute("PRAGMA foreign_keys = ON;")
+            except Exception:
+                pass
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._connect() as conn:

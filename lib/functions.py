@@ -630,13 +630,15 @@ def calculate_brightness(ledsettings):
 
 
 def stop_animations(menu):
-    temp_is_idle_animation_running = menu.is_idle_animation_running
-    temp_is_animation_running = menu.is_animation_running
+    current = threading.current_thread()
+    thread = getattr(menu, 't', None)
+    # If called from within the currently active animation thread, do not self-terminate
+    if thread is not None and current is thread:
+        return
     menu.is_idle_animation_running = False
     menu.is_animation_running = False
-    time.sleep(0.3)
-    menu.is_idle_animation_running = temp_is_idle_animation_running
-    menu.is_animation_running = temp_is_animation_running
+    if thread is not None and thread.is_alive() and current is not thread:
+        thread.join(timeout=0.5)
 
 def theaterChase(ledstrip, ledsettings, menu, speed_ms=None):
     """Movie theater light style chaser animation."""

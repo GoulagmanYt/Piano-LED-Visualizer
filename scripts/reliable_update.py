@@ -153,7 +153,10 @@ def restore_backup(project_dir: Path, backup_path: Path) -> None:
             destination = (project_root / member.name).resolve()
             if destination != project_root and project_root not in destination.parents:
                 raise UpdateError(f"Unsafe backup member: {member.name}")
-        archive.extractall(project_root)
+        if hasattr(tarfile, 'data_filter'):
+            archive.extractall(project_root, filter='data')
+        else:
+            archive.extractall(project_root)
 
 
 def prune_backups(backup_dir: Path, keep: int = 5) -> None:

@@ -104,6 +104,25 @@ def _sidecar_paths(song_name):
         yield song_path.with_suffix(extension)
 
 
+def _migrate_legacy_colon_song_files(base_dir=SONGS_DIR):
+    base_path = Path(base_dir)
+    if not base_path.is_dir():
+        return
+    try:
+        for entry in base_path.iterdir():
+            if ":" in entry.name:
+                clean_name = entry.name.replace(":", "-")
+                target = base_path / clean_name
+                if not target.exists():
+                    entry.rename(target)
+                    logger.info("Migrated legacy song filename: %s -> %s", entry.name, clean_name)
+    except Exception as exc:
+        logger.warning("Error migrating legacy song filenames: %s", exc)
+
+
+_migrate_legacy_colon_song_files()
+
+
 def _bundle_renames(current_name, new_name):
     old_prefix = bundle_prefix(current_name)
     new_prefix = Path(new_name).stem
@@ -1258,7 +1277,7 @@ def change_setting():
 
     if setting_name == "save_recording":
         now = datetime.datetime.now()
-        current_date = now.strftime("%Y-%m-%d %H:%M")
+        current_date = now.strftime("%Y-%m-%d_%H-%M-%S")
         app_state.saving.save(current_date)
         return jsonify(success=True, reload_songs=True)
 
@@ -2242,6 +2261,7 @@ def get_songs():
 
     songs_list_dict = {}
 
+    _migrate_legacy_colon_song_files()
     path = 'Songs/'
     songs_list = os.listdir(path)
     songs_list = [os.path.join(path, i) for i in songs_list]

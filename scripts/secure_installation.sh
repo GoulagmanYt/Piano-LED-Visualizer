@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run after deployment, before enabling OverlayFS.
 set -euo pipefail
-PLV_DIR="${PLV_DIR:-/home/Piano-LED-Visualizer}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PLV_DIR="${PLV_DIR:-$PROJECT_ROOT}"
 [ "$(id -u)" -eq 0 ] || { echo 'Run with sudo' >&2; exit 1; }
 [ -f "$PLV_DIR/visualizer.py" ] && [ -d "$PLV_DIR/lib" ] || exit 1
 # Do not traverse symlinks or other mounted filesystems.

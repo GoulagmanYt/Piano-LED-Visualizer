@@ -74,11 +74,13 @@ class SaveMIDI:
                                 time=int(time_delay * 40000)))
                 self.last_note_time = message[1]
 
-            self.mid.save('Songs/' + filename + '_' + str(key) + '.mid')
+            safe_filename = filename.replace(":", "-")
+            self.mid.save('Songs/' + safe_filename + '_' + str(key) + '.mid')
 
         self.is_recording = False
         self.messages_to_save = None
-        self.menu.render_message("File saved", filename + ".mid", 1500)
+        safe_display = filename.replace(":", "-")
+        self.menu.render_message("File saved", safe_display + ".mid", 1500)
 
     def restart_time(self):
         self.start_time = time.perf_counter()
