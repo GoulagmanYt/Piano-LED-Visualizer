@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import threading
 from functools import wraps
+
+logger = logging.getLogger("my_app")
 
 _session_lock = threading.RLock()
 
@@ -288,7 +291,7 @@ def connect_rtpmidi_peer(hostname: str, port: int = 5004, name: str | None = Non
         current_peers = get_rtpmidi_peers(timeout=1.5)
         matches = []
         for cp in current_peers.get("connected_peers", []):
-            same_name = name and cp.get("name") == name
+            same_name = bool(name and (cp.get("name") == name or str(name).lower() in (cp.get("name") or "").lower()))
             same_host = cp.get("hostname") == clean_host
             if (same_name or same_host) and cp.get("port") == clean_port:
                 if cp.get("orphan"):
@@ -341,6 +344,26 @@ def disconnect_rtpmidi_peer(peer_id: int | str, *, timeout=3.0):
         return {"success": False, "error": str(exc)}
 
 
+_MDNS_HOSTNAME_RE = re.compile(r"[^a-zA-Z0-9\-]")
+_MDNS_MULTIDASH_RE = re.compile(r"-+")
+
+
+def _derive_mdns_hostname(session_name: str) -> str:
+    """Derive the mDNS hostname from an RTP session name.
+
+    Mirrors the convention used by OSCMidi and other Apple MIDI clients:
+    lowercased, non-alphanumeric replaced by hyphens, suffixed with -rtp.local.
+    This is a best-effort heuristic; if the peer uses a different convention
+    rtpmidid will simply create a waiting listener that connects once the peer
+    actually appears on the network.
+    """
+    label = _MDNS_HOSTNAME_RE.sub("-", session_name).strip("-").lower()
+    label = _MDNS_MULTIDASH_RE.sub("-", label)
+    if not label:
+        label = "rtpmidi"
+    return f"{label}-rtp.local"
+
+
 @_serialized
 def reconcile_rtpmidi_autoconnect(usersettings):
     """Apply the saved target at startup and after peer/daemon disappearance.
@@ -356,20 +379,52 @@ def reconcile_rtpmidi_autoconnect(usersettings):
     disabled = target.lower() in {"none", "disabled", ""}
     discovered = next((p for p in info["discovered_peers"]
                        if target in (p["name"], p["hostname"])), None)
-    host = discovered["hostname"] if discovered else target
     port = discovered["port"] if discovered else 5004
+
+    candidate_hosts: set[str] = set()
+    candidate_names: set[str] = {target}
+
+    if discovered:
+        host = discovered["hostname"]
+        peer_name = discovered["name"]
+        candidate_hosts.add(host)
+        candidate_names.add(peer_name)
+    elif "." not in target and ":" not in target:
+        host = _derive_mdns_hostname(target)
+        peer_name = target
+        candidate_hosts.add(host)
+        candidate_hosts.add(target)
+    else:
+        host = target
+        peer_name = target
+        candidate_hosts.add(host)
+
     for peer in info["connected_peers"]:
         if peer.get("kind") not in {"client", "listener"}:
             continue
-        matches = peer.get("port") == port and (peer.get("hostname") == host or peer.get("name") == target)
+        peer_host = peer.get("hostname", "")
+        peer_name_val = peer.get("name", "")
+        host_match = peer_host in candidate_hosts
+        name_match = (
+            peer_name_val in candidate_names
+            or any(c and c.lower() in peer_name_val.lower() for c in candidate_names)
+        )
+        matches = peer.get("port") == port and (host_match or name_match)
         if disabled or not matches or peer.get("orphan"):
             result = disconnect_rtpmidi_peer(peer["id"], timeout=1.5)
             if not result.get("success"):
                 return result
     if disabled:
         return {"success": True, "connected": False}
-    # A service name without a current announcement isn't a DNS hostname.
-    # Wait for discovery rather than creating endless invalid listeners.
+    # When the target is a service name not yet discovered via mDNS (typical
+    # cold-boot race), derive the mDNS hostname and issue a connect.  rtpmidid
+    # creates a waiting listener that auto-connects once the peer appears,
+    # eliminating the multi-minute discovery delay.
     if discovered is None and "." not in target and ":" not in target:
-        return {"success": True, "connected": False, "waiting": True}
-    return connect_rtpmidi_peer(host, port, discovered["name"] if discovered else target)
+        logger.info(
+            "RTP autoconnect: peer '%s' not yet discovered via mDNS, "
+            "trying derived hostname '%s:%d'",
+            target, host, port,
+        )
+        return connect_rtpmidi_peer(host, port, target)
+    return connect_rtpmidi_peer(host, port, peer_name)

@@ -1313,11 +1313,17 @@ class MidiPorts:
         last_input_present = None
         last_secondary_present = None
         last_play_present = None
+        # Start at threshold so reconcile fires on the very first iteration
+        # (critical for cold-boot auto-connect).
+        reconcile_tick = 4
 
         while self.monitor_running:
             try:
-                from lib.rtpmidi_diagnostics import reconcile_rtpmidi_autoconnect
-                reconcile_rtpmidi_autoconnect(self.usersettings)
+                reconcile_tick += 1
+                if reconcile_tick >= 4:
+                    reconcile_tick = 0
+                    from lib.rtpmidi_diagnostics import reconcile_rtpmidi_autoconnect
+                    reconcile_rtpmidi_autoconnect(self.usersettings)
                 if not self.monitor_running:
                     break
                 last_input_present, last_secondary_present, last_play_present = self._auto_reconnect_once(

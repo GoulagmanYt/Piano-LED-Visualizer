@@ -44,11 +44,25 @@ def test_autoconnect_retries_when_peer_appears_after_startup():
     info = {'success': True, 'connected_peers': [], 'discovered_peers': []}
     with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
          patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer', return_value={'success': True}) as connect:
-        assert reconcile_rtpmidi_autoconnect(settings)['waiting']
-        connect.assert_not_called()
+        # When peer is not yet discovered, reconcile attempts connect via
+        # derived mDNS hostname rather than passively waiting.
+        reconcile_rtpmidi_autoconnect(settings)
+        connect.assert_called_once_with('studio-rtp.local', 5004, 'Studio')
+        connect.reset_mock()
+        # When peer IS discovered, reconcile uses the announced hostname.
         info['discovered_peers'].append({'name': 'Studio', 'hostname': 'pc.local', 'port': 5006})
         reconcile_rtpmidi_autoconnect(settings)
         connect.assert_called_once_with('pc.local', 5006, 'Studio')
+
+
+def test_derive_mdns_hostname_convention():
+    from lib.rtpmidi_diagnostics import _derive_mdns_hostname
+    assert _derive_mdns_hostname("OSCMidi") == "oscmidi-rtp.local"
+    assert _derive_mdns_hostname("OSCMidiRobin") == "oscmidirobin-rtp.local"
+    assert _derive_mdns_hostname("My Piano") == "my-piano-rtp.local"
+    assert _derive_mdns_hostname("Studio") == "studio-rtp.local"
+    assert _derive_mdns_hostname("") == "rtpmidi-rtp.local"
+    assert _derive_mdns_hostname("peer--name") == "peer-name-rtp.local"
 
 
 def test_disabled_autoconnect_removes_outgoing_routes_only():
@@ -171,3 +185,29 @@ def test_profile_manager_closes_connections(tmp_path):
     except sqlite3.ProgrammingError:
         pass  # Expected: Cannot operate on a closed database
 
+
+
+def test_reconcile_preserves_waiting_listener_on_derived_mdns_host():
+    settings = Mock()
+    settings.get_setting_value.return_value = 'OSCMidi'
+    info = {
+        'success': True,
+        'discovered_peers': [],
+        'connected_peers': [
+            {
+                'id': 16,
+                'name': 'RtMidiOut Client-RtMidi output  OSCMidi',
+                'hostname': 'oscmidi-rtp.local',
+                'port': 5004,
+                'kind': 'listener',
+                'status': 'WAITING',
+            }
+        ],
+    }
+    with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
+         patch('lib.rtpmidi_diagnostics.disconnect_rtpmidi_peer') as disc, \
+         patch('subprocess.check_output') as cmd:
+        res = reconcile_rtpmidi_autoconnect(settings)
+        assert res.get('success') is True
+        disc.assert_not_called()
+        cmd.assert_not_called()
