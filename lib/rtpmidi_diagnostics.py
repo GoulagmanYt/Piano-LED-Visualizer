@@ -346,6 +346,7 @@ def disconnect_rtpmidi_peer(peer_id: int | str, *, timeout=3.0):
 
 _MDNS_HOSTNAME_RE = re.compile(r"[^a-zA-Z0-9\-]")
 _MDNS_MULTIDASH_RE = re.compile(r"-+")
+_DEFAULT_RTP_PORT = 5004
 
 
 def _derive_mdns_hostname(session_name: str) -> str:
@@ -364,6 +365,80 @@ def _derive_mdns_hostname(session_name: str) -> str:
     return f"{label}-rtp.local"
 
 
+def _normalize_rtp_port(value, default=_DEFAULT_RTP_PORT):
+    try:
+        port = int(value)
+    except (TypeError, ValueError):
+        return default
+    if 1 <= port <= 65535:
+        return port
+    return default
+
+
+def _remember_rtp_port(usersettings, port):
+    port = _normalize_rtp_port(port)
+    try:
+        current = str(usersettings.get_setting_value("rtp_autoconnect_port") or "").strip()
+        if current != str(port):
+            usersettings.change_setting_value("rtp_autoconnect_port", str(port))
+    except Exception:
+        logger.debug("Unable to persist rtp_autoconnect_port=%s", port, exc_info=True)
+    return port
+
+
+def _remembered_rtp_port(usersettings):
+    try:
+        raw = usersettings.get_setting_value("rtp_autoconnect_port")
+    except Exception:
+        raw = None
+    return _normalize_rtp_port(raw)
+
+
+def _announcement_matches(target: str, peer: dict) -> bool:
+    if not target:
+        return False
+    name = str(peer.get("name") or "").strip()
+    host = str(peer.get("hostname") or "").strip()
+    tl = target.lower()
+    if target in {name, host} or tl in {name.lower(), host.lower()}:
+        return True
+    return bool(name) and tl in name.lower()
+
+
+def _peer_name_matches(peer_name: str, candidate_names: set[str]) -> bool:
+    if not peer_name:
+        return False
+    if peer_name in candidate_names:
+        return True
+    lower = peer_name.lower()
+    return any(c and c.lower() in lower for c in candidate_names)
+
+
+def _existing_target_session(connected_peers, candidate_hosts, candidate_names):
+    """Return the best existing client/listener for the autoconnect target."""
+    best = None
+    for peer in connected_peers:
+        if peer.get("kind") not in {"client", "listener"}:
+            continue
+        if peer.get("orphan"):
+            continue
+        host_match = peer.get("hostname", "") in candidate_hosts
+        name_match = _peer_name_matches(str(peer.get("name") or ""), candidate_names)
+        if not (host_match or name_match):
+            continue
+        status = str(peer.get("status") or "").upper()
+        score = 0
+        if peer.get("kind") == "client":
+            score += 20
+        if status in {"CONNECTED", "ESTABLISHED", "3", "2"}:
+            score += 10
+        elif status in {"WAITING", "CONNECTING", "1"}:
+            score += 5
+        if best is None or score > best[0]:
+            best = (score, peer)
+    return best[1] if best else None
+
+
 @_serialized
 def reconcile_rtpmidi_autoconnect(usersettings):
     """Apply the saved target at startup and after peer/daemon disappearance.
@@ -371,60 +446,101 @@ def reconcile_rtpmidi_autoconnect(usersettings):
     Called only by the port monitor or an explicit web request, never by MIDI
     callbacks. The deployment disables daemon-created discovery routes while
     retaining mDNS announcements, so there is one owner of outgoing sessions.
+
+    Port selection priority (OSCMidi may bind 5004, then 5006/5008 if busy):
+    1. Live mDNS announcement for the target
+    2. Existing matching listener/client (preserve across mDNS flaps)
+    3. Last successful port stored in settings
+    4. Apple MIDI default 5004
     """
     target = str(usersettings.get_setting_value("rtp_autoconnect") or "None").strip()
     info = get_rtpmidi_peers(timeout=1.5)
     if not info.get("success"):
         return info
     disabled = target.lower() in {"none", "disabled", ""}
-    discovered = next((p for p in info["discovered_peers"]
-                       if target in (p["name"], p["hostname"])), None)
-    port = discovered["port"] if discovered else 5004
+    discovered = next(
+        (p for p in info["discovered_peers"] if _announcement_matches(target, p)),
+        None,
+    )
 
     candidate_hosts: set[str] = set()
-    candidate_names: set[str] = {target}
+    candidate_names: set[str] = {target} if target else set()
 
     if discovered:
         host = discovered["hostname"]
-        peer_name = discovered["name"]
+        peer_name = discovered["name"] or target
+        port = _normalize_rtp_port(discovered.get("port"))
         candidate_hosts.add(host)
-        candidate_names.add(peer_name)
+        if peer_name:
+            candidate_names.add(peer_name)
+        _remember_rtp_port(usersettings, port)
     elif "." not in target and ":" not in target:
         host = _derive_mdns_hostname(target)
         peer_name = target
+        port = _remembered_rtp_port(usersettings)
         candidate_hosts.add(host)
         candidate_hosts.add(target)
     else:
         host = target
         peer_name = target
+        port = _remembered_rtp_port(usersettings)
         candidate_hosts.add(host)
+
+    existing = None if disabled else _existing_target_session(
+        info["connected_peers"], candidate_hosts, candidate_names
+    )
+    if existing and discovered is None:
+        # Keep the live session's port across temporary mDNS disappearances.
+        # Falling back to 5004 here used to tear down working non-default ports.
+        port = _normalize_rtp_port(existing.get("port"), port)
+        existing_host = str(existing.get("hostname") or "").strip()
+        if existing_host:
+            host = existing_host
+            candidate_hosts.add(existing_host)
+        _remember_rtp_port(usersettings, port)
 
     for peer in info["connected_peers"]:
         if peer.get("kind") not in {"client", "listener"}:
             continue
         peer_host = peer.get("hostname", "")
-        peer_name_val = peer.get("name", "")
+        peer_name_val = str(peer.get("name") or "")
         host_match = peer_host in candidate_hosts
-        name_match = (
-            peer_name_val in candidate_names
-            or any(c and c.lower() in peer_name_val.lower() for c in candidate_names)
-        )
-        matches = peer.get("port") == port and (host_match or name_match)
+        name_match = _peer_name_matches(peer_name_val, candidate_names)
+        # Match by identity (name/host), not by a guessed default port. A
+        # WAITING/CONNECTED session for the same target must survive mDNS gaps
+        # and OSCMidi binding to 5006/5008 when 5004 is occupied.
+        matches = host_match or name_match
         if disabled or not matches or peer.get("orphan"):
             result = disconnect_rtpmidi_peer(peer["id"], timeout=1.5)
             if not result.get("success"):
                 return result
+        elif discovered is not None and _normalize_rtp_port(peer.get("port")) != port:
+            # Peer moved to a newly announced port: drop the stale endpoint.
+            result = disconnect_rtpmidi_peer(peer["id"], timeout=1.5)
+            if not result.get("success"):
+                return result
+            existing = None
+
     if disabled:
         return {"success": True, "connected": False}
-    # When the target is a service name not yet discovered via mDNS (typical
-    # cold-boot race), derive the mDNS hostname and issue a connect.  rtpmidid
-    # creates a waiting listener that auto-connects once the peer appears,
-    # eliminating the multi-minute discovery delay.
+
+    if existing is not None and (
+        discovered is None or _normalize_rtp_port(existing.get("port")) == port
+    ):
+        return {"success": True, "result": ["already_configured"], "port": port}
+
     if discovered is None and "." not in target and ":" not in target:
         logger.info(
             "RTP autoconnect: peer '%s' not yet discovered via mDNS, "
             "trying derived hostname '%s:%d'",
             target, host, port,
         )
-        return connect_rtpmidi_peer(host, port, target)
-    return connect_rtpmidi_peer(host, port, peer_name)
+        result = connect_rtpmidi_peer(host, port, target)
+    else:
+        result = connect_rtpmidi_peer(host, port, peer_name)
+
+    if result.get("success"):
+        _remember_rtp_port(usersettings, port)
+        result = dict(result)
+        result["port"] = port
+    return result

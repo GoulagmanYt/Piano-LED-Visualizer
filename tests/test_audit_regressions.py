@@ -40,7 +40,10 @@ def test_rtp_connect_preserves_custom_reliable_tcp_port():
 
 def test_autoconnect_retries_when_peer_appears_after_startup():
     settings = Mock()
-    settings.get_setting_value.return_value = 'Studio'
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'Studio',
+        'rtp_autoconnect_port': '5004',
+    }.get(key)
     info = {'success': True, 'connected_peers': [], 'discovered_peers': []}
     with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
          patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer', return_value={'success': True}) as connect:
@@ -49,10 +52,14 @@ def test_autoconnect_retries_when_peer_appears_after_startup():
         reconcile_rtpmidi_autoconnect(settings)
         connect.assert_called_once_with('studio-rtp.local', 5004, 'Studio')
         connect.reset_mock()
-        # When peer IS discovered, reconcile uses the announced hostname.
+        # When peer IS discovered, reconcile uses the announced hostname/port.
         info['discovered_peers'].append({'name': 'Studio', 'hostname': 'pc.local', 'port': 5006})
         reconcile_rtpmidi_autoconnect(settings)
         connect.assert_called_once_with('pc.local', 5006, 'Studio')
+        assert any(
+            call.args == ('rtp_autoconnect_port', '5006')
+            for call in settings.change_setting_value.call_args_list
+        )
 
 
 def test_derive_mdns_hostname_convention():
@@ -189,7 +196,10 @@ def test_profile_manager_closes_connections(tmp_path):
 
 def test_reconcile_preserves_waiting_listener_on_derived_mdns_host():
     settings = Mock()
-    settings.get_setting_value.return_value = 'OSCMidi'
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'OSCMidi',
+        'rtp_autoconnect_port': '5004',
+    }.get(key)
     info = {
         'success': True,
         'discovered_peers': [],
@@ -209,5 +219,78 @@ def test_reconcile_preserves_waiting_listener_on_derived_mdns_host():
          patch('subprocess.check_output') as cmd:
         res = reconcile_rtpmidi_autoconnect(settings)
         assert res.get('success') is True
+        assert res.get('result') == ['already_configured']
         disc.assert_not_called()
         cmd.assert_not_called()
+
+
+def test_reconcile_preserves_non_default_port_when_mdns_flaps():
+    """OSCMidi may bind 5006/5008 when 5004 is busy; mDNS gaps must not reset to 5004."""
+    settings = Mock()
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'OSCMidi',
+        'rtp_autoconnect_port': '5006',
+    }.get(key)
+    info = {
+        'success': True,
+        'discovered_peers': [],
+        'connected_peers': [
+            {
+                'id': 22,
+                'name': 'RtMidiOut Client-RtMidi output <-> OSCMidi',
+                'hostname': 'oscmidi-rtp.local',
+                'port': 5006,
+                'kind': 'listener',
+                'status': 'WAITING',
+            }
+        ],
+    }
+    with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
+         patch('lib.rtpmidi_diagnostics.disconnect_rtpmidi_peer') as disc, \
+         patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer') as connect:
+        res = reconcile_rtpmidi_autoconnect(settings)
+        assert res.get('success') is True
+        assert res.get('port') == 5006
+        disc.assert_not_called()
+        connect.assert_not_called()
+
+
+def test_reconcile_uses_remembered_port_before_default():
+    settings = Mock()
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'Studio',
+        'rtp_autoconnect_port': '5008',
+    }.get(key)
+    info = {'success': True, 'discovered_peers': [], 'connected_peers': []}
+    with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
+         patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer', return_value={'success': True}) as connect:
+        reconcile_rtpmidi_autoconnect(settings)
+        connect.assert_called_once_with('studio-rtp.local', 5008, 'Studio')
+
+
+def test_reconcile_moves_to_announced_port_when_peer_rebounds():
+    settings = Mock()
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'OSCMidi',
+        'rtp_autoconnect_port': '5004',
+    }.get(key)
+    info = {
+        'success': True,
+        'discovered_peers': [{'name': 'OSCMidi', 'hostname': 'oscmidi-rtp.local', 'port': 5006}],
+        'connected_peers': [
+            {
+                'id': 9,
+                'name': 'OSCMidi',
+                'hostname': 'oscmidi-rtp.local',
+                'port': 5004,
+                'kind': 'listener',
+                'status': 'WAITING',
+            }
+        ],
+    }
+    with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
+         patch('lib.rtpmidi_diagnostics.disconnect_rtpmidi_peer', return_value={'success': True}) as disc, \
+         patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer', return_value={'success': True}) as connect:
+        reconcile_rtpmidi_autoconnect(settings)
+        disc.assert_called_once_with(9, timeout=1.5)
+        connect.assert_called_once_with('oscmidi-rtp.local', 5006, 'OSCMidi')

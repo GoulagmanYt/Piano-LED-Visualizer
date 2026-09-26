@@ -71,6 +71,9 @@ class MenuLCD:
         self.args = args
         self._font_cache = {}
         self._title_image_cache = {}
+        self._lcd_lock = threading.RLock()
+        self._last_wake_mono = 0.0
+        self._wake_in_progress = False
         
         font_dir = "/usr/share/fonts/truetype/freefont"
         if args.fontdir is not None:
@@ -573,23 +576,45 @@ class MenuLCD:
         """
         Safely wake and recover the LCD hardware from sleep or glitch states.
         Re-asserts backlight (GPIO 24) and ST7735 display-on registers.
-        """
-        try:
-            GPIO.output(24, 1)
-            self.screen_status = 1
 
-            if hasattr(self, "LCD") and self.LCD is not None:
-                if reinit_registers:
-                    # Full hardware reset & register re-initialization
-                    self.LCD.LCD_Init()
-                else:
-                    # Gentle wake-up commands: Sleep Out (0x11) and Display ON (0x29)
-                    if hasattr(self.LCD, "LCD_WriteReg"):
-                        self.LCD.LCD_WriteReg(0x11)  # Sleep Out
-                        time.sleep(0.01)
-                        self.LCD.LCD_WriteReg(0x29)  # Display ON
-        except Exception as e:
-            logger.warning(f"Error waking LCD screen: {e}")
+        Serialized: screensaver exit and housekeeping can both request a wake
+        when USB MIDI returns; concurrent LCD_Init/ShowImage corrupted the bus.
+        """
+        with self._lcd_lock:
+            try:
+                now = time.monotonic()
+                # Coalesce bursts from screensaver thread + housekeeping on the
+                # same keypress / USB wake. Still allow a hard reinit through.
+                if (
+                    self._wake_in_progress
+                    or (now - self._last_wake_mono < 0.75 and not reinit_registers)
+                ):
+                    try:
+                        GPIO.output(24, 1)
+                    except Exception:
+                        pass
+                    self.screen_status = 1
+                    return
+
+                self._wake_in_progress = True
+                self._last_wake_mono = now
+                GPIO.output(24, 1)
+                self.screen_status = 1
+
+                if hasattr(self, "LCD") and self.LCD is not None:
+                    if reinit_registers:
+                        # Full hardware reset & register re-initialization
+                        self.LCD.LCD_Init()
+                    else:
+                        # Gentle wake-up commands: Sleep Out (0x11) and Display ON (0x29)
+                        if hasattr(self.LCD, "LCD_WriteReg"):
+                            self.LCD.LCD_WriteReg(0x11)  # Sleep Out
+                            time.sleep(0.01)
+                            self.LCD.LCD_WriteReg(0x29)  # Display ON
+            except Exception as e:
+                logger.warning(f"Error waking LCD screen: {e}")
+            finally:
+                self._wake_in_progress = False
 
     def _draw_rounded_rect(self, xy, radius, fill=None, outline=None, width=1):
         """Draw an anti-aliased rounded rectangle (fill + optional outline)."""
@@ -966,6 +991,10 @@ class MenuLCD:
         return None
 
     def show(self, position="default", back_pointer_location=None):
+        with self._lcd_lock:
+            return self._show_locked(position, back_pointer_location)
+
+    def _show_locked(self, position="default", back_pointer_location=None):
         selected_sid = None
         if self.screen_on == 0:
             return False
@@ -1433,12 +1462,13 @@ class MenuLCD:
             self.show(self.parent_menu, location_readable)
 
     def render_message(self, title, message, delay=500):
-        self.image = Image.new("RGB", (self.LCD.width, self.LCD.height), self.background_color)
-        self.draw = ImageDraw.Draw(self.image)
-        self.draw.text((self.scale(3), self.scale(55)), title, fill=self.text_color, font=self.font)
-        self.draw.text((self.scale(3), self.scale(65)), str(message), fill=self.text_color, font=self.font)
-        self.LCD.LCD_ShowImage(self.rotate_image(self.image), 0, 0)
-        LCD_Config.Driver_Delay_ms(delay)
+        with self._lcd_lock:
+            self.image = Image.new("RGB", (self.LCD.width, self.LCD.height), self.background_color)
+            self.draw = ImageDraw.Draw(self.image)
+            self.draw.text((self.scale(3), self.scale(55)), title, fill=self.text_color, font=self.font)
+            self.draw.text((self.scale(3), self.scale(65)), str(message), fill=self.text_color, font=self.font)
+            self.LCD.LCD_ShowImage(self.rotate_image(self.image), 0, 0)
+            LCD_Config.Driver_Delay_ms(delay)
 
     def render_screensaver(self, hour, date, cpu, cpu_average, ram, temp, cpu_history=None, upload=0, download=0,
                            card_space=None, local_ip="0.0.0.0"):
@@ -1542,7 +1572,8 @@ class MenuLCD:
             self.draw.text((self.scale(1), top_offset), "IP: " + str(local_ip), fill=self.text_color, font=font)
             top_offset += info_height_font
 
-        self.LCD.LCD_ShowImage(self.rotate_image(self.image), 0, 0)
+        with self._lcd_lock:
+            self.LCD.LCD_ShowImage(self.rotate_image(self.image), 0, 0)
 
     def change_settings(self, choice, location):
         # Pointer color setting

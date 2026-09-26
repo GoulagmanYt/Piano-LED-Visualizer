@@ -473,7 +473,8 @@ def screensaver(menu, midiports, saving, ledstrip, ledsettings, state_manager=No
                 else:
                     menu.screen_status = 1
                     GPIO.output(24, 1)
-                midiports.ensure_ports_ready()
+                # Port healing is owned by the MIDI monitor thread. Doing it
+                # here during USB piano wake races LCD refresh and MIDI flood.
                 midiports.last_activity = time.time()
                 menu.show()
                 break
@@ -488,7 +489,7 @@ def screensaver(menu, midiports, saving, ledstrip, ledsettings, state_manager=No
             else:
                 menu.screen_status = 1
                 GPIO.output(24, 1)
-            midiports.ensure_ports_ready()
+            midiports.last_activity = time.time()
             menu.show()
             break
 
