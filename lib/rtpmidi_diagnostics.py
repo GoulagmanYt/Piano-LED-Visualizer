@@ -194,6 +194,12 @@ def get_rtpmidi_peers(*, timeout=2.0):
         # Connected or configured router peers
         router = result.get("router") or []
         routed_ids = {pid for p in router if isinstance(p, dict) for pid in (p.get("send_to") or [])}
+        active_client_ids = set()
+        for p in router:
+            if isinstance(p, dict) and p.get("type") == "network_rtpmidi_client_t":
+                c_status = str((p.get("peer") or {}).get("status", "")).upper()
+                if c_status in {"3", "CONNECTED", "ESTABLISHED"}:
+                    active_client_ids.add(p.get("id"))
         connected = []
         seen_ids = set()
 
@@ -215,6 +221,8 @@ def get_rtpmidi_peers(*, timeout=2.0):
                     "status": str(peer_info.get("status", "connected")),
                     "latency_ms": latency.get("average"),
                     "kind": "client",
+                    "has_active_client": True,
+                    "send_to": peer.get("send_to") or [],
                     "orphan": not peer.get("send_to") and peer_id not in routed_ids,
                 })
                 if peer_id is not None:
@@ -222,6 +230,8 @@ def get_rtpmidi_peers(*, timeout=2.0):
 
             elif peer_type == "local_alsa_listener_t" and peer.get("endpoints"):
                 # Outgoing configured session / waiting session
+                send_to = peer.get("send_to") or []
+                has_active = any(cid in active_client_ids for cid in send_to)
                 for ep in peer.get("endpoints", []):
                     if isinstance(ep, dict):
                         raw_name = (peer.get("name") or "Remote Peer").replace("[WATING]", "").replace("<->", "").strip()
@@ -233,6 +243,8 @@ def get_rtpmidi_peers(*, timeout=2.0):
                             "status": str(peer.get("status", "WAITING")),
                             "latency_ms": None,
                             "kind": "listener",
+                            "has_active_client": has_active,
+                            "send_to": send_to,
                         })
                         if peer_id is not None:
                             seen_ids.add(peer_id)
@@ -428,12 +440,15 @@ def _existing_target_session(connected_peers, candidate_hosts, candidate_names):
             continue
         status = str(peer.get("status") or "").upper()
         score = 0
+        has_active = peer.get("has_active_client", True)
         if peer.get("kind") == "client":
-            score += 20
+            score += 30
         if status in {"CONNECTED", "ESTABLISHED", "3", "2"}:
             score += 10
         elif status in {"WAITING", "CONNECTING", "1"}:
             score += 5
+        if has_active:
+            score += 20
         if best is None or score > best[0]:
             best = (score, peer)
     return best[1] if best else None
@@ -510,10 +525,17 @@ def reconcile_rtpmidi_autoconnect(usersettings):
         # WAITING/CONNECTED session for the same target must survive mDNS gaps
         # and OSCMidi binding to 5006/5008 when 5004 is occupied.
         matches = host_match or name_match
-        if disabled or not matches or peer.get("orphan"):
+        is_zombie_listener = (
+            discovered is not None
+            and peer.get("kind") == "listener"
+            and peer.get("has_active_client") is False
+        )
+        if disabled or not matches or peer.get("orphan") or is_zombie_listener:
             result = disconnect_rtpmidi_peer(peer["id"], timeout=1.5)
             if not result.get("success"):
                 return result
+            if existing and existing.get("id") == peer.get("id"):
+                existing = None
         elif discovered is not None and _normalize_rtp_port(peer.get("port")) != port:
             # Peer moved to a newly announced port: drop the stale endpoint.
             result = disconnect_rtpmidi_peer(peer["id"], timeout=1.5)
@@ -525,7 +547,10 @@ def reconcile_rtpmidi_autoconnect(usersettings):
         return {"success": True, "connected": False}
 
     if existing is not None and (
-        discovered is None or _normalize_rtp_port(existing.get("port")) == port
+        discovered is None or (
+            _normalize_rtp_port(existing.get("port")) == port
+            and (existing.get("kind") == "client" or existing.get("has_active_client") is not False)
+        )
     ):
         return {"success": True, "result": ["already_configured"], "port": port}
 

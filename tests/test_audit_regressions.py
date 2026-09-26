@@ -294,3 +294,70 @@ def test_reconcile_moves_to_announced_port_when_peer_rebounds():
         reconcile_rtpmidi_autoconnect(settings)
         disc.assert_called_once_with(9, timeout=1.5)
         connect.assert_called_once_with('oscmidi-rtp.local', 5006, 'OSCMidi')
+
+
+def test_reconcile_reconnects_zombie_listener_when_peer_restarts_with_new_ssrc():
+    """When a remote peer restarts, rtpmidid leaves a listener with no active client.
+    Reconcile must drop the zombie listener and reconnect upon announced mDNS."""
+    settings = Mock()
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'OSCMidi',
+        'rtp_autoconnect_port': '5004',
+    }.get(key)
+    info = {
+        'success': True,
+        'discovered_peers': [{'name': 'OSCMidi', 'hostname': 'oscmidi-rtp.local', 'port': 5004}],
+        'connected_peers': [
+            {
+                'id': 22,
+                'name': 'RtMidiOut Client-RtMidi output <-> OSCMidi',
+                'hostname': 'oscmidi-rtp.local',
+                'port': 5004,
+                'kind': 'listener',
+                'status': 'CONNECTED',
+                'has_active_client': False,
+                'send_to': [],
+            }
+        ],
+    }
+    with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
+         patch('lib.rtpmidi_diagnostics.disconnect_rtpmidi_peer', return_value={'success': True}) as disc, \
+         patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer', return_value={'success': True}) as connect:
+        res = reconcile_rtpmidi_autoconnect(settings)
+        disc.assert_called_once_with(22, timeout=1.5)
+        connect.assert_called_once_with('oscmidi-rtp.local', 5004, 'OSCMidi')
+        assert res.get('success') is True
+        assert res.get('port') == 5004
+        assert res.get('result') != ['already_configured']
+
+
+def test_reconcile_preserves_healthy_session_with_active_client():
+    settings = Mock()
+    settings.get_setting_value.side_effect = lambda key: {
+        'rtp_autoconnect': 'OSCMidi',
+        'rtp_autoconnect_port': '5004',
+    }.get(key)
+    info = {
+        'success': True,
+        'discovered_peers': [{'name': 'OSCMidi', 'hostname': 'oscmidi-rtp.local', 'port': 5004}],
+        'connected_peers': [
+            {
+                'id': 22,
+                'name': 'RtMidiOut Client-RtMidi output <-> OSCMidi',
+                'hostname': 'oscmidi-rtp.local',
+                'port': 5004,
+                'kind': 'listener',
+                'status': 'CONNECTED',
+                'has_active_client': True,
+                'send_to': [23],
+            }
+        ],
+    }
+    with patch('lib.rtpmidi_diagnostics.get_rtpmidi_peers', return_value=info), \
+         patch('lib.rtpmidi_diagnostics.disconnect_rtpmidi_peer') as disc, \
+         patch('lib.rtpmidi_diagnostics.connect_rtpmidi_peer') as connect:
+        res = reconcile_rtpmidi_autoconnect(settings)
+        disc.assert_not_called()
+        connect.assert_not_called()
+        assert res.get('success') is True
+        assert res.get('result') == ['already_configured']

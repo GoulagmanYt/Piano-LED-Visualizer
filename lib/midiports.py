@@ -1287,8 +1287,15 @@ class MidiPorts:
         play_restored = play_present and (last_play_present is False)
         input_missing = self.inport is None or self.actual_input_port is None
 
+        play_missing = (
+            self.playport is None or self.actual_play_port is None
+        ) and play_present and self.usersettings.get_setting_value("play_port") not in ("off", "disabled", None)
+
         if input_missing and input_present:
             logger.info("MIDI input available while no input is open. Reconnecting ports.")
+            self.reconnect_ports(force=False)
+        elif play_missing and play_present:
+            logger.info("MIDI play port available while no play port is open. Reconnecting ports.")
             self.reconnect_ports(force=False)
         elif input_restored or secondary_restored:
             logger.info("MIDI input port restored. Triggering connectall()")
@@ -1302,6 +1309,9 @@ class MidiPorts:
         elif play_restored:
             logger.info("MIDI play port restored. Reconnecting ports.")
             self.reconnect_ports(force=False)
+
+        if input_restored:
+            self._force_reconcile_rtp = True
 
         return input_present, secondary_present, play_present
 
@@ -1320,10 +1330,22 @@ class MidiPorts:
         while self.monitor_running:
             try:
                 reconcile_tick += 1
-                if reconcile_tick >= 4:
+                if reconcile_tick >= 4 or getattr(self, "_force_reconcile_rtp", False):
                     reconcile_tick = 0
+                    self._force_reconcile_rtp = False
                     from lib.rtpmidi_diagnostics import reconcile_rtpmidi_autoconnect
-                    reconcile_rtpmidi_autoconnect(self.usersettings)
+                    rtp_res = reconcile_rtpmidi_autoconnect(self.usersettings)
+                    if (
+                        rtp_res
+                        and rtp_res.get("success")
+                        and rtp_res.get("result") != ["already_configured"]
+                        and rtp_res.get("connected") is not False
+                    ):
+                        logger.info(
+                            "RTP autoconnect updated session (port %s). Reconnecting play port.",
+                            rtp_res.get("port"),
+                        )
+                        self._reconnect_output(force=True)
                 if not self.monitor_running:
                     break
                 last_input_present, last_secondary_present, last_play_present = self._auto_reconnect_once(

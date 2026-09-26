@@ -71,7 +71,7 @@ class MenuLCD:
         self.args = args
         self._font_cache = {}
         self._title_image_cache = {}
-        self._lcd_lock = threading.RLock()
+        self._lcd_lock_instance = threading.RLock()
         self._last_wake_mono = 0.0
         self._wake_in_progress = False
         
@@ -572,6 +572,18 @@ class MenuLCD:
         self.wake_screen(reinit_registers=True)
         self.show()
 
+    @property
+    def _lcd_lock(self):
+        lock = getattr(self, "_lcd_lock_instance", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._lcd_lock_instance = lock
+        return lock
+
+    @_lcd_lock.setter
+    def _lcd_lock(self, val):
+        self._lcd_lock_instance = val
+
     def wake_screen(self, reinit_registers=False):
         """
         Safely wake and recover the LCD hardware from sleep or glitch states.
@@ -583,12 +595,9 @@ class MenuLCD:
         with self._lcd_lock:
             try:
                 now = time.monotonic()
-                # Coalesce bursts from screensaver thread + housekeeping on the
-                # same keypress / USB wake. Still allow a hard reinit through.
-                if (
-                    self._wake_in_progress
-                    or (now - self._last_wake_mono < 0.75 and not reinit_registers)
-                ):
+                last_wake = getattr(self, "_last_wake_mono", 0.0)
+                in_progress = getattr(self, "_wake_in_progress", False)
+                if in_progress or (now - last_wake < 1.0):
                     try:
                         GPIO.output(24, 1)
                     except Exception:
