@@ -251,7 +251,6 @@ def stop_server(loop):
 
 # Import views after app is defined to avoid circular imports
 from webinterface import views, views_api
-from webinterface import webinterface, app_state
 
 # Attach profile manager without modifying existing AppState.__init__
 try:

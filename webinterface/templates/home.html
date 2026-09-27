@@ -451,7 +451,7 @@
                 </div>
             </div>
             <div class="status-item cursor-pointer hover:glass-light rounded-glass p-3 transition-smooth-fast"
-                 onclick="history.pushState({}, '', '#ports'); loadAjax('ports'); setTimeout(() => { const el = document.getElementById('active_input'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 500);">
+                 onclick="history.pushState({}, '', '#ports'); loadAjax('ports'); setTimeout(() => { var el = document.getElementById('active_input'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 500);">
                 <div class="text-xs text-gray-600 dark:text-gray-400 mb-1" data-translate="input_port">Input Port</div>
                 <div class="flex items-center space-x-2">
                     <div id="input_port" class="text-xl font-bold truncate"></div>
@@ -461,7 +461,7 @@
                 </div>
             </div>
             <div class="status-item cursor-pointer hover:glass-light rounded-glass p-3 transition-smooth-fast"
-                 onclick="history.pushState({}, '', '#ports'); loadAjax('ports'); setTimeout(() => { const el = document.getElementById('playback_input'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 500);">
+                 onclick="history.pushState({}, '', '#ports'); loadAjax('ports'); setTimeout(() => { var el = document.getElementById('playback_input'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 500);">
                 <div class="text-xs text-gray-600 dark:text-gray-400 mb-1" data-translate="playback_port">Playback Port</div>
                 <div class="flex items-center space-x-2">
                     <div id="playback_port" class="text-xl font-bold truncate"></div>
@@ -506,4 +506,4 @@
 
 
     </div>
-</div>
+

@@ -118,11 +118,12 @@
 
         <!-- Action Buttons -->
         <div class="flex flex-wrap items-center justify-center sm:justify-between gap-2 pt-3 border-t border-white/10">
-                <button data-song-name="{{key}}" onclick="const midiPlayer = document.getElementById('midi_player');
-                const song = this.dataset.songName;
-                midiPlayer.dataset.songName = song;
+            <div class="flex items-center space-x-2">
+                <button data-song-name="{{key}}" onclick="var midiPlayer = document.getElementById('midi_player');
+                var playSong = this.dataset.songName;
+                midiPlayer.dataset.songName = playSong;
                 midiPlayer.src =
-                'api/change_setting?setting_name=download_song&value=' + encodeURIComponent(song);
+                'api/change_setting?setting_name=download_song&value=' + encodeURIComponent(playSong);
                 document.getElementById('midi_player_wrapper').classList.remove('hidden');
 
                 if (midiPlayer.__plvLoadHandler) {
@@ -131,7 +132,7 @@
                 midiPlayer.__plvLoadHandler = function (e) {
                     if(document.getElementById('player_and_songs').offsetWidth > 500 && midiPlayer.noteSequence.notes.length < 6000){
                         document.getElementById('myVisualizer').src =
-                        'api/change_setting?setting_name=download_song&value=' + encodeURIComponent(song);
+                        'api/change_setting?setting_name=download_song&value=' + encodeURIComponent(playSong);
                         document.getElementById('midi_visualizer_wrapper').classList.remove('hidden');
                         midiPlayer.addVisualizer(document.getElementById('myVisualizer'));
                         var note_width = document.getElementById('player_and_songs').offsetWidth / 54;
@@ -173,10 +174,10 @@
                 </button>
 
                 <button data-song-name="{{key}}" onclick="document.getElementById('stop_learning').click();
-                const song = this.dataset.songName;
-                change_setting('learning_load_song', song);get_learning_status();
+                var learnSong = this.dataset.songName;
+                change_setting('learning_load_song', learnSong);get_learning_status();
                 document.getElementById('learn_midi_wrapper').classList.remove('hidden');
-                window.loadSheet(song)"
+                window.loadSheet(learnSong)"
                         class="p-2 glass-light hover:glass rounded-glass transition-smooth-fast cursor-pointer group"
                         title="Learn" data-translate-title="learn">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-600 dark:text-gray-400 group-hover:text-blue-500 transition-colors" fill="none" viewBox="0 0 24 24"
