@@ -248,7 +248,6 @@ class VisualizerApp:
         ci.ledstrip.strip.diagnostics = self.runtime_diagnostics
         activity = ci.midiports.queues.activity
         while not self.stop_event.is_set():
-            activity.clear()
             ci.ledstrip.strip.check_health()
             if self.state_manager.is_active_use():
                 ci.menu.is_idle_animation_running = False
@@ -311,11 +310,12 @@ class VisualizerApp:
             midiports.refresh_queue_diagnostics()
             self.runtime_diagnostics.record_duration("main_loop", time.perf_counter() - loop_start)
             if should_update:
-                time.sleep(sleep_interval)
+                activity.wait(sleep_interval)
             else:
                 # Quiescent idle wait: unblocks immediately (<50us) via activity.set() on MIDI,
                 # or times out after 25ms without spinning CPU cores.
                 activity.wait(0.025)
+            activity.clear()
 
     def update_fps_stats(self):
         now = time.perf_counter()
