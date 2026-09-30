@@ -661,13 +661,15 @@ def theaterChase(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         for q in range(5):
             for i in range(0, strip.numPixels(), 5):
@@ -732,13 +734,15 @@ def rainbow(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         for i in range(strip.numPixels()):
             if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
@@ -767,12 +771,14 @@ def fireplace(ledstrip, ledsettings, menu, speed_ms=None):
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
 
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         brightness = calculate_brightness(ledsettings)
 
@@ -814,13 +820,15 @@ def rainbowCycle(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         for i in range(strip.numPixels()):
             if check_if_led_can_be_overwrite(i, ledstrip, ledsettings):
@@ -1133,13 +1141,15 @@ def theaterChaseRainbow(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         for q in range(5):
             for i in range(0, strip.numPixels(), 5):
@@ -1183,13 +1193,15 @@ def breathing(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         if multiplier >= 98 or multiplier < 24:
             direction *= -1
@@ -1237,13 +1249,15 @@ def sound_of_da_police(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         r_start += step
         l_start -= step
@@ -1297,13 +1311,15 @@ def scanner(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         position += direction
         for i in range(strip.numPixels()):
@@ -1347,13 +1363,15 @@ def chords(scale, ledstrip, ledsettings, menu):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         brightness = calculate_brightness(ledsettings)
 
@@ -1397,13 +1415,15 @@ def colormap_animation(colormap, ledstrip, ledsettings, menu):
 
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
         
         brightness = calculate_brightness(ledsettings)
 
@@ -1453,13 +1473,15 @@ def wave(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         brightness = calculate_brightness(ledsettings)
         
@@ -1571,13 +1593,15 @@ def lava_lamp(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         # Clear all pixels first
         pixel_colors = [[0, 0, 0] for _ in range(num_pixels)]
@@ -1705,13 +1729,15 @@ def aurora(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         # Update wave phases
         for wave in waves:
@@ -1824,13 +1850,15 @@ def stardust(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         current_time = time.time()
         frame_duration = wait_ms / 1000.0
@@ -1932,13 +1960,15 @@ def kaleidoscope(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         # Clear all pixels first
         for i in range(num_pixels):
@@ -2091,13 +2121,15 @@ def color_ripple(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         # Spawn new ripples randomly
         if len(ripples) < max_ripples:
@@ -2302,13 +2334,15 @@ def fireworks(ledstrip, ledsettings, menu, speed_ms=None):
     while menu.is_idle_animation_running or menu.is_animation_running:
         last_state = 1
         cover_opened = GPIO.input(SENSECOVER)
-        while not cover_opened:
+        while not cover_opened and (menu.is_idle_animation_running or menu.is_animation_running):
             if last_state != cover_opened:
                 # clear if changed
                 fastColorWipe(strip, True, ledsettings)
             time.sleep(.1)
             last_state = cover_opened
             cover_opened = GPIO.input(SENSECOVER)
+        if not (menu.is_idle_animation_running or menu.is_animation_running):
+            break
 
         # Spawn new bursts randomly
         if len(bursts) < max_bursts:

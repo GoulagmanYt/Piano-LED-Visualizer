@@ -2154,7 +2154,6 @@ def get_settings():
 
     response["speed_max_notes"] = app_state.usersettings.get_setting_value("speed_max_notes")
     response["speed_period_in_seconds"] = app_state.usersettings.get_setting_value("speed_period_in_seconds")
-    response["hotspot_password"] = app_state.usersettings.get_setting_value("hotspot_password")
     response["practice_tool_url"] = app_state.usersettings.get_setting_value("practice_tool_url") or "https://piano-visualizer.pages.dev"
 
     return jsonify(response)

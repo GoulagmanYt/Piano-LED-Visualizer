@@ -103,5 +103,10 @@ def bundle_member_paths(filename, base_dir="Songs"):
             continue
         if path.suffix.lower().lstrip(".") not in ALLOWED_SONG_EXTENSIONS:
             continue
-        members.append(path.resolve())
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(songs_dir)
+        except ValueError:
+            continue
+        members.append(resolved)
     return sorted(members, key=lambda path: path.name.lower())

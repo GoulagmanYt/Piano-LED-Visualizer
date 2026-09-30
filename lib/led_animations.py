@@ -3,6 +3,7 @@ Central registry for LED animations.
 Provides unified interface for managing and starting animations.
 """
 
+import threading
 from typing import Callable, Optional, Dict, Any, List
 from lib.animation_speed import to_milliseconds, get_speed_manager, get_global_speed_ms
 
@@ -87,6 +88,7 @@ class AnimationRegistry:
     def __init__(self):
         self._animations: Dict[str, AnimationInfo] = {}
         self._web_id_map: Dict[str, str] = {}  # web_id -> name
+        self._start_lock = threading.RLock()
     
     def register(self, info: AnimationInfo):
         """
@@ -172,7 +174,7 @@ class AnimationRegistry:
             is_idle: Whether this is an IDLE animation
         
         Returns:
-            bool: True if animation was started, False if not found
+            bool: True if started; False if invalid or the previous worker is stopping.
         """
         # Get by name (internal name)
         info = self._animations.get(name)
@@ -185,24 +187,25 @@ class AnimationRegistry:
         except ValueError as e:
             return False
         
-        import threading
-
-        # Stop previous animation thread if still running
-        existing_thread = getattr(menu, 't', None)
-        if existing_thread is not None and existing_thread.is_alive():
+        with self._start_lock:
+            # Shared flags cannot be reused until the old worker has exited.
+            existing_thread = getattr(menu, 't', None)
             menu.is_idle_animation_running = False
             menu.is_animation_running = False
-            existing_thread.join(timeout=0.5)
+            if existing_thread is not None and existing_thread.is_alive():
+                if existing_thread is threading.current_thread():
+                    return False
+                existing_thread.join(timeout=0.5)
+                if existing_thread.is_alive():
+                    return False
 
-        # Set running flag
-        if is_idle:
-            menu.is_idle_animation_running = True
-        else:
-            menu.is_animation_running = True
-        
-        # Start animation in thread
-        menu.t = threading.Thread(target=info.function, args=args)
-        menu.t.start()
+            if is_idle:
+                menu.is_idle_animation_running = True
+            else:
+                menu.is_animation_running = True
+
+            menu.t = threading.Thread(target=info.function, args=args)
+            menu.t.start()
         
         return True
 

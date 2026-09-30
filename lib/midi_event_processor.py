@@ -49,6 +49,13 @@ class MIDIEventProcessor:
             # Check if practice mode is active (websocket MIDI takes priority)
             if hasattr(app_state, 'practice_active') and app_state.practice_active:
                 # Process websocket MIDI input (from practice tool)
+                # Physical input still feeds forwarding, but its unused LED copy
+                # must not accumulate and replay when practice mode ends.
+                queues = getattr(self.midiports, "queues", None)
+                if queues is not None:
+                    queues.discard_inactive(learning_active=False, live_active=False)
+                else:
+                    self.midiports.midi_queue.clear()
                 self.midiports.midipending = self.midiports.websocket_midi_queue
                 queue_name = "websocket_input"
             else:

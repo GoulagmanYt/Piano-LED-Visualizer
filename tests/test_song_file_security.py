@@ -45,3 +45,29 @@ class TestSongFileSecurity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_bundle_excludes_member_resolving_outside_songs(tmp_path, monkeypatch):
+    songs = tmp_path / "Songs"
+    songs.mkdir()
+    main = songs / "Suite_main.mid"
+    main.write_bytes(b"main")
+    outside = tmp_path / "private.mid"
+    outside.write_bytes(b"private")
+    link = songs / "Suite_part.mid"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        # Windows can require privileges for symlinks; simulate only resolution.
+        link.write_bytes(b"")
+        original_resolve = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == link:
+                return outside
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", resolve)
+
+    assert bundle_member_paths("Suite_main.mid", songs) == [main]
+    assert outside.read_bytes() == b"private"

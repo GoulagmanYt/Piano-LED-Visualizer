@@ -356,3 +356,27 @@ def test_soft_velocity_scales_down_instead_of_overflowing_rgb():
     processor.color_mode.NoteOn = lambda *args: (255, 128, 64)
     processor.handle_note_on(FakeMessage(velocity=1), 1.0, 3)
     assert processor.ledstrip.strip.pixels[-1] == (3, (2, 1, 0))
+
+
+def test_practice_discards_unused_physical_notes_before_returning_to_live():
+    from lib.midi_queues import MidiQueues
+
+    processor = make_processor(ledstrip=FakeLedStrip(note_position=3))
+    ports = processor.midiports
+    ports.queues = MidiQueues()
+    ports.midi_queue = ports.queues.live_visualizer_queue
+    ports.websocket_midi_queue = ports.queues.websocket_queue
+    stale_note = FakeMessage(note=60)
+    fresh_note = FakeMessage(note=64)
+
+    with patch("lib.midi_event_processor.app_state.practice_active", True):
+        for _ in range(3):
+            ports.queues.enqueue_live(stale_note)
+            assert not processor.process_midi_events()
+            assert not ports.midi_queue
+
+    with patch("lib.midi_event_processor.app_state.practice_active", False):
+        ports.queues.enqueue_live(fresh_note)
+        processor.process_midi_events()
+
+    assert processor.color_mode.midi_events == [fresh_note]

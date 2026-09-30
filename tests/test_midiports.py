@@ -352,6 +352,23 @@ class TestMidiPorts(unittest.TestCase):
         self.assertEqual(diagnostics["scheduled_late_messages"], 1)
         self.assertGreaterEqual(diagnostics["scheduled_late_max_ms"], 200.0)
 
+    def test_due_scheduled_note_is_not_starved_by_new_live_messages(self):
+        ports = self.make_ports()
+        scheduled = FakeMidiMessage(note=99)
+        ports.queues.enqueue_scheduled_forward(scheduled, enqueued_at=90, due_time=100)
+        older_live = FakeMidiMessage(note=60)
+        ports.queues.enqueue_live_forward(older_live, timestamp=99)
+
+        with patch("lib.midiports.time.perf_counter", return_value=101):
+            for _ in range(3):
+                ports.queues.enqueue_live_forward(FakeMidiMessage(note=61), timestamp=101)
+                ports.queues.enqueue_live_forward(FakeMidiMessage(note=62), timestamp=101)
+                ports._flush_live_forward_queue_once()
+
+        self.assertEqual(ports.playport.sent[:2], [older_live, scheduled])
+        self.assertEqual(len(ports.scheduled_forward_queue), 0)
+        self.assertGreater(len(ports.live_forward_queue), 0)
+
     def test_configure_input_backend_filters_enables_rtmidi_timing_filter(self):
         ports = self.make_ports()
         input_port = FakeInputPort()

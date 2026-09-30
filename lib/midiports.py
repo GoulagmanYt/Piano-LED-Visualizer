@@ -420,7 +420,12 @@ class MidiPorts:
 
         if hasattr(self, "queues"):
             live_item = self.queues.peek_live_forward()
-            if live_item is not None:
+            scheduled_item = self.queues.peek_due_scheduled_forward(now_perf=now_perf)
+            # Merge by delivery time so a sustained live backlog cannot starve
+            # scheduled playback, while preserving older live messages first.
+            if live_item is not None and (
+                scheduled_item is None or live_item[1] <= scheduled_item[2]
+            ):
                 msg = live_item[0]
                 sent = self._send_rtp_message(msg, send_started=now_perf)
                 if sent:
@@ -429,7 +434,6 @@ class MidiPorts:
                     self.forward_backoff_until = now_perf + 0.05
                 return sent
 
-            scheduled_item = self.queues.peek_due_scheduled_forward(now_perf=now_perf)
             if scheduled_item is None:
                 next_item = self.queues.peek_next_scheduled_forward()
                 if next_item is not None:
@@ -447,7 +451,14 @@ class MidiPorts:
                 self.forward_backoff_until = now_perf + 0.05
             return sent
 
-        if self.live_forward_queue:
+        scheduled_due = (
+            self.scheduled_forward_queue
+            and self.scheduled_forward_queue[0][2] <= now_perf
+        )
+        if self.live_forward_queue and (
+            not scheduled_due
+            or self.live_forward_queue[0][1] <= self.scheduled_forward_queue[0][2]
+        ):
             msg, _ = self.live_forward_queue[0]
             sent = self._send_rtp_message(msg, send_started=now_perf)
             if sent:
