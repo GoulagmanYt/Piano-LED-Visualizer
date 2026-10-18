@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 sys.argv = [str(ROOT / 'visualizer.py'), '-s', '-w', 'false', '-a', 'app']
 from visualizer import VisualizerApp
 from lib.midi_pipeline_probe import MidiPipelineProbe
+from lib.buffered_midi_input import open_midi_input
 
 
 class NullOutput:
@@ -69,7 +70,7 @@ def main():
             recv_pedal_channels.append(getattr(message, 'channel', 0))
         app.ci.midiports.msg_callback(message)
 
-    app.ci.midiports.inport = mido.open_input('PLV-maintenance-benchmark', virtual=True, callback=receive)
+    app.ci.midiports.inport = open_midi_input('PLV-maintenance-benchmark', virtual=True, callback=receive)
     app.ci.midiports._configure_input_backend_filters(app.ci.midiports.inport)
     name = next(name for name in mido.get_output_names() if 'PLV-maintenance-benchmark' in name)
     output = mido.open_output(name)

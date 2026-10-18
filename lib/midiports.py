@@ -4,6 +4,7 @@ import time
 import mido
 
 from lib import connectall
+from lib.buffered_midi_input import open_midi_input
 from lib.midi_connection_manager import MidiConnectionManager
 from lib.midi_queues import MidiQueues
 from lib.log_setup import logger
@@ -106,6 +107,7 @@ class MidiPorts:
         self.ignored_counts = {}
         self.received_count = 0
         self._received_at_reset = 0
+        self.practice_state = None
         self.forward_stats = {
             "live_sent": 0,
             "live_send_errors": 0,
@@ -775,7 +777,7 @@ class MidiPorts:
         return resolution.selected_port
 
     def _should_keep_current_port(self, requested_port, actual_port, port_handle, available_ports, selected_port, force):
-        if force or port_handle is None or actual_port is None:
+        if force or port_handle is None or actual_port is None or getattr(port_handle, 'closed', False):
             return False
         if not port_is_present(actual_port, available_ports):
             return False
@@ -860,7 +862,7 @@ class MidiPorts:
             return old_port is not None
 
         try:
-            self.inport = mido.open_input(selected_port, callback=self.msg_callback)
+            self.inport = open_midi_input(selected_port, callback=self.msg_callback)
             self._configure_input_backend_filters(self.inport)
             self.actual_input_port = selected_port
             logger.info("Input port active: %s", selected_port)
@@ -1074,7 +1076,8 @@ class MidiPorts:
         )
         return {
             "connection_state": {
-                "input_ready": self.inport is not None and self.actual_input_port is not None,
+                "input_ready": (self.inport is not None and self.actual_input_port is not None
+                                and not getattr(self.inport, 'closed', False)),
                 "play_ready": self.playport is not None and self.actual_play_port is not None,
                 "monitor_running": bool(self.monitor_running),
             },
@@ -1130,7 +1133,8 @@ class MidiPorts:
                 "actual_play_port": self.actual_play_port,
                 "last_resolved_input_port": self.last_resolved_input_port,
                 "last_resolved_play_port": self.last_resolved_play_port,
-                "input_ready": self.inport is not None and self.actual_input_port is not None,
+                "input_ready": (self.inport is not None and self.actual_input_port is not None
+                                and not getattr(self.inport, 'closed', False)),
                 "play_ready": self.playport is not None and self.actual_play_port is not None,
             }
         )
@@ -1156,8 +1160,10 @@ class MidiPorts:
         self.last_activity = time.time()
         
         is_note = self._classify_message(msg) in ("note_on", "note_off")
+        publish_note = is_note and bool(
+            getattr(getattr(self, 'practice_state', None), 'practice_active', False))
         if hasattr(self, "queues"):
-            wake_forward = self.queues.enqueue_all_live(msg, timestamp=ts, source="rtp_rx", is_note=is_note)
+            wake_forward = self.queues.enqueue_all_live(msg, timestamp=ts, source="rtp_rx", is_note=publish_note)
             self._sync_queue_drop_counters()
             # A nonempty backlog is already being handled (or rechecked by
             # the worker under its condition). Only the empty -> first item
@@ -1168,7 +1174,7 @@ class MidiPorts:
             self.enqueue_live_message(msg, timestamp=ts)
             self.enqueue_rtp_message(msg, msg_timestamp=ts)
 
-            if is_note:
+            if publish_note:
                 self._queue_with_policy(
                     self.websocket_publish_queue,
                     (msg, ts),
@@ -1336,7 +1342,8 @@ class MidiPorts:
         input_restored = input_present and (last_input_present is False)
         secondary_restored = secondary_present and (last_secondary_present is False)
         play_restored = play_present and (last_play_present is False)
-        input_missing = self.inport is None or self.actual_input_port is None
+        input_missing = (self.inport is None or self.actual_input_port is None
+                         or getattr(self.inport, 'closed', False))
 
         play_missing = (
             self.playport is None or self.actual_play_port is None

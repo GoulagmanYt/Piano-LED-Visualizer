@@ -30,6 +30,27 @@ Base logicielle MIDI : `7a33cd2` ; base Git de la correction : `931c884`.
   d'envoi ; ils ne mesuraient pas le délai passé dans sa file. La nouvelle
   métrique `rtp_live_queue_wait` mesure cette attente. `midi_callback_calls`
   compte aussi les événements d'entrée acceptés sur le chemin rapide.
+- Un essai à quatre fois le débit nominal a ensuite reproduit des pertes
+  **avant le callback Python** : 13 052 événements émis, 10 954 reçus. La file
+  ALSA atteignait son maximum de 2 000 événements. Une tentative à 8 192 est
+  rejetée sur ce noyau ; cette limite est définie dans
+  [Linux 6.12](https://github.com/torvalds/linux/blob/v6.12/include/sound/seq_kernel.h).
+  Le backend Mido/RtMidi installe un callback Python sur le thread ALSA, qui
+  attend alors le GIL avant de continuer à vider le noyau.
+- `BufferedMidiInput` utilise une file **native C++ de 32 768 événements** sans
+  callback Python sur le lecteur ALSA. Un consommateur Python dépile ensuite
+  les messages dans l'ordre. La file noyau est dimensionnée avant abonnement
+  à la source, car son redimensionnement efface son contenu. Ce réglage reste
+  facultatif en cas d'erreur OS. L'arrêt attend le consommateur avant de libérer
+  les ressources natives ; une erreur du lecteur est visible et provoque une
+  reconnexion. Les autres plateformes/backends conservent leur entrée Mido.
+- Les durées et compteurs disposent de verrous indépendants par métrique,
+  évitant une seconde contention globale. Leur mémoire dépend des noms de
+  métriques, pas du nombre de threads créés. Les copies de buffers LED passent
+  par une affectation de tranche en C : 124,29 → 18,98 microsecondes par appel
+  dans le microbenchmark de 10 000 appels/195 LED, avec les mêmes buffers.
+  Les copies destinées à la page Practice ne sont plus produites lorsqu'elle
+  est inactive.
 
 Pour désactiver le réglage d'affinité, définir `PLV_MIDI_CPU_AFFINITY=off`
 dans l'environnement du service et le redémarrer. Une valeur numérique permet
@@ -53,6 +74,8 @@ d'accords. Les chiffres ci-dessous excluent le profilage cProfile.
 | Correction + traçage exact, quatre cœurs | 52 052 / 52 052 | 28,1242 / 192,5186 ms |
 | Même traçage, affinité CPU 2 par taskset | 52 052 / 52 052 | 5,7381 / 28,3685 ms |
 | Affinité automatique depuis l'application | 52 052 / 52 052 | 5,7660 / 44,4138 ms |
+| Version finale, file native, accords à 20 ms | 52 052 / 52 052 | 4,5544 / 15,7426 ms |
+| Version finale, file native, accords à 5 ms | 52 052 / 52 052 | 9,5570 / 53,6672 ms |
 
 Le traçage exact ajoute volontairement du travail : empreintes SHA-256 des
 octets et compteurs aux quatre frontières émission, réception, traitement,
@@ -64,6 +87,15 @@ L'attente de sortie est 4,7111 ms en moyenne ; le délai complet de la source
 synthétique à la sortie instrumentée est 11,0674 ms en moyenne, p99 22,5637 ms.
 Les files se vident ; aucune touche ni pédale ne reste active ; le buffer LED
 est noir après arrêt ; aucun échec d'allocation ALSA n'est enregistré.
+
+La **version finale** passe les deux essais de 52 052 événements avec les
+quatre empreintes identiques ci-dessus. Le test à 5 ms reproduit la charge
+qui provoquait les pertes avant la file native. Il n'y a plus d'échec
+d'allocation ALSA dans ces essais. Source synthétique → sortie instrumentée :
+7,5080 ms en moyenne / p99 13,2153 ms à 20 ms par accord ; 11,9746 ms en moyenne /
+p99 31,7600 ms à 5 ms par accord. Cette mesure inclut l'attente avant le callback
+Python ; la métrique réception → traitement seule ne mesure pas toute cette
+attente.
 
 Les tests de régression reproduisent notamment le blocage sur notification,
 les callbacks qui se chevauchent, les attentes avec un lot restant, une
@@ -80,3 +112,7 @@ lumière ni la livraison UDP à l'autre ordinateur. Le benchmark n'émet pas
 sur le réseau ; l'état de la session et le trajet en service sont contrôlés
 séparément après déploiement. Un profilage cProfile est utile au diagnostic,
 mais ses résultats de latence ne sont pas comparés aux essais sans profilage.
+La file native reste finie : elle ne garantit pas la livraison sous une charge
+illimitée, pendant un blocage prolongé ou pour une taille arbitraire de SysEx.
+OSCMidi n'était pas relancé pendant ces essais ; la livraison au PC attend donc
+une session réseau active pour être vérifiée.

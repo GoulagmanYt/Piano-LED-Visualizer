@@ -18,11 +18,15 @@ class RuntimeDiagnostics:
         if not self.enabled:
             return
         elapsed_ms = max(0.0, float(seconds) * 1000.0)
-        with self._lock:
-            metric = self._timings.get(name)
-            if metric is None:
-                metric = {"count": 0, "total_ms": 0.0, "max_ms": 0.0, "last_ms": 0.0}
-                self._timings[name] = metric
+        metric = self._timings.get(name)
+        if metric is None:
+            with self._lock:
+                metric = self._timings.setdefault(name, {
+                    'lock': threading.Lock(),
+                    'count': 0, 'total_ms': 0.0, 'max_ms': 0.0, 'last_ms': 0.0})
+        # Independent metrics have independent writers. A global lock here
+        # caused MIDI, DMA and render threads to form a per-event convoy.
+        with metric['lock']:
             metric["count"] += 1
             metric["total_ms"] += elapsed_ms
             metric["last_ms"] = elapsed_ms
@@ -50,8 +54,12 @@ class RuntimeDiagnostics:
     def increment_counter(self, name, amount=1):
         if not self.enabled:
             return
-        with self._lock:
-            self._counters[name] = self._counters.get(name, 0) + amount
+        counter = self._counters.get(name)
+        if counter is None:
+            with self._lock:
+                counter = self._counters.setdefault(name, {'lock': threading.Lock(), 'value': 0})
+        with counter['lock']:
+            counter['value'] += amount
 
     def set_gauge(self, name, value):
         if not self.enabled:
@@ -67,16 +75,11 @@ class RuntimeDiagnostics:
 
     def snapshot(self):
         with self._lock:
-            timings = {
-                name: {
-                    "count": metric["count"],
-                    "avg_ms": round(metric["total_ms"] / metric["count"], 4) if metric["count"] else 0.0,
-                    "max_ms": round(metric["max_ms"], 4),
-                    "last_ms": round(metric["last_ms"], 4),
-                    "total_ms": round(metric["total_ms"], 4),
-                }
-                for name, metric in self._timings.items()
-            }
+            # Copy the registry, then release it before waiting for a metric.
+            # Reset replaces the registry; an in-flight snapshot can finish
+            # reading its old generation without blocking new MIDI samples.
+            timing_items = tuple(self._timings.items())
+            counter_items = tuple(self._counters.items())
             queues = {
                 name: {
                     "current_depth": metric["current_depth"],
@@ -86,14 +89,27 @@ class RuntimeDiagnostics:
                 }
                 for name, metric in self._queues.items()
             }
-            return {
+            report = {
                 "enabled": self.enabled,
-                "timings": timings,
+                "timings": {},
                 "queues": queues,
-                "counters": dict(self._counters),
+                "counters": {},
                 "gauges": dict(self._gauges),
                 "metadata": dict(self._metadata),
             }
+        for name, metric in timing_items:
+            with metric['lock']:
+                report['timings'][name] = {
+                    'count': metric['count'],
+                    'avg_ms': round(metric['total_ms'] / metric['count'], 4) if metric['count'] else 0.0,
+                    'max_ms': round(metric['max_ms'], 4),
+                    'last_ms': round(metric['last_ms'], 4),
+                    'total_ms': round(metric['total_ms'], 4),
+                }
+        for name, counter in counter_items:
+            with counter['lock']:
+                report['counters'][name] = counter['value']
+        return report
 
     def reset(self):
         with self._lock:

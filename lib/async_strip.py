@@ -75,8 +75,7 @@ class AsyncPixelStrip:
                 raise RuntimeError("LED transmission worker failed") from self._error
             if self._closed:
                 return
-            for i in range(self._count):
-                self._pending[i] = self._pixels[i]
+            self._pending[:] = self._pixels
             self._submitted = time.perf_counter()
             self._dirty = True
             self._condition.notify()
@@ -90,8 +89,7 @@ class AsyncPixelStrip:
                     self._condition.wait_for(lambda: self._dirty or self._closed)
                     if self._closed:
                         return
-                    for i in range(self._count):
-                        self._transmit[i] = self._pending[i]
+                    self._transmit[:] = self._pending
                     submitted = self._submitted
                     brightness = self._brightness
                     self._dirty = False

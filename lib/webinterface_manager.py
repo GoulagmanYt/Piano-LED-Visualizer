@@ -22,6 +22,9 @@ class WebInterfaceManager:
         self.hotspot = hotspot
         self.platform = platform
         self.state_manager = state_manager
+        # Read the live flag directly in the input callback: queuing notes for
+        # an inactive practice page only adds another consumer to the hot path.
+        self.midiports.practice_state = app_state
         self.websocket_loop = asyncio.new_event_loop()
         self.setup_web_interface()
 

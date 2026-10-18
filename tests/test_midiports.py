@@ -3,6 +3,7 @@
 import sys
 import threading
 import unittest
+from types import SimpleNamespace
 from collections import deque
 from unittest.mock import patch
 
@@ -315,6 +316,27 @@ class TestMidiPorts(unittest.TestCase):
         finally:
             worker.join(2)
         self.assertEqual([item[0] for item in ports.live_forward_queue], [first, second])
+
+    def test_inactive_practice_does_not_publish_unused_note_copies(self):
+        ports = self.make_ports()
+        ports.practice_state = SimpleNamespace(practice_active=False)
+        ports.msg_callback(FakeMidiMessage(note=60))
+        self.assertFalse(ports.websocket_publish_queue)
+        ports.practice_state.practice_active = True
+        note = FakeMidiMessage(note=64)
+        ports.msg_callback(note)
+        self.assertIs(ports.queues.pop_websocket_publish()[0], note)
+        self.assertEqual(len(ports.midi_queue), 2)
+        self.assertEqual(len(ports.live_forward_queue), 2)
+
+    def test_failed_input_worker_is_not_reported_as_ready(self):
+        ports = self.make_ports()
+        ports.inport = SimpleNamespace(closed=True)
+        ports.actual_input_port = 'USB:Port 16:0'
+        with patch('lib.midiports._get_cached_input_names', return_value=['USB:Port 16:0']), \
+             patch('lib.midiports._get_cached_output_names', return_value=[]):
+            self.assertFalse(ports.get_rtp_diagnostics()['connection_state']['input_ready'])
+            self.assertFalse(ports.get_runtime_diagnostics()['metadata']['input_ready'])
 
     def test_overlapping_input_callbacks_wake_sleeping_forwarder(self):
         ports = self.make_ports()
@@ -738,7 +760,7 @@ class TestMidiPorts(unittest.TestCase):
 
         with patch("lib.midiports._get_cached_input_names", return_value=["mio:mio MIDI 1 24:0"]), patch(
             "lib.midiports._get_cached_output_names", return_value=[]
-        ), patch("lib.midiports.mido.open_input", side_effect=fake_open_input):
+        ), patch("lib.midiports.open_midi_input", side_effect=fake_open_input):
             changed = ports._reconnect_input(force=False)
 
         self.assertTrue(changed)
@@ -763,7 +785,7 @@ class TestMidiPorts(unittest.TestCase):
             "lib.midiports._get_cached_input_names",
             return_value=["USB AudioDevice:USB AudioDevice MIDI 1 16:0"],
         ), patch("lib.midiports._get_cached_output_names", return_value=[]), patch(
-            "lib.midiports.mido.open_input",
+            "lib.midiports.open_midi_input",
             side_effect=fake_open_input,
         ):
             self.assertTrue(ports._reconnect_input(force=True))

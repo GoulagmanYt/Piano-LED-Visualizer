@@ -36,7 +36,7 @@ class TestMidiPortsBehavior(unittest.TestCase):
             "USB AudioDevice:USB AudioDevice MIDI 1 16:0",
             "rtpmidid:OSCMidiRobin 128:3",
         ]), patch("lib.midiports._get_cached_output_names", return_value=[]), patch(
-            "lib.midiports.mido.open_input", return_value=DummyPort()
+            "lib.midiports.open_midi_input", return_value=DummyPort()
         ) as open_input, patch("lib.midiports.mido.open_output", return_value=DummyPort()):
             midiports = MidiPorts(settings)
 
@@ -54,7 +54,7 @@ class TestMidiPortsBehavior(unittest.TestCase):
             "rtpmidid:Network Export 128:0",
             "USB AudioDevice:USB AudioDevice MIDI 1 16:0",
         ]), patch("lib.midiports._get_cached_output_names", return_value=[]), patch(
-            "lib.midiports.mido.open_input", return_value=DummyPort()
+            "lib.midiports.open_midi_input", return_value=DummyPort()
         ), patch("lib.midiports.mido.open_output", return_value=DummyPort()):
             midiports = MidiPorts(settings)
 
