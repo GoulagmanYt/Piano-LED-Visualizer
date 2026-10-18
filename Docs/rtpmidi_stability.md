@@ -25,6 +25,13 @@ above does not remove external nftables QoS rules; inspect existing rules
 separately. See the [controlled RTP loss investigation](rtp_loss_origin_2026-10-18.md)
 for measurements and the configuration corrected on the tested Pi.
 
+The subsequent [Wi-Fi latency and jitter investigation](rtp_latency_2026-10-18.md)
+measures exceptional late notes separately from delivery. Its Pi-to-router
+controls reproduce stalls even with the visualizer stopped. None of the tested
+additional PC, firmware or router settings demonstrated a reliable improvement;
+they were restored. Do not treat a successful delivery test as proof of bounded
+Wi-Fi latency.
+
 ## Expected RTP-MIDI setup with oscMIDI
 
 - `oscMIDI` session name should stay fixed, for example `OSCMidiRobin64!`
