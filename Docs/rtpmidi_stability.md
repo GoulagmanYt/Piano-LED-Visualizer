@@ -18,6 +18,13 @@ The script applies:
 - Wi-Fi power save disabled through NetworkManager
 - an immediate `iw` power-save-off call when available
 
+On the tested Pi Zero 2 W Wi-Fi connection, forcing DSCP EF or packet priority
+6 for RTP caused packet loss and Wi-Fi transmission failures. Avoid applying
+these markings as an unconditional latency optimization. The stability script
+above does not remove external nftables QoS rules; inspect existing rules
+separately. See the [controlled RTP loss investigation](rtp_loss_origin_2026-10-18.md)
+for measurements and the configuration corrected on the tested Pi.
+
 ## Expected RTP-MIDI setup with oscMIDI
 
 - `oscMIDI` session name should stay fixed, for example `OSCMidiRobin64!`

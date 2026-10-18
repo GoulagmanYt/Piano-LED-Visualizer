@@ -139,11 +139,12 @@ Il compare le nombre, l'ordre et l'empreinte des messages attendus.
 | RTP synthétique en boucle locale sur le PC | 1 000 / 1 000, ordre et empreinte identiques |
 | Même source RTP du Pi, arrivée instrumentée sur un relais temporaire du PC, puis OSCMidi en local | 1 000 paquets RTP uniques reçus dans l'ordre ; 1 000 messages OSC, empreinte identique |
 
-Ces essais confirment les corrections du chemin MIDI du Pi et isolent un
-problème supplémentaire sur le trajet de réception RTP direct du PC. Ils
-ne permettent pas encore d'attribuer ce problème à un composant précis entre
-le réseau, Windows et OSCMidi. Le relais est un outil de diagnostic temporaire,
-arrêté après l'essai ; il ne constitue pas un correctif installé.
+À ce stade, ces essais confirmaient les corrections du chemin MIDI local
+du Pi, mais ne localisaient pas les pertes réseau. L'attribution provisoire
+au trajet de réception du PC était prématurée : une capture de sortie sur
+le Pi ne prouve pas que la transmission Wi-Fi a réussi. Le diagnostic
+complémentaire ci-dessous a identifié un forçage QoS sur le Pi.
+Le relais était un outil temporaire, arrêté après l'essai.
 
 À la fin des essais, les services `visualizer` et `rtpmidid` sont actifs,
 les files du Pi sont vides, le pool ALSA affiche zéro échec d'allocation
@@ -153,7 +154,24 @@ aucune file en attente et un transport sain, mais son compteur cumulatif
 signale 152 paquets RTP manquants depuis son démarrage. Ce compteur cumule
 les différents essais et ne correspond pas au seul test de 10 000 événements.
 
-**La validation « zéro perte de bout en bout jusqu'au PC » échoue encore.**
-Les pertes restantes ne sont pas reproduites dans le traitement local du Pi.
+**À 16 h, la validation « zéro perte jusqu'au PC » échouait encore.**
+Les pertes n'étaient pas reproduites dans le traitement local du Pi.
 Les résultats complets et les scripts de maintenance sont conservés dans
 `.maintenance/` sur le poste de développement.
+
+## Origine réseau identifiée à 20 h
+
+La table nftables `inet oscmidi_qos` du Pi imposait DSCP EF et
+`meta priority set 0:6` aux ports UDP 5004/5005 et au processus rtpmidid.
+Les essais contrôlés reproduisent les pertes quand ces règles sont actives
+et les suppriment dans le test de 1 000 messages quand elles sont retirées.
+Chaque famille de règles, testée seule, reproduit aussi le défaut.
+
+Le fichier générateur est `scripts/setup-pi-qos.sh` dans le dépôt OSCMidi ;
+sa configuration persistante était `/etc/nftables.d/oscmidi-qos.nft` sur le Pi.
+Les règles ont été désactivées avec sauvegarde, sans modifier les autres
+tables du pare-feu. Un test de production de 10 000 messages passe ensuite
+avec compteurs, ordre et empreinte identiques jusqu'à la sortie OSC du PC.
+
+Les essais longs et les limites restantes sont détaillés dans
+[le diagnostic de l'origine RTP](rtp_loss_origin_2026-10-18.md).
