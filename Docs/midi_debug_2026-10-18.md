@@ -114,5 +114,46 @@ séparément après déploiement. Un profilage cProfile est utile au diagnostic,
 mais ses résultats de latence ne sont pas comparés aux essais sans profilage.
 La file native reste finie : elle ne garantit pas la livraison sous une charge
 illimitée, pendant un blocage prolongé ou pour une taille arbitraire de SysEx.
-OSCMidi n'était pas relancé pendant ces essais ; la livraison au PC attend donc
-une session réseau active pour être vérifiée.
+
+## Vérification avec OSCMidi relancé
+
+La version `7743cdc` a été poussée et installée par le bouton de mise à jour
+de la page web. Après le retour de l'interface USB et le lancement d'OSCMidi,
+la session réseau est connectée à `192.168.1.92:5004/5005`.
+
+Le contrôle final utilise le service de production et son entrée ALSA
+existante. Les notes synthétiques sont injectées directement dans cette
+entrée ; il ne mesure donc pas le trajet électrique dans l'interface USB.
+Un récepteur indépendant sur le PC écoute la sortie OSC déjà configurée
+par OSCMidi sur `127.0.0.1:9000`, sans modifier ses réglages audio ou MIDI.
+Il compare le nombre, l'ordre et l'empreinte des messages attendus.
+
+| Test | Résultat observé |
+| --- | --- |
+| Production, 1 000 événements, capture de sortie du Pi | 1 000 reçus, traités et envoyés ; 1 000 paquets RTP capturés, séquences continues, aucune perte de capture |
+| Même test, sortie d'OSCMidi sur le PC | 976 / 1 000 messages OSC, comparaison exacte en échec |
+| Autres essais de production à 1 000 événements | 968 puis 966 messages OSC, résultat non fiable |
+| Production, rafale de 10 000 événements | 10 000 reçus, traités et envoyés par le Pi ; 9 938 messages OSC observés sur le PC |
+| UDP indépendant Pi → PC, deux modes d'émission | 1 000 / 1 000 dans l'ordre pour chaque mode |
+| RTP synthétique directement du Pi vers OSCMidi, sans le visualiseur ni rtpmidid | 962 / 1 000 messages OSC |
+| RTP synthétique en boucle locale sur le PC | 1 000 / 1 000, ordre et empreinte identiques |
+| Même source RTP du Pi, arrivée instrumentée sur un relais temporaire du PC, puis OSCMidi en local | 1 000 paquets RTP uniques reçus dans l'ordre ; 1 000 messages OSC, empreinte identique |
+
+Ces essais confirment les corrections du chemin MIDI du Pi et isolent un
+problème supplémentaire sur le trajet de réception RTP direct du PC. Ils
+ne permettent pas encore d'attribuer ce problème à un composant précis entre
+le réseau, Windows et OSCMidi. Le relais est un outil de diagnostic temporaire,
+arrêté après l'essai ; il ne constitue pas un correctif installé.
+
+À la fin des essais, les services `visualizer` et `rtpmidid` sont actifs,
+les files du Pi sont vides, le pool ALSA affiche zéro échec d'allocation
+et un pic de 57 cellules sur 2 000. Le Pi est à 48,3 °C avec
+`throttled=0x0`. OSCMidi indique zéro perte de sa file MIDI audio, zéro xrun,
+aucune file en attente et un transport sain, mais son compteur cumulatif
+signale 152 paquets RTP manquants depuis son démarrage. Ce compteur cumule
+les différents essais et ne correspond pas au seul test de 10 000 événements.
+
+**La validation « zéro perte de bout en bout jusqu'au PC » échoue encore.**
+Les pertes restantes ne sont pas reproduites dans le traitement local du Pi.
+Les résultats complets et les scripts de maintenance sont conservés dans
+`.maintenance/` sur le poste de développement.
