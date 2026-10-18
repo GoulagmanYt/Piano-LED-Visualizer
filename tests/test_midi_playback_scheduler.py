@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -280,6 +281,110 @@ class TestMidiPlaybackScheduler(unittest.TestCase):
 
         self.assertEqual(scheduled_counts_at_wait, [2, 3])
         self.assertEqual([msg.note for msg, _, _ in midiports.scheduled], [60, 64, 60])
+
+    def test_stop_during_native_chord_does_not_enqueue_the_remaining_notes(self):
+        midiports = FakeMidiPorts()
+        scheduler = MidiPlaybackScheduler(midiports, FakeSaving(), FakeMenu(), None, None)
+        scheduler.state = PlaybackState.RUNNING
+        compiled = CompiledMidiPlayback(
+            events=[],
+            local_messages=[(0, mido.Message("note_on", note=note)) for note in (60, 64, 67)],
+            total_delay_s=0.0,
+        )
+        original_schedule = midiports.schedule_rtp_message
+
+        def enqueue_then_stop(*args, **kwargs):
+            queued = original_schedule(*args, **kwargs)
+            scheduler.stop()
+            return queued
+
+        midiports.schedule_rtp_message = enqueue_then_stop
+        with patch("lib.midi_playback_scheduler.time.perf_counter", return_value=100.0):
+            self.assertFalse(scheduler._play_native_rtp_events("chord.mid", compiled))
+
+        self.assertEqual([msg.note for msg, _, _ in midiports.scheduled], [60])
+        self.assertEqual(midiports.queues.snapshot_depths()["scheduled_forward"], 0)
+        self.assertEqual(midiports.panic_count, 1)
+
+    def test_stop_before_native_queue_admission_does_not_leave_a_stale_note(self):
+        midiports = FakeMidiPorts()
+        scheduler = MidiPlaybackScheduler(midiports, FakeSaving(), FakeMenu(), None, None)
+        scheduler.state = PlaybackState.RUNNING
+
+        class MessageAtStopBoundary:
+            def copy(self, **kwargs):
+                # Cancellation arrives while preparing the message, after
+                # the playback loop's initial stop check.
+                scheduler.stop()
+                return mido.Message("note_on", note=60, **kwargs)
+
+        compiled = CompiledMidiPlayback(
+            events=[], local_messages=[(0, MessageAtStopBoundary())], total_delay_s=0.0
+        )
+        with patch("lib.midi_playback_scheduler.time.perf_counter", return_value=100.0):
+            self.assertFalse(scheduler._play_native_rtp_events("chord.mid", compiled))
+
+        self.assertEqual(midiports.scheduled, [])
+        self.assertEqual(midiports.queues.snapshot_depths()["scheduled_forward"], 0)
+
+    def test_concurrent_stop_clears_an_admission_already_in_progress(self):
+        midiports = FakeMidiPorts()
+        scheduler = MidiPlaybackScheduler(midiports, FakeSaving(), FakeMenu(), None, None)
+        scheduler.state = PlaybackState.RUNNING
+        compiled = CompiledMidiPlayback(
+            events=[], local_messages=[(0, mido.Message("note_on", note=60))], total_delay_s=0.0
+        )
+        admitting = threading.Event()
+        release = threading.Event()
+        stopping = threading.Event()
+        stopped = threading.Event()
+        errors = []
+        original_schedule = midiports.schedule_rtp_message
+
+        def pause_before_enqueue(*args, **kwargs):
+            admitting.set()
+            if not release.wait(2):
+                raise TimeoutError("test did not release queue admission")
+            return original_schedule(*args, **kwargs)
+
+        midiports.schedule_rtp_message = pause_before_enqueue
+
+        def play():
+            try:
+                scheduler._play_native_rtp_events("chord.mid", compiled)
+            except Exception as error:
+                errors.append(error)
+
+        def stop():
+            stopping.set()
+            try:
+                scheduler.stop()
+            except Exception as error:
+                errors.append(error)
+            finally:
+                stopped.set()
+
+        player = threading.Thread(target=play)
+        canceller = threading.Thread(target=stop)
+        player.start()
+        try:
+            self.assertTrue(admitting.wait(2))
+            canceller.start()
+            self.assertTrue(stopping.wait(2))
+            # Without shared admission/cancellation locking, stop completes
+            # now and the paused enqueue subsequently leaves a stale note.
+            stopped.wait(0.1)
+        finally:
+            release.set()
+            player.join(2)
+            if canceller.ident is not None:
+                canceller.join(2)
+
+        self.assertFalse(player.is_alive())
+        self.assertFalse(canceller.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(midiports.queues.snapshot_depths()["scheduled_forward"], 0)
+        self.assertEqual(midiports.panic_count, 1)
 
 
 if __name__ == "__main__":

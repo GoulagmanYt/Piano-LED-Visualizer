@@ -141,6 +141,7 @@ class MidiPorts:
         self._cached_ignored_set = frozenset(self.ignored_message_types)
         self.forward_backoff_until = 0.0
         self.forward_condition = threading.Condition()
+        self._output_lock = threading.RLock()
 
         # Known python-rtmidi first-access quirk on some systems.
         try:
@@ -180,6 +181,8 @@ class MidiPorts:
         try:
             oldest = queue[0]
         except IndexError:
+            # A consumer may drain the final item after the nonempty check.
+            # Diagnostics must not turn a successful MIDI send into a retry.
             return 0.0
         if queue is self.scheduled_forward_queue and hasattr(self, "queues"):
             oldest = oldest[2]
@@ -606,8 +609,31 @@ class MidiPorts:
                 time.sleep(timeout)
                 continue
             with condition:
-                if self.worker_running:
-                    condition.wait(timeout=timeout)
+                if not self.worker_running:
+                    break
+                # A producer may enqueue and notify between the empty check
+                # above and this lock. Recheck under the condition so work
+                # cannot miss its wakeup and wait for the 50ms idle timeout.
+                now_perf = time.perf_counter()
+                backoff = max(0.0, getattr(self, "forward_backoff_until", 0.0) - now_perf)
+                if hasattr(self, "queues"):
+                    live_item = self.queues.peek_live_forward()
+                    next_item = self.queues.peek_next_scheduled_forward()
+                else:
+                    live_item = self.live_forward_queue[0] if self.live_forward_queue else None
+                    next_item = self.scheduled_forward_queue[0] if self.scheduled_forward_queue else None
+                due_now = next_item is not None and next_item[2] <= now_perf
+                if self.playport is None:
+                    timeout = 0.05
+                elif live_item is not None or due_now:
+                    if backoff <= 0.0:
+                        continue
+                    timeout = min(0.05, backoff)
+                else:
+                    timeout = 0.05
+                    if next_item is not None:
+                        timeout = min(timeout, max(backoff, next_item[2] - now_perf))
+                condition.wait(timeout=timeout)
 
     def _websocket_publish_loop(self):
         while self.worker_running:

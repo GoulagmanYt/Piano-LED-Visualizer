@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import threading
 import unittest
 from collections import deque
 from unittest.mock import patch
@@ -106,6 +107,123 @@ class TestMidiPorts(unittest.TestCase):
         self.assertEqual({(m.channel, m.control, m.value) for m in port.sent},
                          {(ch, cc, 0) for ch in range(16) for cc in (64, 120, 123)})
 
+    def run_forward_wait_boundary(self, produce, *, backoff_until=0.0):
+        """Queue work exactly after the empty check and before condition.wait."""
+        ports = self.make_ports()
+        ports.worker_running = True
+        ports.forward_backoff_until = backoff_until
+        waits = []
+
+        class BoundaryCondition(threading.Condition):
+            entered = False
+
+            def __enter__(self):
+                if not self.entered:
+                    self.entered = True
+                    produce(ports)
+                return super().__enter__()
+
+            def wait(self, timeout=None):
+                waits.append(timeout)
+                ports.worker_running = False
+
+        ports.forward_condition = BoundaryCondition()
+        original_flush = ports._flush_live_forward_queue_once
+        attempts = 0
+
+        def flush():
+            nonlocal attempts
+            attempts += 1
+            self.assertLessEqual(attempts, 8, "forward worker spun instead of waiting")
+            sent = original_flush()
+            if sent:
+                ports.worker_running = False
+            return sent
+
+        ports._flush_live_forward_queue_once = flush
+        with patch("lib.midiports.time.perf_counter", return_value=100.0):
+            ports._live_forward_loop()
+        return ports, waits
+
+    def test_live_forward_notification_before_wait_is_not_lost(self):
+        msg = FakeMidiMessage()
+        ports, waits = self.run_forward_wait_boundary(
+            lambda ports: ports.enqueue_rtp_message(msg, msg_timestamp=100.0)
+        )
+        self.assertEqual(waits, [])
+        self.assertEqual(ports.playport.sent, [msg])
+
+    def test_due_scheduled_forward_notification_before_wait_is_not_lost(self):
+        msg = FakeMidiMessage()
+        ports, waits = self.run_forward_wait_boundary(
+            lambda ports: ports.schedule_rtp_message(msg, due_time=99.0, enqueued_at=99.0)
+        )
+        self.assertEqual(waits, [])
+        self.assertEqual(ports.playport.sent, [msg])
+
+    def test_new_scheduled_deadline_replaces_idle_wait(self):
+        ports, waits = self.run_forward_wait_boundary(
+            lambda ports: ports.schedule_rtp_message(
+                FakeMidiMessage(), due_time=100.005, enqueued_at=100.0
+            )
+        )
+        self.assertEqual(len(waits), 1)
+        self.assertAlmostEqual(waits[0], 0.005)
+        self.assertEqual(ports.playport.sent, [])
+
+    def test_live_forward_backoff_waits_until_retry_without_spinning(self):
+        ports, waits = self.run_forward_wait_boundary(
+            lambda ports: ports.enqueue_rtp_message(FakeMidiMessage(), msg_timestamp=100.0),
+            backoff_until=100.02,
+        )
+        self.assertEqual(len(waits), 1)
+        self.assertAlmostEqual(waits[0], 0.02)
+        self.assertEqual(len(ports.live_forward_queue), 1)
+        self.assertEqual(ports.playport.sent, [])
+
+    def test_due_scheduled_backoff_waits_until_retry_without_spinning(self):
+        ports, waits = self.run_forward_wait_boundary(
+            lambda ports: ports.schedule_rtp_message(
+                FakeMidiMessage(), due_time=99.0, enqueued_at=99.0
+            ),
+            backoff_until=100.02,
+        )
+        self.assertEqual(len(waits), 1)
+        self.assertAlmostEqual(waits[0], 0.02)
+        self.assertEqual(ports.playport.sent, [])
+
+    def test_live_forward_idle_worker_keeps_bounded_wait(self):
+        _, waits = self.run_forward_wait_boundary(lambda ports: None)
+        self.assertEqual(waits, [0.05])
+
+    def test_live_forward_without_output_waits_instead_of_spinning(self):
+        def disconnect_and_enqueue(ports):
+            ports.playport = None
+            ports.enqueue_rtp_message(FakeMidiMessage(), msg_timestamp=100.0)
+
+        ports, waits = self.run_forward_wait_boundary(disconnect_and_enqueue)
+        self.assertEqual(waits, [0.05])
+        self.assertEqual(len(ports.live_forward_queue), 1)
+
+    def test_scheduled_forward_without_output_keeps_bounded_wait(self):
+        for due_time in (99.0, 100.005):
+            with self.subTest(due_time=due_time):
+                def disconnect_and_schedule(ports):
+                    ports.playport = None
+                    ports.schedule_rtp_message(
+                        FakeMidiMessage(), due_time=due_time, enqueued_at=99.0
+                    )
+
+                ports, waits = self.run_forward_wait_boundary(disconnect_and_schedule)
+                self.assertEqual(waits, [0.05])
+                self.assertEqual(len(ports.scheduled_forward_queue), 1)
+
+    def test_live_forward_shutdown_before_wait_does_not_sleep(self):
+        _, waits = self.run_forward_wait_boundary(
+            lambda ports: setattr(ports, "worker_running", False)
+        )
+        self.assertEqual(waits, [])
+
     def make_ports(self, *, midi_maxlen=4, websocket_maxlen=4, forward_maxlen=4):
         ports = MidiPorts.__new__(MidiPorts)
         ports.queues = MidiQueues(
@@ -178,6 +296,125 @@ class TestMidiPorts(unittest.TestCase):
 
         self.assertEqual(len(ports.playport.sent), 1)
         self.assertIs(ports.playport.sent[0], msg)
+
+    def test_diagnostics_queue_drained_during_snapshot_does_not_retry_sent_note(self):
+        ports = self.make_ports()
+        msg = FakeMidiMessage()
+        ports.enqueue_rtp_message(msg, msg_timestamp=99.0)
+
+        class DrainingDeque(deque):
+            def __getitem__(self, index):
+                # The consumer removes the final entry after the nonempty
+                # check, before diagnostics reads the head of the queue.
+                self.clear()
+                return super().__getitem__(index)
+
+        ports.midi_queue = DrainingDeque([(msg, 99.0)])
+        with patch("lib.midiports.time.perf_counter", return_value=100.0):
+            self.assertTrue(ports._flush_live_forward_queue_once())
+            self.assertFalse(ports._flush_live_forward_queue_once())
+
+        self.assertEqual(ports.playport.sent, [msg])
+        self.assertEqual(ports.forward_stats["live_send_errors"], 0)
+        self.assertEqual(len(ports.live_forward_queue), 0)
+
+    def test_overdue_scheduled_release_is_not_starved_by_continuous_live_input(self):
+        ports = self.make_ports()
+        release = FakeMidiMessage(msg_type="note_off", note=61, velocity=0)
+        ports.schedule_rtp_message(release, due_time=98.0, enqueued_at=97.0)
+        live = FakeMidiMessage(note=60)
+        ports.enqueue_rtp_message(live, msg_timestamp=99.0)
+
+        def send_and_keep_live_busy(msg):
+            ports.playport.sent.append(msg)
+            ports.enqueue_rtp_message(FakeMidiMessage(note=62), msg_timestamp=100.0)
+
+        ports.playport.send = send_and_keep_live_busy
+        with patch("lib.midiports.time.perf_counter", return_value=100.0):
+            for _ in range(4):
+                ports._flush_live_forward_queue_once()
+
+        self.assertIs(ports.playport.sent[0], release)
+        self.assertIn(live, ports.playport.sent)
+
+    def test_older_live_message_precedes_due_scheduled_message(self):
+        ports = self.make_ports()
+        live = FakeMidiMessage(note=60)
+        scheduled = FakeMidiMessage(note=61)
+        ports.enqueue_rtp_message(live, msg_timestamp=97.0)
+        ports.schedule_rtp_message(scheduled, due_time=98.0, enqueued_at=96.0)
+        with patch("lib.midiports.time.perf_counter", return_value=100.0):
+            ports._flush_live_forward_queue_once()
+            ports._flush_live_forward_queue_once()
+        self.assertEqual(ports.playport.sent, [live, scheduled])
+
+    def test_future_scheduled_message_does_not_delay_live_input(self):
+        ports = self.make_ports()
+        live = FakeMidiMessage(note=60)
+        ports.enqueue_rtp_message(live, msg_timestamp=99.0)
+        ports.schedule_rtp_message(FakeMidiMessage(note=61), due_time=101.0, enqueued_at=98.0)
+        with patch("lib.midiports.time.perf_counter", return_value=100.0):
+            self.assertTrue(ports._flush_live_forward_queue_once())
+            self.assertFalse(ports._flush_live_forward_queue_once())
+        self.assertEqual(ports.playport.sent, [live])
+
+    def test_panic_follows_a_note_already_selected_by_the_forward_worker(self):
+        ports = self.make_ports()
+        note = FakeMidiMessage(note=60)
+        ports.enqueue_rtp_message(note)
+        selected = threading.Event()
+        release = threading.Event()
+        panic_started = threading.Event()
+        panic_done = threading.Event()
+        errors = []
+        original_peek = ports.queues.peek_live_forward
+
+        def select_then_pause():
+            item = original_peek()
+            selected.set()
+            if not release.wait(2):
+                raise TimeoutError("test did not release the selected note")
+            return item
+
+        ports.queues.peek_live_forward = select_then_pause
+
+        def forward():
+            try:
+                ports._flush_live_forward_queue_once()
+            except Exception as error:
+                errors.append(error)
+
+        def panic():
+            panic_started.set()
+            try:
+                ports.send_all_notes_off()
+            except Exception as error:
+                errors.append(error)
+            finally:
+                panic_done.set()
+
+        worker = threading.Thread(target=forward)
+        reset = threading.Thread(target=panic)
+        worker.start()
+        try:
+            self.assertTrue(selected.wait(2))
+            reset.start()
+            self.assertTrue(panic_started.wait(2))
+            # The old implementation completes the reset before the selected
+            # note is sent. A serialized reset waits for the in-flight note.
+            panic_done.wait(0.1)
+        finally:
+            release.set()
+            worker.join(2)
+            if reset.ident is not None:
+                reset.join(2)
+
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(reset.is_alive())
+        self.assertEqual(errors, [])
+        self.assertIs(ports.playport.sent[0], note)
+        self.assertEqual(len(ports.playport.sent), 49)
+        self.assertEqual(ports.playport.sent[-1].type, "control_change")
 
     def test_learning_queue_does_not_steal_live_visualizer_input(self):
         ports = self.make_ports()

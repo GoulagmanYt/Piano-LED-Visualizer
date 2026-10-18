@@ -206,11 +206,18 @@ class MidiPlaybackScheduler:
             group_end = index
             while group_end < len(local_messages) and local_messages[group_end][0] == due_us:
                 _, message = local_messages[group_end]
-                queued = self.midiports.schedule_rtp_message(
-                    message.copy(time=0),
-                    due_time=due_time,
-                    source="midifile",
-                )
+                outgoing = message.copy(time=0)
+                # stop() uses the same lock to cancel and clear the queue.
+                # Admission must finish before that clear, or observe the
+                # cancellation; no remainder of a chord may follow the panic.
+                with self._lock:
+                    if self.stop_event.is_set():
+                        return False
+                    queued = self.midiports.schedule_rtp_message(
+                        outgoing,
+                        due_time=due_time,
+                        source="midifile",
+                    )
                 if queued:
                     scheduled += 1
                 group_end += 1
