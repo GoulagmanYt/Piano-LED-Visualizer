@@ -277,6 +277,89 @@ class TestMidiPorts(unittest.TestCase):
         ports.forward_backoff_until = 0.0
         return ports
 
+    def test_live_latency_includes_time_waiting_before_native_send(self):
+        ports = self.make_ports()
+        ports.queues.enqueue_live_forward(FakeMidiMessage(), timestamp=100.0)
+        with patch('lib.midiports.time.perf_counter', return_value=100.250):
+            self.assertTrue(ports._flush_live_forward_queue_once())
+        timing = ports._ensure_runtime_diagnostics().snapshot()['timings']
+        self.assertEqual(timing['rtp_live_queue_wait']['max_ms'], 250.0)
+        self.assertEqual(timing['rtp_send']['max_ms'], 0.0)
+
+    def test_callback_count_distinguishes_ingress_from_processing_and_resets(self):
+        ports = self.make_ports()
+        ports.msg_callback(FakeMidiMessage())
+        ports.msg_callback(FakeMidiMessage('clock'))
+        ports.msg_callback(FakeMidiMessage('note_off'))
+        self.assertEqual(ports.get_runtime_diagnostics()['counters']['midi_callback_calls'], 2)
+        ports.reset_runtime_diagnostics()
+        ports.msg_callback(FakeMidiMessage())
+        self.assertEqual(ports.get_runtime_diagnostics()['counters']['midi_callback_calls'], 1)
+
+    def test_callback_does_not_wait_to_notify_an_already_busy_forwarder(self):
+        ports = self.make_ports()
+        ports.forward_condition = threading.Condition()
+        first, second = FakeMidiMessage(note=60), FakeMidiMessage(note=64)
+        ports.queues.enqueue_live_forward(first)
+        finished = threading.Event()
+
+        def receive():
+            ports.msg_callback(second)
+            finished.set()
+
+        worker = threading.Thread(target=receive)
+        try:
+            with ports.forward_condition:
+                worker.start()
+                self.assertTrue(finished.wait(.25), 'callback blocked on redundant forward notification')
+        finally:
+            worker.join(2)
+        self.assertEqual([item[0] for item in ports.live_forward_queue], [first, second])
+
+    def test_overlapping_input_callbacks_wake_sleeping_forwarder(self):
+        ports = self.make_ports()
+        admitted = threading.Barrier(2)
+        sleeping, forwarded = threading.Event(), threading.Event()
+
+        class OverlappingInputs(MidiQueues):
+            def enqueue_all_live(self, *args, **kwargs):
+                wake = super().enqueue_all_live(*args, **kwargs)
+                admitted.wait(2)
+                return wake
+
+        class SleepingCondition(threading.Condition):
+            def wait(self, timeout=None):
+                sleeping.set()
+                return super().wait(2)  # Expose a lost notify without watchdog rescue.
+
+        class ObservedPort(FakePlayPort):
+            def send(self, message):
+                super().send(message)
+                if len(self.sent) == 2:
+                    forwarded.set()
+
+        ports.queues = OverlappingInputs()
+        ports.live_forward_queue = ports.queues.live_forward_queue
+        ports.scheduled_forward_queue = ports.queues.scheduled_forward_queue
+        ports.forward_condition = SleepingCondition()
+        ports.playport = ObservedPort()
+        ports.worker_running = True
+        worker = threading.Thread(target=ports._live_forward_loop)
+        callbacks = [threading.Thread(target=ports.msg_callback, args=(FakeMidiMessage(note=n),))
+                     for n in (60, 64)]
+        try:
+            worker.start()
+            self.assertTrue(sleeping.wait(1))
+            for callback in callbacks:
+                callback.start()
+            self.assertTrue(forwarded.wait(.25), 'overlapping callbacks lost their forwarding wakeup')
+        finally:
+            ports.worker_running = False
+            ports._notify_forward_worker()
+            for callback in callbacks:
+                callback.join(2)
+            worker.join(2)
+
     def test_live_input_is_not_forwarded_synchronously(self):
         ports = self.make_ports()
         msg = FakeMidiMessage()

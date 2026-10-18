@@ -69,7 +69,8 @@ class MidiQueues:
         queue_reserve = max(1, queue.maxlen // 8)
         return min(self.reserved_noteoff_slots, queue_reserve)
 
-    def queue_with_policy(self, queue, item, source, reserve_slots=0, count_drops=True):
+    def queue_with_policy(self, queue, item, source, reserve_slots=0, count_drops=True,
+                          notify=True):
         msg = item[0] if isinstance(item, tuple) else item
         event_type = self.classify_message(msg)
         soft_limit = queue.maxlen - reserve_slots if queue.maxlen else None
@@ -87,7 +88,8 @@ class MidiQueues:
                 return False
 
         queue.append(item)
-        self.activity.set()
+        if notify and not self.activity.is_set():
+            self.activity.set()
         return True
 
     def enqueue_live(self, msg, timestamp=None):
@@ -130,6 +132,7 @@ class MidiQueues:
             )
 
     def enqueue_all_live(self, msg, timestamp=None, source="rtp_rx", is_note=False):
+        """Fan out input and return whether the forwarder needs a wakeup."""
         if timestamp is None:
             timestamp = time.perf_counter()
             
@@ -139,8 +142,13 @@ class MidiQueues:
         with self._lock:
             self.live_visualizer_queue.append(item)
             self.live_learning_queue.append(item)
+            wake_forward = False
             if self.forwarding_enabled:
                 self.live_forward_queue.append(item_forward)
+                # Decide after append while other producers are excluded.
+                # The consumer may pop concurrently; an empty queue then
+                # means this item has already been handled, needing no wake.
+                wake_forward = len(self.live_forward_queue) == 1
             if is_note:
                 self.queue_with_policy(
                     self.websocket_publish_queue,
@@ -148,9 +156,15 @@ class MidiQueues:
                     "websocket_publish",
                     reserve_slots=self._reserve_slots_for(self.websocket_publish_queue),
                     count_drops=False,
+                    notify=False,
                 )
+        # Event.set() acquires another lock and can yield the GIL. Waking a
+        # consumer while holding the shared queue lock creates a lock convoy.
+        # The renderer clears before consuming its slice. Coalesce the rest
+        # of a burst instead of acquiring Event's condition for every note.
+        if not self.activity.is_set():
             self.activity.set()
-            return True
+        return wake_forward
 
     def enqueue_live_forward(self, msg, timestamp=None, source="forward"):
         if timestamp is None:
@@ -166,17 +180,19 @@ class MidiQueues:
             )
 
     def peek_live_forward(self):
-        with self._lock:
-            if not self.live_forward_queue:
-                return None
+        # MidiPorts serializes forwarding and connection changes with its
+        # output lock. Appending from the input callback is deque-atomic.
+        try:
             return self.live_forward_queue[0]
+        except IndexError:
+            return None
 
     def pop_live_forward(self, expected=None):
+        if expected is None:
+            return self.pop_queue(self.live_forward_queue)
         with self._lock:
             if not self.live_forward_queue:
                 return None
-            if expected is None:
-                return self.live_forward_queue.popleft()
             for index, item in enumerate(self.live_forward_queue):
                 if item == expected:
                     del self.live_forward_queue[index]
@@ -199,6 +215,8 @@ class MidiQueues:
             return True
 
     def peek_due_scheduled_forward(self, now_perf=None):
+        if not self.scheduled_forward_queue:
+            return None
         if now_perf is None:
             now_perf = time.perf_counter()
         with self._lock:
@@ -229,6 +247,8 @@ class MidiQueues:
             return None
 
     def peek_next_scheduled_forward(self):
+        if not self.scheduled_forward_queue:
+            return None
         with self._lock:
             if not self.scheduled_forward_queue:
                 return None
@@ -261,27 +281,27 @@ class MidiQueues:
             )
 
     def pop_websocket_publish(self):
-        with self._lock:
-            if not self.websocket_publish_queue:
-                return None
-            return self.websocket_publish_queue.popleft()
+        return self.pop_queue(self.websocket_publish_queue)
 
     def drain_queue(self, queue, max_messages=None):
         drained = []
-        with self._lock:
-            while queue and (max_messages is None or len(drained) < max_messages):
+        # CPython deque append/popleft are atomic. Independent consumers must
+        # not contend with the callback/forwarder for the fan-out/session lock.
+        while max_messages is None or len(drained) < max_messages:
+            try:
                 drained.append(queue.popleft())
+            except IndexError:
+                break
         return drained
 
     def pop_queue(self, queue):
-        with self._lock:
-            if not queue:
-                return None
+        try:
             return queue.popleft()
+        except IndexError:
+            return None
 
     def queue_depth(self, queue):
-        with self._lock:
-            return len(queue)
+        return len(queue)
 
     def drain_live_for_visualizer(self, max_messages=None):
         return self.drain_queue(self.live_visualizer_queue, max_messages=max_messages)
@@ -297,11 +317,10 @@ class MidiQueues:
 
     def discard_inactive(self, *, learning_active, live_active):
         """Do not retain an unconsumed copy of every note for days."""
-        with self._lock:
-            if not learning_active:
-                self.live_learning_queue.clear()
-            if not live_active:
-                self.live_visualizer_queue.clear()
+        if not learning_active:
+            self.live_learning_queue.clear()
+        if not live_active:
+            self.live_visualizer_queue.clear()
 
     def clear_file(self):
         with self._lock:

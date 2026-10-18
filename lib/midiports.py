@@ -104,6 +104,8 @@ class MidiPorts:
         self.drop_counter = 0
         self.drop_counts = {}
         self.ignored_counts = {}
+        self.received_count = 0
+        self._received_at_reset = 0
         self.forward_stats = {
             "live_sent": 0,
             "live_send_errors": 0,
@@ -432,6 +434,8 @@ class MidiPorts:
                 msg = live_item[0]
                 sent = self._send_rtp_message(msg, send_started=now_perf)
                 if sent:
+                    self._ensure_runtime_diagnostics().record_duration(
+                        'rtp_live_queue_wait', now_perf - live_item[1])
                     self.queues.pop_live_forward()
                 else:
                     self.forward_backoff_until = now_perf + 0.05
@@ -1108,6 +1112,8 @@ class MidiPorts:
     def get_runtime_diagnostics(self):
         self.refresh_queue_diagnostics(force=True)
         diagnostics = self._ensure_runtime_diagnostics().snapshot()
+        diagnostics['counters']['midi_callback_calls'] = (
+            getattr(self, 'received_count', 0) - getattr(self, '_received_at_reset', 0))
         diagnostics["rtp"] = {
             "drop_counter": self.drop_counter,
             "drop_counts": dict(self.drop_counts),
@@ -1131,6 +1137,7 @@ class MidiPorts:
         return diagnostics
 
     def reset_runtime_diagnostics(self):
+        self._received_at_reset = getattr(self, 'received_count', 0)
         self._ensure_runtime_diagnostics().reset()
 
     def msg_callback(self, msg):
@@ -1143,13 +1150,20 @@ class MidiPorts:
             return
 
         ts = time.perf_counter()
+        # The backend invokes one input callback serially. Keep this counter
+        # out of the shared diagnostics lock on the input hot path.
+        self.received_count = getattr(self, 'received_count', 0) + 1
         self.last_activity = time.time()
         
         is_note = self._classify_message(msg) in ("note_on", "note_off")
         if hasattr(self, "queues"):
-            self.queues.enqueue_all_live(msg, timestamp=ts, source="rtp_rx", is_note=is_note)
+            wake_forward = self.queues.enqueue_all_live(msg, timestamp=ts, source="rtp_rx", is_note=is_note)
             self._sync_queue_drop_counters()
-            self._notify_forward_worker()
+            # A nonempty backlog is already being handled (or rechecked by
+            # the worker under its condition). Only the empty -> first item
+            # transition needs a notification; avoid callback lock convoys.
+            if wake_forward:
+                self._notify_forward_worker()
         else:
             self.enqueue_live_message(msg, timestamp=ts)
             self.enqueue_rtp_message(msg, msg_timestamp=ts)

@@ -17,6 +17,7 @@ from lib.ledsettings import LedSettings
 from lib.ledstrip import LedStrip
 from lib.menulcd import MenuLCD
 from lib.midi_event_processor import MIDIEventProcessor
+from lib.midi_runtime_tuning import configure_midi_cpu_affinity
 from lib.color_mode import ColorMode
 from lib.webinterface_manager import WebInterfaceManager
 from lib.state_manager import StateManager
@@ -36,6 +37,7 @@ class VisualizerApp:
     def __init__(self):
         # Bound Python GIL handoff delays between MIDI, rendering and DMA.
         sys.setswitchinterval(0.001)
+        self._midi_cpu = configure_midi_cpu_affinity()
         self.stop_event = threading.Event()
         self._shutdown_done = False
         self._screensaver_thread = None
@@ -103,6 +105,8 @@ class VisualizerApp:
                                                          self.pedal_deadzone,
                                                          runtime_diagnostics=self.ci.midiports.runtime_diagnostics)
         self.runtime_diagnostics = self.ci.midiports.runtime_diagnostics
+        if self._midi_cpu is not None:
+            self.runtime_diagnostics.set_metadata('midi_cpu_affinity', self._midi_cpu)
         self._instrument_strip_show()
 
         # Frame rate counters
@@ -248,6 +252,9 @@ class VisualizerApp:
         ci.ledstrip.strip.diagnostics = self.runtime_diagnostics
         activity = ci.midiports.queues.activity
         while not self.stop_event.is_set():
+            # Consume the wakeup before its work. Arrivals during this slice
+            # keep the event set and interrupt the following frame delay.
+            activity.clear()
             ci.ledstrip.strip.check_health()
             if self.state_manager.is_active_use():
                 ci.menu.is_idle_animation_running = False
@@ -309,13 +316,16 @@ class VisualizerApp:
                     ledstrip.current_fps = 0.0
             midiports.refresh_queue_diagnostics()
             self.runtime_diagnostics.record_duration("main_loop", time.perf_counter() - loop_start)
+            if midiports.midipending:
+                # A bounded processing slice may leave a chord/backlog. Drain
+                # it on the next frame without adding an artificial sleep.
+                continue
             if should_update:
                 activity.wait(sleep_interval)
             else:
                 # Quiescent idle wait: unblocks immediately (<50us) via activity.set() on MIDI,
                 # or times out after 25ms without spinning CPU cores.
                 activity.wait(0.025)
-            activity.clear()
 
     def update_fps_stats(self):
         now = time.perf_counter()

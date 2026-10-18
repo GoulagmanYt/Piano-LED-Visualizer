@@ -18,11 +18,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.argv = [str(ROOT / 'visualizer.py'), '-s', '-w', 'false', '-a', 'app']
 from visualizer import VisualizerApp
+from lib.midi_pipeline_probe import MidiPipelineProbe
 
 
 class NullOutput:
+    def __init__(self, probe):
+        self.probe = probe
+
     def send(self, message):
-        pass
+        self.probe.forwarded(message)
 
     def close(self):
         pass
@@ -30,12 +34,23 @@ class NullOutput:
 
 def main():
     chord_count = int(os.environ.get('PLV_BENCHMARK_CHORDS', '2000'))
+    chord_interval = float(os.environ.get('PLV_BENCHMARK_INTERVAL_MS', '20')) / 1000
+    if chord_count < 1 or chord_interval <= 0:
+        raise ValueError('Benchmark requires positive chord count and interval')
+    probe = MidiPipelineProbe()
     app = VisualizerApp()
+    original_midi_event = app.color_mode.MidiEvent
+
+    def trace_processed(message, state, ledstrip):
+        original_midi_event(message, state, ledstrip)
+        probe.processed(message)
+
+    app.color_mode.MidiEvent = trace_processed
     process = psutil.Process()
     app.ci.midiports.stop_midi_monitor()
     app.ci.midiports._safe_close_port(app.ci.midiports.inport)
     app.ci.midiports._safe_close_port(app.ci.midiports.playport)
-    app.ci.midiports.playport = NullOutput()
+    app.ci.midiports.playport = NullOutput(probe)
     app.ci.midiports.queues.set_forwarding_enabled(True)
     received = 0
     sent = 0
@@ -46,6 +61,7 @@ def main():
     recv_pedal_channels = []
     def receive(message):
         nonlocal received
+        probe.received(message)
         received += 1
         t = message.type
         recv_by_type[t] = recv_by_type.get(t, 0) + 1
@@ -66,6 +82,7 @@ def main():
 
     def send(message):
         nonlocal sent
+        probe.sent(message)
         output.send(message)
         sent += 1
 
@@ -105,8 +122,6 @@ def main():
             # 12-note chords plus sustain: 1,300 events/sec for ~40 sec.
             notes_on = [mido.Message('note_on', note=n, velocity=80) for n in range(48, 60)]
             notes_off = [mido.Message('note_off', note=n) for n in range(48, 60)]
-            pedal_on = mido.Message('control_change', control=64, value=127)
-            pedal_off = mido.Message('control_change', control=64, value=0)
             deadline = time.monotonic()
             for chord in range(chord_count):
                 # Pedal and notes belong to the same channel.
@@ -121,14 +136,21 @@ def main():
                 send(p_off)
                 now = time.monotonic()
                 if deadline < now:
-                    deadline = now + 0.02
+                    deadline = now + chord_interval
                 else:
-                    deadline += 0.02
-                time.sleep(max(0.005, deadline - time.monotonic()))
+                    deadline += chord_interval
+                time.sleep(max(0.0, deadline - time.monotonic()))
                 if chord % 100 == 0:
                     samples.append({'chord': chord, 'rss_bytes': process.memory_info().rss,
                                     'cpu_percent': process.cpu_percent()})
             time.sleep(2)
+            # A fixed sleep alone can hide a stranded final note or miss a
+            # forward backlog. Keep rendering until all three stages drain.
+            drain_deadline = time.monotonic() + 5
+            while time.monotonic() < drain_deadline:
+                if probe.drained:
+                    break
+                time.sleep(0.01)
         except Exception as error:
             errors.append(repr(error))
         finally:
@@ -151,6 +173,10 @@ def main():
         worker.join(3)
         output.close()
         report = {'sent': sent, 'received': received, 'recv_by_type': recv_by_type, 'recv_pedals': len(recv_pedal_channels), 'missing_pedals': chord_count + 1 - len(recv_pedal_channels), 'errors': errors, 'samples': samples,
+                  'pipeline': probe.snapshot(),
+                  'chord_interval_ms': chord_interval * 1000,
+                  'cpu_affinity': sorted(os.sched_getaffinity(0)),
+                  'alsa_clients': Path('/proc/asound/seq/clients').read_text(),
                   'diagnostics': app.ci.midiports.get_runtime_diagnostics(),
                   'remaining_keys': sum(bool(x) for x in app.ci.ledstrip.keylist),
                   'remaining_sustain': sum(bool(x) for x in app.ci.ledstrip.keylist_sustained)}
@@ -160,7 +186,7 @@ def main():
     report_queues = report['diagnostics']['queues']
     processed = app.runtime_diagnostics.snapshot()['counters'].get('midi_events_processed_total', 0)
     print('BENCHMARK_PROCESSED=' + str(processed), flush=True)
-    if (errors or sent != received or processed != received
+    if (errors or sent != received or processed != received or not report['pipeline']['lossless']
             or any(report_queues.get(q, {}).get('current_depth', 0)
                    for q in ('live_input', 'live_forward', 'scheduled_forward'))
             or report['remaining_keys'] or report['remaining_sustain']
