@@ -2,7 +2,7 @@
 
 [![Platform: Raspberry Pi Zero 2 W](https://img.shields.io/badge/Hardware-Raspberry%20Pi%20Zero%202%20W%20Only-C51A4A?style=for-the-badge&logo=raspberrypi&logoColor=white)](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/)
 [![Companion: OSC Midi Tool](https://img.shields.io/badge/Companion-OSC%20Midi%20Tool-0080FF?style=for-the-badge&logo=musical-score&logoColor=white)](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool)
-[![Tests: 153/153 Passing](https://img.shields.io/badge/Tests-153%2F153%20Passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
+[![Tests: 284/284 Passing](https://img.shields.io/badge/Tests-284%2F284%20Passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 
 An ultra-responsive, real-time LED visualizer for digital pianos, specifically engineered and finely tuned for the **Raspberry Pi Zero 2 W** (BCM2837B0 quad-core Cortex-A53).
@@ -38,7 +38,7 @@ The original visualizer was designed primarily for older single-core Pis (Zero 1
 
 ### 🛡️ 3. Robust Web Interface & 100% Test Coverage
 - **Modernized Backend & Web APIs**: Streamlined endpoints with rock-solid error handling, zero memory leaks, and clean state management.
-- **Fully Validated**: Backed by **153 unit tests** running natively on target hardware.
+- **Fully Validated**: Backed by **284 unit tests** running natively on target hardware.
 - **Safe Self-Healing Updates**: Rollback-capable visualizer updates via `reliable_update.py` with health checks.
 
 ---
