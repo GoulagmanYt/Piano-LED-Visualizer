@@ -285,7 +285,7 @@ class PlatformRasp(PlatformBase):
 
     @staticmethod
     def change_hotspot_password(new_password):
-        logger.info(f"Changing Hotspot password to: {new_password}")
+        logger.info("Changing Hotspot password")
         try:
             # Modify the Hotspot connection with the new password
             subprocess.run([

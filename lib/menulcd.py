@@ -53,6 +53,17 @@ class UITheme:
         self.value_gap = 5  # Gap between label and value
 
 
+# Emplacement du menu LCD -> préfixe des réglages sauvegardés (<préfixe>_red/_green/_blue)
+LED_COLOR_SETTING_PREFIXES = {
+    "Color_for_slow_speed": "speed_slowest",
+    "Color_for_fast_speed": "speed_fastest",
+    "Gradient_start": "gradient_start",
+    "Gradient_end": "gradient_end",
+    "Color_in_scale": "key_in_scale",
+    "Color_not_in_scale": "key_not_in_scale",
+}
+
+
 class MenuLCD:
     def __init__(self, xml_file_name, args, usersettings, ledsettings, ledstrip, learning, saving, midiports, hotspot, platform):
         self.list_count = None
@@ -2188,7 +2199,10 @@ class MenuLCD:
                 led_setting[self.current_choice.lower()] = 255
             if led_setting[self.current_choice.lower()] < 0:
                 led_setting[self.current_choice.lower()] = 0
-            self.usersettings.change_setting_value(self.current_location.lower() + "_" + self.current_choice.lower(),
+            # Le nom du réglage sauvegardé ne se déduit pas du nom du menu
+            # ("Color_in_scale" -> "key_in_scale_red", etc.)
+            setting_prefix = LED_COLOR_SETTING_PREFIXES[self.current_location]
+            self.usersettings.change_setting_value(setting_prefix + "_" + self.current_choice.lower(),
                                                    led_setting[self.current_choice.lower()])
 
         # Learn MIDI

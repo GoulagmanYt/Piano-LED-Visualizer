@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import mido
 
@@ -186,6 +186,19 @@ class TestHostnameSuffix(unittest.TestCase):
         self.assertEqual(_strip_local_suffix("local"), "local")
 
 
+class TestHotspotPasswordNotLogged(unittest.TestCase):
+    def test_new_password_is_not_written_to_logs(self):
+        import lib.platform as platform_module
+
+        secret = "S3cretHotspotPass"
+        with patch.object(platform_module.subprocess, "run", return_value=SimpleNamespace(returncode=0)), \
+                patch.object(platform_module.time, "sleep"), \
+                self.assertLogs(platform_module.logger, level="DEBUG") as captured:
+            platform_module.PlatformRasp.change_hotspot_password(secret)
+
+        self.assertNotIn(secret, "\n".join(captured.output))
+
+
 class TestSpeedColorZeroMaxNotes(unittest.TestCase):
     def test_zero_max_notes_does_not_divide_by_zero(self):
         from lib.color_mode import ColorMode
@@ -198,6 +211,37 @@ class TestSpeedColorZeroMaxNotes(unittest.TestCase):
         )
         color_mode = ColorMode("Speed", ledsettings)
         color_mode.NoteOn(None, 0, None, 10)  # ne doit pas lever ZeroDivisionError
+
+
+class TestLcdColorSettingsArePersisted(unittest.TestCase):
+    def test_every_lcd_color_menu_maps_to_existing_settings(self):
+        import xml.etree.ElementTree as ET
+        from lib.menulcd import LED_COLOR_SETTING_PREFIXES
+
+        defaults = {element.tag for element in ET.parse(PROJECT_ROOT / "config" / "default_settings.xml").getroot()}
+        for location, prefix in LED_COLOR_SETTING_PREFIXES.items():
+            for channel in ("red", "green", "blue"):
+                self.assertIn(f"{prefix}_{channel}", defaults, f"{location} -> {prefix}_{channel}")
+
+    def test_change_value_saves_under_the_real_setting_name(self):
+        from lib.menulcd import MenuLCD
+
+        saved = {}
+        ledsettings = SimpleNamespace(
+            speed_slowest={"red": 10, "green": 0, "blue": 0}, speed_fastest={"red": 10, "green": 0, "blue": 0},
+            gradient_start={"red": 10, "green": 0, "blue": 0}, gradient_end={"red": 10, "green": 0, "blue": 0},
+            key_in_scale={"red": 10, "green": 0, "blue": 0}, key_not_in_scale={"red": 10, "green": 0, "blue": 0},
+        )
+        fake_menu = MagicMock()  # show(), learning, etc. sont simulés ; seuls les attributs utiles sont fixés
+        fake_menu.current_location = "Color_in_scale"
+        fake_menu.current_choice = "Red"
+        fake_menu.speed_multiplier = 1
+        fake_menu.ledsettings = ledsettings
+        fake_menu.usersettings = SimpleNamespace(change_setting_value=lambda name, value: saved.__setitem__(name, value))
+
+        MenuLCD.change_value(fake_menu, 1)
+
+        self.assertEqual(saved, {"key_in_scale_red": 11})
 
 
 class TestNoDirectHardwareImports(unittest.TestCase):
