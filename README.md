@@ -1,153 +1,137 @@
-# <img src="Docs/logo.svg" align="left" height="42" width="42" alt="Logo"> Piano LED Visualizer *(Zero 2 W Edition)*
+# Piano LED Visualizer
 
-[![Platform: Raspberry Pi Zero 2 W](https://img.shields.io/badge/Hardware-Raspberry%20Pi%20Zero%202%20W%20Only-C51A4A?style=for-the-badge&logo=raspberrypi&logoColor=white)](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/)
-[![Companion: OSC Midi Tool](https://img.shields.io/badge/Companion-OSC%20Midi%20Tool-0080FF?style=for-the-badge&logo=musical-score&logoColor=white)](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool)
-[![Tests: 284/284 Passing](https://img.shields.io/badge/Tests-284%2F284%20Passed-brightgreen?style=for-the-badge&logo=pytest&logoColor=white)](tests/)
-[![Python 3.11](https://img.shields.io/badge/Python-3.11%2B-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Raspberry Pi Zero 2 W](https://img.shields.io/badge/hardware-Raspberry%20Pi%20Zero%202%20W-C51A4A?logo=raspberrypi&logoColor=white)](https://www.raspberrypi.com/products/raspberry-pi-zero-2-w/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-An ultra-responsive, real-time LED visualizer for digital pianos, specifically engineered and finely tuned for the **Raspberry Pi Zero 2 W** (BCM2837B0 quad-core Cortex-A53).
+Light up piano keys as you play. Piano LED Visualizer runs on a Raspberry Pi and drives a WS2812B LED strip from USB or network MIDI. A web interface handles colors, MIDI ports, song playback and recordings. An optional LCD provides local controls.
 
-This project is a dedicated fork of the original [Onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visualizer). It strips out legacy overhead, fixes real-time audio/lighting pipeline bottlenecks,  and is tailored to work hand-in-hand with [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool) for seamless low-latency network & USB MIDI routing.
+This fork of [onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visualizer) targets the Raspberry Pi Zero 2 W. Work here focuses on MIDI delivery, reconnecting devices, reducing idle CPU use and integrating with [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool).
 
----
+[Installation](#installation) · [MIDI setup](#midi-setup) · [Documentation](#documentation) · [Development](#development)
 
-## 🎯 Why this Fork?
+## Features
 
-The original visualizer was designed primarily for older single-core Pis (Zero 1 / Pi 1) and generic setups, often encountering CPU spikes, thermal throttling, ALSA buffer overruns on fast chords, and noticeable latency over RTP-MIDI.
+- LED colors based on note, velocity or playing speed, with fading, backlight and animation settings.
+- MIDI file playback, recording and guided practice, including Synthesia integration.
+- USB MIDI input with an Auto mode that keeps the current device connected and waits when no device is available.
+- RTP-MIDI routing through rtpmidid, with peer selection and connection diagnostics in the web interface.
+- Browser controls available in 12 languages, plus an optional Waveshare LCD menu.
+- Updates with configuration backups, service health checks and rollback on failure.
 
-**This edition changes the game:**
-- **Exclusively optimized for the Raspberry Pi Zero 2 W**: We take full advantage of the quad-core architecture with a dedicated threading model (render loop, housekeeping, MIDI monitor, and asynchronous WebSocket dispatch).
-- **Designed for [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool)**: Perfect synergy for wireless and USB RTP-MIDI streaming between your DAW, PC, Mac, iPad (Synthesia, Reaper, Ableton) and your piano keys.
-- **Zero Latency Priority**: Under-the-hood synchronization primitives wake the LED render pipeline in microseconds (< 0.05 ms) the moment a note is struck.
-- **Thermal & Energy Efficiency**: Idle CPU usage is slashed by ~68%, lowering operating temperatures by 5°C to 7°C so your Zero 2 W stays cool even in a closed 3D-printed enclosure without loud fans.
+The [feature guide](Docs/features.md) covers the color modes, song controls and animations.
 
----
+## Hardware
 
-## ✨ Key Improvements & Features
+| Component | Setup |
+| --- | --- |
+| Raspberry Pi | Zero 2 W, the target board for this fork |
+| LED strip | WS2812B, typically 144 LEDs/m; roughly 1.5 to 2 m for an 88-key keyboard |
+| Power | Regulated 5 V supply, sized for the LED count and brightness |
+| Storage | 16 GB or larger microSD card with Raspberry Pi OS Lite |
+| MIDI source | USB MIDI piano or a network MIDI connection |
+| Display, optional | Waveshare 1.44-inch SPI LCD with navigation controls |
 
-### ⚡ 1. Real-Time MIDI & Latency Eradication
-- **Instant Event Wakeup**: Replaced tight polling loops with synchronous event triggers (`activity.set()`). When silent, the CPU rests; the moment a key is pressed, the render loop unblocks in under 50 microseconds.
-- **ALSA Buffer Overrun Fixes**: Aggressive multi-event draining prevents chord drops and buffer bloat during fast virtuosic playing.
-- **Self-Healing USB Ports**: Automatic background detection and reconnect without stalling active playback.
-- **LED Clamp Guards**: Strict array boundary protection preventing index out-of-bounds crashes regardless of strip density or transpose offsets.
+Power the LED strip from its own supply connection and share ground with the Pi. Do not draw the strip's current through the GPIO header. Both the Pi and the strip require 5 V; a 9 V or 12 V supply will damage them.
 
-### 🌿 2. CPU & Thermal Optimizations
-- **Idle Render Loop De-spinning**: Cut background polling wakeups from 500 Hz down to an event-driven 40 Hz watchdog. Python idle CPU dropped from **17.6% down to 5.6%**.
-- **`schedutil` Kernel Governor**: Dynamic frequency scaling aligned with the Linux kernel CFS scheduler.
-- **Memory Optimization**: Completely zero swap usage, reducing SD card wear. Unloaded unused DRM 3D and HDMI video drivers to free precious RAM.
+## Installation
 
-### 🛡️ 3. Robust Web Interface & 100% Test Coverage
-- **Modernized Backend & Web APIs**: Streamlined endpoints with rock-solid error handling, zero memory leaks, and clean state management.
-- **Fully Validated**: Backed by **284 unit tests** running natively on target hardware.
-- **Safe Self-Healing Updates**: Rollback-capable visualizer updates via `reliable_update.py` with health checks.
+Start with Raspberry Pi OS Lite. The [installation guide](Docs/manual_installation.md) covers OS setup, SPI, dependencies and the systemd service. For a headless setup, see the [Wi-Fi guide](Docs/wifi_setup.md).
 
----
+The installer configures system packages, the hostname, the `plv` account and services. Review [autoinstall.sh](autoinstall.sh), then run it on the Pi:
 
-## ⚡ Hardware Optimization Guide (Undervolting & Low Thermals)
-
-The Raspberry Pi Zero 2 W packs a quad-core processor in a tiny footprint. Without active cooling, it can easily reach 55°C+ at idle. By fine-tuning `/boot/firmware/config.txt`, you can significantly reduce power draw and temperature without any loss in performance.
-
-### Recommended `/boot/firmware/config.txt` Settings:
-
-```ini
-# ==============================================================================
-# Piano LED Visualizer - Optimized for Raspberry Pi Zero 2 W
-# ==============================================================================
-
-# Hardware SPI for Waveshare 1.44" LCD Hat
-dtparam=spi=on
-auto_initramfs=1
-
-# Disable Camera & DSI display polling (saves CPU interrupts)
-camera_auto_detect=0
-display_auto_detect=0
-
-# Power down unused HDMI video & audio subsystems (saves ~25-30 mA)
-hdmi_blanking=2
-hdmi_ignore_hotplug=1
-enable_tvout=0
-dtoverlay=vc4-kms-v3d,nohdmi,noaudio
-max_framebuffers=1
-
-# Disable onboard Bluetooth (saves ~15-20 mA, frees UART pins & stops interrupts)
-dtoverlay=disable-bt
-
-# Safe Undervolting & Frequency Scaling (BCM2837B0)
-# Lowers Vcore by 50mV at 1GHz and 100mV at 600MHz idle
-arm_freq=1000
-arm_freq_min=600
-over_voltage=-2
-over_voltage_min=-4
-
-# Turn off onboard green ACT LED (eliminates light bleed on the piano)
-dtparam=act_led_trigger=none
-dtparam=act_led_activelow=off
+```bash
+curl -fsSLo autoinstall.sh https://raw.githubusercontent.com/GoulagmanYt/Piano-LED-Visualizer/master/autoinstall.sh
+sudo bash autoinstall.sh
 ```
 
-### Measured Real-World Results:
-- **Core Voltage (Vcore)**: Dropped from **1.256 V** down to **1.206 V** under load (and ~1.10 V at idle).
-- **SoC Temperature**: **-4°C to -6°C** cooler at idle and under continuous load.
-- **Hardware Power**: Around **250 mW** saved, keeping the board stable on standard 5V power rails.
-- **Throttling**: Maintained `throttled=0x0` with zero thermal or under-voltage throttling.
+Once the service is running, open:
 
----
+```text
+http://pianoledvisualizer.local
+```
 
-## 🎹 Pairing with OSC Midi Tool
+If your network does not resolve the hostname, use the Pi's IP address. Set the LED count, key offset and brightness to match your strip before using the visualizer.
 
-This visualizer is tailor-made to pair with [GoulagmanYt/RTP-OSC-Midi-tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool).
+## MIDI setup
 
-1. **On your PC / Mac**: Launch OSC Midi Tool to bridge your DAW, MIDI keyboard, or Synthesia over network.
-2. **On the Visualizer**: Go to the web interface (`http://pianoledvisualizer.local`) $\rightarrow$ **Ports Settings**.
-3. Select the active RTP-MIDI port (`rtpmidid:OSCMidi` or your USB piano input).
-4. Enjoy rock-solid, jitter-free MIDI transmission with instant LED response!
+### USB piano
 
----
+Connect the piano to the Pi and open **Ports Settings** in the web interface.
 
-## 🛠️ Hardware Requirements
+Choose **Auto** under **Active** to let the visualizer select an available input. It keeps the current device when another one appears and waits for a device when none is connected. You can also select a specific input by name.
 
-| Component | Recommendation | Notes |
-| :--- | :--- | :--- |
-| **SBC** | **Raspberry Pi Zero 2 W** | Essential. Quad-core Cortex-A53 is required. |
-| **LED Strip** | **WS2812B (144 LEDs/meter)** | 1.5m to 2m covers a standard 88-key piano keyboard. |
-| **Power Supply** | **5V DC (4A to 6A)** | High quality 5V supply. **Never power LEDs from the Pi pins directly.** |
-| **Screen (Optional)** | **Waveshare LCD 1.44" SPI** | Dedicated on-board menu with navigation joystick. |
-| **DC Jack** | 5.5 x 2.1mm / 2.5mm screw terminal | For clean power distribution. |
-| **MicroSD Card** | 16GB or 32GB Class 10 / A1 | Reliable card for Raspberry Pi OS (Bookworm). |
+Auto selects local device inputs; RTP-MIDI, Midi Through and internal Pi ports are excluded. Select a network session explicitly when using RTP-MIDI. The LCD offers the same Auto choice under **Ports Settings → Input**.
 
-> [!CAUTION]
-> **5V Power Warning**: Ensure your power supply is strictly **5V**. Using a 9V or 12V supply will instantly destroy both your LED strip and the Raspberry Pi.
+The playback output is a separate setting. Choose the destination under **Playback**, or disable it when you only need the LEDs.
 
----
+### OSC Midi Tool and RTP-MIDI
 
-## 🌐 Web Interface & Network Setup
+1. Start [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool) on your computer and configure its MIDI routing.
+2. In **Ports Settings**, select the peer in **RTP MIDI Auto-Connect**.
+3. Choose the input and playback output for the direction you need. For example, a USB piano can be the input and `rtpmidid:OSCMidi` the playback output.
 
-Once powered on and connected to your local network:
-1. Open your browser and navigate to:
-   ```text
-   http://pianoledvisualizer.local
-   ```
-   *(or use the Pi's direct IP address, e.g. `http://192.168.1.180`)*
-2. Customize colors, brightness, responsive velocity modes, fading speeds, and background backlights.
-3. Manage MIDI song playback, recordings, and sequences directly from your phone, tablet, or laptop.
+See [RTP-MIDI setup and stability](Docs/rtpmidi_stability.md) for service configuration and troubleshooting.
 
----
+## Performance and diagnostics
 
-## 🔄 Updating
+MIDI reception, LED rendering and network forwarding use separate queues and workers. The web diagnostics report queue depths, message counters, connection state and timing measurements.
 
-You can safely update the visualizer directly from the Web Interface (`Settings > Update Visualizer`) or via SSH:
+Network latency depends on the full route. Tests on the documented Wi-Fi setup still show occasional delays and packet loss. The [latency report](Docs/rtp_latency_2026-10-18.md) includes the test method and results; the [RTP loss investigation](Docs/rtp_loss_origin_2026-10-18.md) records a QoS configuration that made delivery worse.
+
+Treat clock, voltage and governor settings as specific to the board and workload. Check temperature and throttling on your own Pi before keeping a change.
+
+## Updating
+
+Use **Settings → Update Visualizer** in the web interface, or run the updater over SSH:
 
 ```bash
 cd /home/Piano-LED-Visualizer
 sudo python3 scripts/reliable_update.py --project-dir /home/Piano-LED-Visualizer
 ```
-The updater automatically validates dependencies, runs health checks, and rolls back if an issue is detected.
 
----
+The updater fetches this fork's `master` branch, validates the release and backs up configuration and user data. It restarts the service, checks the HTTP health endpoint and attempts rollback if activation or the health check fails. Uncommitted source changes block the update.
 
-## 📜 Credits & License
+## Documentation
 
-- Original base project: [Onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visualizer).
-- Pacifica animation: **Mark Kriegsman & Mary Corey March** (FastLED Library).
-- Meteor Rain concept: **Tweaking4All**.
-- Specialized Zero 2 W optimizations & OSC Midi Tool integration by **GoulagmanYt**.
-- Licensed under the [MIT License](LICENSE).
+| Guide | Contents |
+| --- | --- |
+| [Installation](Docs/manual_installation.md) | OS setup, dependencies, SPI and service configuration |
+| [Features](Docs/features.md) | LED modes, songs, learning and sequences |
+| [Wi-Fi setup](Docs/wifi_setup.md) | Headless network configuration |
+| [Automatic hotspot](Docs/autohotspot.md) | Access point configuration |
+| [RTP-MIDI](Docs/rtpmidi_stability.md) | Network MIDI services and reconnection |
+| [External devices](Docs/external_devices.md) | Buttons, sensors and other controls |
+| [Cover detection](Docs/cover_detection.md) | Piano cover sensor setup |
+| [MIDI diagnostics](Docs/midi_debug_2026-10-18.md) | Delivery checks and pipeline investigation |
+
+## Development
+
+The application entry point is `visualizer.py`. MIDI handling, LED effects and device support live in `lib/`; the Flask application and browser assets are in `webinterface/`. Regression tests are in `tests/`.
+
+On a Raspberry Pi development installation with the required system libraries:
+
+```bash
+python3 -m venv --system-site-packages .venv
+. .venv/bin/activate
+python -m pip install -r requirements-dev.txt
+python -m pytest -q --ignore=tests/test_screen.py
+```
+
+`test_screen.py` needs a physical Pi display. Some MIDI tests also access host services, so run them in a development environment with no production instance running.
+
+The Ports page has additional DOM tests. With Node.js and npm installed:
+
+```bash
+npm install --prefix .maintenance/input-auto-web --no-save --package-lock=false jsdom@31.0.0
+NODE_PATH="$PWD/.maintenance/input-auto-web/node_modules" node --test tests/test_ports_ui.cjs
+```
+
+For a bug report, include your board, OS version, MIDI device names, reproduction steps and relevant service logs. For port or timing changes, add a regression test and describe which parts were checked on hardware. Use [issues](https://github.com/GoulagmanYt/Piano-LED-Visualizer/issues) for reports and feature requests.
+
+## Credits and license
+
+Based on [onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visualizer), with Zero 2 W and OSC Midi Tool integration maintained in this fork by GoulagmanYt.
+
+The Pacifica animation is by Mark Kriegsman and Mary Corey March (FastLED). The Meteor Rain effect is based on the Tweaking4All example.
+
+Released under the [MIT license](LICENSE).
