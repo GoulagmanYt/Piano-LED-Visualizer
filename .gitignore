@@ -9,3 +9,7 @@ score_log.txt*
 .maintenance/
 .venv/
 Piano-LED-Visualizersafe.code-workspace
+/Docs/superpowers/
+/.tmp
+/.serena
+Docs/audit_pass_4.md
