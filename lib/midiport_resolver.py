@@ -169,7 +169,9 @@ def port_is_present(actual_port: str | None, available_ports: list[str]) -> bool
     return False
 
 
-def refresh_runtime_port_name(actual_port: str | None, available_ports: list[str]) -> str | None:
+def refresh_runtime_port_name(
+    actual_port: str | None, available_ports: list[str], match_alsa_slot: bool = True,
+) -> str | None:
     if not actual_port:
         return None
 
@@ -177,7 +179,7 @@ def refresh_runtime_port_name(actual_port: str | None, available_ports: list[str
         return actual_port
 
     actual_slot = _alsa_slot(actual_port)
-    if actual_slot:
+    if actual_slot and match_alsa_slot:
         for candidate in available_ports:
             if _alsa_slot(candidate) == actual_slot:
                 return candidate
@@ -195,10 +197,19 @@ def refresh_runtime_port_name(actual_port: str | None, available_ports: list[str
     return actual_port
 
 
-def pick_default_input_port(available_ports: list[str]) -> str | None:
-    for port_name in filter_valid_input_ports(available_ports):
-        return port_name
-    return None
+def is_auto_input_port(port_name: str | None) -> bool:
+    return not port_name or port_name == "default"
+
+
+def pick_default_input_port(
+    available_ports: list[str], preferred_port: str | None = None,
+) -> str | None:
+    safe_ports = filter_valid_input_ports(available_ports)
+    if preferred_port and filter_valid_input_ports([preferred_port]):
+        preferred = refresh_runtime_port_name(preferred_port, safe_ports, match_alsa_slot=False)
+        if preferred in safe_ports:
+            return preferred
+    return safe_ports[0] if safe_ports else None
 
 
 def pick_default_output_port(

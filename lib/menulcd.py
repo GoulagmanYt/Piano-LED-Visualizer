@@ -425,7 +425,8 @@ class MenuLCD:
         return ret
 
     def update_ports(self):
-        ports = list(dict.fromkeys(mido.get_input_names()))
+        input_ports = ["Auto"] + list(dict.fromkeys(mido.get_input_names()))
+        output_ports = list(dict.fromkeys(mido.get_output_names()))
 
         port_texts = ["Input", "Playback"]
         for index, port_text in enumerate(port_texts):
@@ -435,8 +436,8 @@ class MenuLCD:
             mc = self.DOMTree.getElementsByTagName("Ports_Settings")[index]
             mc.parentNode.replaceChild(element, mc)
 
-        for port in ports:
-            for index, port_text in enumerate(port_texts):
+        for index, (port_text, ports) in enumerate(zip(port_texts, (input_ports, output_ports))):
+            for port in ports:
                 element = self.DOMTree.createElement(port_text)
                 element.appendChild(self.DOMTree.createTextNode(""))
                 element.setAttribute("text", port)
@@ -1746,7 +1747,7 @@ class MenuLCD:
             fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
 
         if location == "Input":
-            self.midiports.change_port("inport", choice)
+            self.midiports.change_port("inport", "default" if choice == "Auto" else choice)
         if location == "Playback":
             self.midiports.change_port("playport", choice)
 

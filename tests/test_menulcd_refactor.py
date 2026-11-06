@@ -124,7 +124,8 @@ class TestMenuLCDRefactor(unittest.TestCase):
     def test_update_ports_does_not_call_update_sequence_list(self):
         menu = self._create_mock_menu()
         menu.update_sequence_list = MagicMock()
-        with patch("lib.menulcd.mido.get_input_names", return_value=["Port1"]):
+        with patch("lib.menulcd.mido.get_input_names", return_value=["Port1"]), \
+                patch("lib.menulcd.mido.get_output_names", return_value=[]):
             menu.update_ports()
         menu.update_sequence_list.assert_not_called()
 

@@ -1943,6 +1943,13 @@ function get_ports() {
                 const inputPorts = response["input_ports"] || response["ports_list"] || [];
                 const outputPorts = response["output_ports"] || [];
 
+                const autoInput = document.createElement('option');
+                autoInput.value = "default";
+                const actualInput = response["actual_input_port"];
+                autoInput.textContent = translate("input_auto") + " (" +
+                    (actualInput || translate("input_auto_waiting")) + ")";
+                active_input_select.appendChild(autoInput);
+
                 // Deduplicate and populate input ports
                 const seenInputs = new Set();
                 inputPorts.forEach(function (item) {

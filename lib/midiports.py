@@ -11,6 +11,8 @@ from lib.log_setup import logger
 from lib.midiport_resolver import (
     PortResolutionStatus,
     descriptive_port_name,
+    filter_valid_input_ports,
+    is_auto_input_port,
     is_port_disabled,
     is_valid_input_port,
     is_valid_output_port,
@@ -683,8 +685,12 @@ class MidiPorts:
         except Exception:
             pass
 
-    def _resolve_input_target(self, requested_port, available_inputs):
-        if requested_port and requested_port != "default":
+    def _resolve_input_target(self, requested_port, available_inputs, primary=True):
+        # A secondary input must never self-heal or replace primary diagnostics.
+        if not primary:
+            return resolve_input_port(requested_port, available_inputs)
+
+        if not is_auto_input_port(requested_port):
             if not is_valid_input_port(requested_port):
                 fallback = pick_default_input_port(available_inputs)
                 if fallback:
@@ -701,9 +707,9 @@ class MidiPorts:
             self.last_resolution_reason["input"] = resolution.reason
             return resolution
 
-        selected = pick_default_input_port(available_inputs)
+        selected = pick_default_input_port(available_inputs, preferred_port=self.actual_input_port)
         self.last_resolved_input_port = selected
-        self.last_resolution_reason["input"] = "Auto-selected first safe input port"
+        self.last_resolution_reason["input"] = "Auto-selected safe input port, preferring current device"
         return {
             "selected_port": selected,
             "status": PortResolutionStatus.AUTO_SELECTED,
@@ -785,7 +791,9 @@ class MidiPorts:
             return selected_port == actual_port
         return selected_port == actual_port
 
-    def _refresh_runtime_port_labels(self, available_inputs=None, available_outputs=None):
+    def _refresh_runtime_port_labels(
+        self, available_inputs=None, available_outputs=None, refresh_auto_input=False,
+    ):
         if available_inputs is None:
             available_inputs = _get_cached_input_names()
         if available_outputs is None:
@@ -793,7 +801,15 @@ class MidiPorts:
 
         previous_input_port = self.actual_input_port
         previous_play_port = self.actual_play_port
-        self.actual_input_port = refresh_runtime_port_name(self.actual_input_port, available_inputs)
+        settings = getattr(self, "usersettings", None)
+        auto_input = settings is not None and is_auto_input_port(settings.get_setting_value("input_port"))
+        # Only input reconnection may relabel Auto: diagnostics/output refresh
+        # must not hide the fact that the input handle still uses the old name.
+        if not auto_input or refresh_auto_input:
+            input_candidates = filter_valid_input_ports(available_inputs) if auto_input else available_inputs
+            self.actual_input_port = refresh_runtime_port_name(
+                self.actual_input_port, input_candidates, match_alsa_slot=not auto_input,
+            )
         self.actual_play_port = refresh_runtime_port_name(self.actual_play_port, available_outputs)
         return {
             "input_changed": previous_input_port != self.actual_input_port,
@@ -833,6 +849,7 @@ class MidiPorts:
         runtime_label_changes = self._refresh_runtime_port_labels(
             available_inputs=available_inputs,
             available_outputs=_get_cached_output_names(),
+            refresh_auto_input=True,
         )
         requested_port = self.usersettings.get_setting_value("input_port")
         resolution = self._resolve_input_target(requested_port, available_inputs)
@@ -1005,7 +1022,7 @@ class MidiPorts:
             if port == "inport":
                 self.usersettings.change_setting_value("input_port", portname)
                 self._reconnect_input(force=True)
-                if self.actual_input_port is None:
+                if self.actual_input_port is None and not is_auto_input_port(portname):
                     raise RuntimeError(f"Unable to activate input port '{portname}'")
             elif port == "playport":
                 self.usersettings.change_setting_value("play_port", portname)
@@ -1331,7 +1348,7 @@ class MidiPorts:
 
         input_present = bool(self._resolve_selected_port(self._resolve_input_target(input_port, input_names)))
         secondary_present = bool(
-            self._resolve_selected_port(self._resolve_input_target(secondary_input_port, input_names))
+            self._resolve_selected_port(self._resolve_input_target(secondary_input_port, input_names, primary=False))
         ) if secondary_input_port and secondary_input_port != "default" else False
         play_present = bool(
             self._resolve_selected_port(

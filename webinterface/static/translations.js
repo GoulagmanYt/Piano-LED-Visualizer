@@ -63,6 +63,8 @@ function getLanguage() {
 
 const translations = {
     en: {
+        input_auto: "Auto (first available)",
+        input_auto_waiting: "waiting for a device",
         //index
         loading: "Loading...",
         home: "Home",
@@ -461,6 +463,8 @@ const translations = {
 
     },
     pl: {
+        input_auto: "Auto (pierwsze dostępne)",
+        input_auto_waiting: "oczekiwanie na urządzenie",
         //index
         loading: "Ładowanie...",
         home: "Strona główna",
@@ -848,6 +852,8 @@ const translations = {
     },
 
     fr: {
+        input_auto: "Auto (premier disponible)",
+        input_auto_waiting: "en attente d'un appareil",
         //index
         loading: "Chargement...",
         home: "Accueil",
@@ -1245,6 +1251,8 @@ const translations = {
     },
 
     de: {
+        input_auto: "Auto (erstes verfügbares Gerät)",
+        input_auto_waiting: "Warten auf ein Gerät",
         //index
         loading: "Lädt...",
         home: "Startseite",
@@ -1632,6 +1640,8 @@ const translations = {
     },
 
     es: {
+        input_auto: "Auto (primer dispositivo disponible)",
+        input_auto_waiting: "esperando un dispositivo",
 
         //index
         loading: "Cargando...",
@@ -2019,6 +2029,8 @@ const translations = {
     },
 
     zh: {
+        input_auto: "自动（首个可用设备）",
+        input_auto_waiting: "等待设备连接",
         //index
         loading: "正在加载...",
         home: "主页",
@@ -2406,6 +2418,8 @@ const translations = {
     },
 
     hi: {
+        input_auto: "ऑटो (पहला उपलब्ध उपकरण)",
+        input_auto_waiting: "उपकरण की प्रतीक्षा में",
         //index
         loading: "लोड हो रहा है ...",
         home: "होम",
@@ -2793,6 +2807,8 @@ const translations = {
     },
 
     pt: {
+        input_auto: "Auto (primeiro dispositivo disponível)",
+        input_auto_waiting: "à espera de um dispositivo",
         //index
         loading: "Carregando...",
         home: "Início",
@@ -3181,6 +3197,8 @@ const translations = {
     },
 
     ja: {
+        input_auto: "自動（最初の利用可能なデバイス）",
+        input_auto_waiting: "デバイスの接続待ち",
         //index
         loading: "読み込み中...",
         home: "ホーム",
@@ -3569,6 +3587,8 @@ const translations = {
     },
 
     ko: {
+        input_auto: "자동 (첫 번째 사용 가능한 장치)",
+        input_auto_waiting: "장치 연결 대기 중",
     //index
     loading: "로딩 중...",
     home: "홈",
@@ -3954,6 +3974,8 @@ const translations = {
         
 },
 he: {
+    input_auto: "אוטומטי (המכשיר הזמין הראשון)",
+    input_auto_waiting: "ממתין למכשיר",
     //index
     loading: "טוען",
     home: "בית",
@@ -4342,6 +4364,8 @@ he: {
     
 },
 ar:{
+    input_auto: "تلقائي (أول جهاز متاح)",
+    input_auto_waiting: "في انتظار جهاز",
     //index
     loading: "جارى التحميل...",
     home: "الرئيسية",
