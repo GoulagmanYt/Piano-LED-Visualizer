@@ -26,6 +26,7 @@ class LEDEffectsProcessor:
         keylist_sustained = ledstrip.keylist_sustained
         keylist_color = ledstrip.keylist_color
         external_software = getattr(ledstrip, "keylist_external_software", None)
+        guide_lights = getattr(ledstrip, "keylist_guide", None)
         use_hand_colors = getattr(ledsettings, "skipped_notes", "Normal") != "Finger-based"
         mode = ledsettings.mode
         color_update = self.color_mode.ColorUpdate
@@ -75,8 +76,9 @@ class LEDEffectsProcessor:
 
             fading = 1
 
-            if mode == "Velocity" or mode == "Pedal" or (
-                    mode == "Fading" and keylist_status[n] == 0):
+            is_guide = guide_lights is not None and guide_lights[n] == 1
+            if not is_guide and (mode == "Velocity" or mode == "Pedal" or (
+                    mode == "Fading" and keylist_status[n] == 0)):
                 fading = (strength / float(100)) / 10
                 red = int(red * fading)
                 green = int(green * fading)
@@ -85,7 +87,7 @@ class LEDEffectsProcessor:
                 keylist[n] = max(0, keylist[n] - decrease_amount)
                 led_changed = True
 
-            if mode == "Velocity" or mode == "Pedal":
+            if not is_guide and (mode == "Velocity" or mode == "Pedal"):
                 # Check if key is pressed or sustained
                 key_active = keylist_status[n] == 1 or keylist_sustained[n] == 1
                 

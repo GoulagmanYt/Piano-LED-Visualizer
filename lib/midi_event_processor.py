@@ -5,6 +5,7 @@ from lib.rpi_drivers import Color
 
 from lib.functions import get_note_position
 from lib.log_setup import logger
+from lib.learning_router import is_guide_channel, is_right_hand
 
 # Import app_state to check practice_active flag
 try:
@@ -44,6 +45,10 @@ class MIDIEventProcessor:
         Handles different event types and routes them to appropriate handlers.
         Selects input source based on playback/learning state.
         """
+        # Guides have their own source-aware queue and are never inferred from
+        # channels on the normal live input.
+        guides_processed = self.process_guide_events()
+        piano_processed = self.process_learning_piano_events()
         # Determine which MIDI queue to process based on playback state and practice mode
         if not self.saving.is_playing_midi and not self.learning.is_started_midi:
             # Check if practice mode is active (websocket MIDI takes priority)
@@ -68,7 +73,7 @@ class MIDIEventProcessor:
             queue_name = "midi_file"
 
         if not self.midiports.midipending:
-            return False
+            return guides_processed or piano_processed
         midi_logging_enabled = int(self.usersettings.get_setting_value("midi_logging")) == 1
         log_sink = self.learning.socket_send if midi_logging_enabled else None
         midiports = self.midiports
@@ -166,7 +171,92 @@ class MIDIEventProcessor:
         else:
             diagnostics.set_gauge("midi_queue_depth_after", len(midipending))
         self.midiports.refresh_queue_diagnostics()
-        return processed > 0
+        return processed > 0 or guides_processed or piano_processed
+
+    def process_learning_piano_events(self):
+        queues = getattr(self.midiports, "queues", None)
+        lane = getattr(queues, "learning_piano_queue", None)
+        if lane is None:
+            return False
+        events = queues.drain_queue(lane, max_messages=512)
+        if not events:
+            return False
+        self._mark_learning_activity()
+        if self.saving.is_recording:
+            for msg, timestamp in events:
+                kind = getattr(msg, "type", None)
+                if kind == "note_on" and msg.velocity > 0:
+                    self.saving.add_track("note_on", msg.note, msg.velocity, timestamp)
+                elif kind == "note_off" or (kind == "note_on" and msg.velocity == 0):
+                    self.saving.add_track("note_off", msg.note, 0, timestamp)
+        return True
+
+    def clear_guide_lights(self):
+        """Clear only explicitly marked guides, preserving unrelated live notes."""
+        guides = getattr(self.ledstrip, "keylist_guide", None)
+        if not guides or not any(guides):
+            return False
+        idle_color, use_backlight = self._resolve_idle_color()
+        for position, active in enumerate(guides):
+            if not active:
+                continue
+            guides[position] = 0
+            self.ledstrip.keylist[position] = 0
+            self.ledstrip.keylist_status[position] = 0
+            self.ledstrip.keylist_sustained[position] = 0
+            self.ledstrip.keylist_external_software[position] = 0
+            self._apply_idle_color(position, idle_color, use_backlight)
+        return True
+
+    def process_guide_events(self):
+        """Render source-tagged computer guides without forwarding or recording.
+
+        Local song/practice modes own the LEDs. Discard guides during those
+        modes rather than replaying old lights when they end.
+        """
+        queues = getattr(self.midiports, "queues", None)
+        if queues is None or not hasattr(queues, "guide_queue"):
+            return False
+        if (self.saving.is_playing_midi or self.learning.is_started_midi or
+                getattr(app_state, "practice_active", False)):
+            queues.clear_guides()
+            return self.clear_guide_lights()
+        events = queues.drain_guides(max_messages=512)
+        if not events:
+            return False
+        if any(msg is not None for msg, _ in events):
+            self._mark_learning_activity()
+        ledstrip = self.ledstrip
+        position_fn = getattr(ledstrip, "get_note_position", None)
+        for msg, timestamp in events:
+            if msg is None or (getattr(msg, "type", None) == "control_change" and
+                               getattr(msg, "control", None) in (120, 123)):
+                self.clear_guide_lights()
+                continue
+            if getattr(msg, "type", None) not in ("note_on", "note_off"):
+                continue
+            position = (position_fn(msg.note, self.ledsettings) if callable(position_fn)
+                        else get_note_position(msg.note, ledstrip, self.ledsettings))
+            if not 0 <= position < ledstrip.led_number:
+                continue
+            if msg.type == "note_off" or getattr(msg, "velocity", 0) == 0:
+                # A guide-off must not extinguish an ordinary note occupying the
+                # same LED (for example after switching source).
+                guides = getattr(ledstrip, "keylist_guide", None)
+                if guides is not None and guides[position]:
+                    self.handle_note_off(msg, timestamp, position)
+            elif self.ledsettings.mode != "Disabled":
+                self.handle_note_on(msg, timestamp, position, is_guide=True)
+        return True
+
+    def _mark_learning_activity(self):
+        now = time.time()
+        self.midiports.last_activity = now
+        if self.state_manager:
+            self._update_midi_activity(now)
+        restart = getattr(self.saving, 'restart_time', None)
+        if callable(restart):
+            restart()
 
     def _update_midi_activity(self, current_time):
         accepts_current_time = self._state_manager_accepts_midi_activity_time
@@ -225,6 +315,18 @@ class MIDIEventProcessor:
         velocity = 0
         self.ledstrip.keylist_status[note_position] = 0
 
+        guides = getattr(self.ledstrip, "keylist_guide", None)
+        was_guide = guides is not None and bool(guides[note_position])
+        if was_guide:
+            guides[note_position] = 0
+            self.ledstrip.keylist_external_software[note_position] = 0
+            self.ledstrip.keylist_sustained[note_position] = 0
+            if self.ledsettings.mode != "Fading":
+                self.ledstrip.keylist[note_position] = 0
+                idle_color, use_backlight = self._resolve_idle_color()
+                self._apply_idle_color(note_position, idle_color, use_backlight)
+                return
+
         # Check if sustain pedal is active for Velocity and Pedal modes
         pedal_deadzone = 10  # Standard MIDI deadzone for sustain pedal
         sustain_active = (self.ledsettings.mode in ["Velocity", "Pedal"] and 
@@ -259,10 +361,10 @@ class MIDIEventProcessor:
             self._apply_idle_color(note_position, idle_color, use_backlight)
 
         # Record the note-off event if recording is active
-        if self.saving.is_recording:
+        if self.saving.is_recording and not was_guide:
             self.saving.add_track("note_off", msg.note, velocity, msg_timestamp)
 
-    def handle_note_on(self, msg, msg_timestamp, note_position):
+    def handle_note_on(self, msg, msg_timestamp, note_position, is_guide=False):
         """
         Handle note-on MIDI events.
         
@@ -275,6 +377,12 @@ class MIDIEventProcessor:
             note_position: Position on the LED strip corresponding to the note
         """
         velocity = msg.velocity
+        guides = getattr(self.ledstrip, "keylist_guide", None)
+        if guides is not None:
+            guides[note_position] = int(is_guide)
+        mode = self.ledsettings.mode
+        if is_guide and mode != "Fading":
+            mode = "Normal"
 
         # Get color from color mode handler
         color = self.color_mode.NoteOn(msg, msg_timestamp, None, note_position)
@@ -285,10 +393,12 @@ class MIDIEventProcessor:
 
         # Keep the assigned hand color in the state used by effects as well as
         # the immediate LED write, so Rainbow cannot replace it next frame.
-        is_external = self._is_external_software_channel(msg)
+        channel = getattr(msg, "channel", None)
+        is_external = self._is_external_software_channel(msg) or (is_guide and is_guide_channel(channel))
         use_hand_color = is_external and self.ledsettings.skipped_notes != "Finger-based"
         if use_hand_color:
-            hand_color = self.learning.hand_colorR if self._is_right_hand_channel(msg) else self.learning.hand_colorL
+            right_hand = is_right_hand(channel) if is_guide else self._is_right_hand_channel(msg)
+            hand_color = self.learning.hand_colorR if right_hand else self.learning.hand_colorL
             red, green, blue = map(int, self.learning.hand_colorList[hand_color])
 
         # Store the note color
@@ -299,25 +409,25 @@ class MIDIEventProcessor:
         self.ledstrip.keylist_sustained[note_position] = 0
         
         # Calculate brightness based on velocity if in velocity mode
-        if self.ledsettings.mode == "Velocity":
+        if mode == "Velocity":
             brightness = velocity / 127.0  # Linear mapping: 0-127 velocity -> 0-1 brightness
         else:
             brightness = 1
 
         # Apply different effects based on the current LED mode
-        if self.ledsettings.mode == "Fading":
+        if mode == "Fading":
             # 1001 indicates the key is active and will start fading when released
             self.ledstrip.keylist[note_position] = 1001
-        elif self.ledsettings.mode == "Velocity":
+        elif mode == "Velocity":
             # Brightness varies with velocity (999 * brightness for linear scaling)
             self.ledstrip.keylist[note_position] = 999 * brightness
-        elif self.ledsettings.mode == "Normal":
+        elif mode == "Normal":
             # Standard mode - full brightness while key is pressed
             self.ledstrip.keylist[note_position] = 1000
-        elif self.ledsettings.mode == "Pedal":
+        elif mode == "Pedal":
             # For pedal mode, start at 999 (will be affected by pedal status)
             self.ledstrip.keylist[note_position] = 999
-        elif self.ledsettings.mode == "Pulse":
+        elif mode == "Pulse":
             # Create a new pulse effect
             self.ledstrip.active_pulses.append({
                 "position": note_position,
@@ -349,8 +459,14 @@ class MIDIEventProcessor:
                 self.ledstrip.strip.setPixelColor(note_position, s_color)
                 self.ledstrip.set_adjacent_colors(note_position, s_color, False)
 
+        if is_guide:
+            # Guides are binary LEDs even in Velocity, Pedal or Pulse mode.
+            guide_color = Color(red, green, blue)
+            self.ledstrip.strip.setPixelColor(note_position, guide_color)
+            self.ledstrip.set_adjacent_colors(note_position, guide_color, False)
+
         # Record the note-on event if recording is active
-        if self.saving.is_recording:
+        if self.saving.is_recording and not is_guide:
             if self.ledsettings.color_mode == "Multicolor":
                 import webcolors as wc
                 # Include color information in multicolor mode

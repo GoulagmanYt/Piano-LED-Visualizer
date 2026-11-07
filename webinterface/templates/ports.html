@@ -99,6 +99,27 @@
     </div>
     </div>
 
+    <section class="glass shadow-glass-lg rounded-glass m-1 mb-6 p-4" id="learning_bridge_card">
+        <h2 class="font-semibold mb-2" data-translate="learning_bridge_title">Synthesia Learning bridge</h2>
+        <p class="text-sm mb-3" data-translate="learning_bridge_warning">Disconnect direct piano/computer MIDI connections before enabling. Changes require a visualizer restart.</p>
+        <label class="block mb-3"><span data-translate="learning_bridge_mode">Mode</span>
+            <select id="learning_bridge_mode" class="glass-light rounded-glass p-2 ml-2">
+                <option value="off" data-translate="learning_bridge_off">Off (existing routing)</option>
+                <option value="learning" data-translate="learning_bridge_on">Learning</option>
+            </select>
+        </label>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <label><span data-translate="learning_piano_input">Piano input</span><select id="learning_piano_input" class="w-full glass-light rounded-glass p-2"></select></label>
+            <label><span data-translate="learning_piano_output">Piano output</span><select id="learning_piano_output" class="w-full glass-light rounded-glass p-2"></select></label>
+            <label><span data-translate="learning_computer_input">Computer input</span><select id="learning_computer_input" class="w-full glass-light rounded-glass p-2"></select></label>
+            <label><span data-translate="learning_computer_output">Computer output</span><select id="learning_computer_output" class="w-full glass-light rounded-glass p-2"></select></label>
+        </div>
+        <label class="block my-3"><input type="checkbox" id="learning_block_control"> <span data-translate="learning_block_control">Block computer control and program changes</span></label>
+        <button type="button" id="learning_bridge_refresh" class="glass-light rounded-glass p-2" data-translate="refresh">Refresh</button>
+        <button type="button" id="learning_bridge_save" class="glass-light rounded-glass p-2" data-translate="save">Save</button>
+        <p id="learning_bridge_status" class="text-sm mt-2" role="status"></p>
+    </section>
+
     <!-- RTP-MIDI Auto-Connect Card (Horizontal Block) -->
     <div class="glass shadow-glass-lg rounded-glass hover-lift intro-y transition-smooth m-1 mb-6">
         <div class="w-full flex items-center p-3">

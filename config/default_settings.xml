@@ -2,6 +2,12 @@
 	<screen_on>1</screen_on>
 	<display_type>1in44</display_type>
 	<disable_hat>0</disable_hat>
+	<midi_bridge_mode>off</midi_bridge_mode>
+	<learning_piano_input>None</learning_piano_input>
+	<learning_piano_output>None</learning_piano_output>
+	<learning_computer_input>None</learning_computer_input>
+	<learning_computer_output>None</learning_computer_output>
+	<learning_block_control>1</learning_block_control>
 	<brightness_percent>50</brightness_percent>
 	<background_color>#27272a</background_color>
 	<text_color>#FFFFFF</text_color>

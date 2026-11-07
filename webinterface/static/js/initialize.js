@@ -516,6 +516,7 @@ function initialize_sequences() {
 
 function initialize_ports_settings() {
     get_ports();
+    initialize_learning_bridge();
     // Initialize the visual port connection manager if it exists
     if (typeof initialize_port_connection_manager === 'function') {
         initialize_port_connection_manager();

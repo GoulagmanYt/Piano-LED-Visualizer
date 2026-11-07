@@ -63,6 +63,18 @@ function getLanguage() {
 
 const translations = {
     en: {
+        learning_bridge_title: "Synthesia Learning bridge",
+        learning_bridge_warning: "Disconnect direct piano/computer MIDI connections before enabling. Changes require a visualizer restart.",
+        learning_bridge_mode: "Mode",
+        learning_bridge_off: "Off (existing routing)",
+        learning_bridge_on: "Learning",
+        learning_piano_input: "Piano input",
+        learning_piano_output: "Piano output",
+        learning_computer_input: "Computer input",
+        learning_computer_output: "Computer output",
+        learning_block_control: "Block computer control and program changes",
+        learning_bridge_inactive: "Bridge inactive",
+        learning_bridge_restart: "Saved. Restart the visualizer to apply.",
         led_power_title: "Estimated LED power draw",
         led_power_note: "Estimate from RGB and brightness. Excludes gamma correction, Pi consumption and wiring losses.",
         led_power_current: "Current estimate",
@@ -872,6 +884,18 @@ const translations = {
     },
 
     fr: {
+        learning_bridge_title: "Pont Synthesia Learning",
+        learning_bridge_warning: "Déconnectez les liaisons MIDI directes entre le piano et l’ordinateur avant activation. Redémarrez le visualiseur après modification.",
+        learning_bridge_mode: "Mode",
+        learning_bridge_off: "Désactivé (routage existant)",
+        learning_bridge_on: "Apprentissage",
+        learning_piano_input: "Entrée piano",
+        learning_piano_output: "Sortie piano",
+        learning_computer_input: "Entrée ordinateur",
+        learning_computer_output: "Sortie ordinateur",
+        learning_block_control: "Bloquer les contrôles et changements de programme de l’ordinateur",
+        learning_bridge_inactive: "Pont inactif",
+        learning_bridge_restart: "Enregistré. Redémarrez le visualiseur pour appliquer.",
         led_power_title: "Consommation LED estimée",
         led_power_note: "Estimation d’après les couleurs et la luminosité, hors correction gamma, consommation du Pi et pertes de câblage.",
         led_power_current: "Courant estimé",
@@ -4872,3 +4896,10 @@ ar:{
     new_profile: "ملف شخصي جديد"
 },
 };
+// Use the English Learning bridge strings until a locale supplies its own.
+for (const locale of Object.keys(translations)) {
+    for (const key of Object.keys(translations.en).filter(key => key.startsWith('learning_bridge_') ||
+        ['learning_piano_input', 'learning_piano_output', 'learning_computer_input', 'learning_computer_output', 'learning_block_control'].includes(key))) {
+        if (!translations[locale][key]) translations[locale][key] = translations.en[key];
+    }
+}

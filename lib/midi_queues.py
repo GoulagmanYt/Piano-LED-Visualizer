@@ -23,6 +23,9 @@ class MidiQueues:
         # bounded.
         self.live_visualizer_queue = deque()
         self.live_learning_queue = deque()
+        # Explicit Synthesia guide messages, independent of piano/playback.
+        self.guide_queue = deque()
+        self.learning_piano_queue = deque()
         self.file_queue = deque()
         self.websocket_queue = deque()
         self.live_forward_queue = deque()
@@ -111,6 +114,35 @@ class MidiQueues:
                 count_drops=False,
             )
             return queued_visualizer or queued_learning
+
+    def enqueue_learning_piano(self, msg, timestamp=None):
+        """Feed practice and recording without letting piano notes drive guides."""
+        if timestamp is None:
+            timestamp = time.perf_counter()
+        with self._lock:
+            self.live_learning_queue.append((msg, timestamp))
+            self.learning_piano_queue.append((msg, timestamp))
+        self.activity.set()
+
+    def enqueue_guide(self, msg, timestamp=None):
+        """Queue an explicit guide message; None requests an immediate reset.
+
+        This lane is not fed by the legacy MIDI input. Only a source-aware
+        Learning bridge may add events, so ordinary MIDI channels are never
+        mistaken for Synthesia lights.
+        """
+        if timestamp is None:
+            timestamp = time.perf_counter()
+        with self._lock:
+            self.guide_queue.append((msg, timestamp))
+        self.activity.set()
+
+    def drain_guides(self, max_messages=None):
+        return self.drain_queue(self.guide_queue, max_messages=max_messages)
+
+    def clear_guides(self):
+        with self._lock:
+            self.guide_queue.clear()
 
     def enqueue_file(self, msg, timestamp=None):
         if timestamp is None:

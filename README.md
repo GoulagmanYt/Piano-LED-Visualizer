@@ -12,7 +12,7 @@ This fork of [onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Vis
 ## Features
 
 - LED colors based on note, velocity or playing speed, with fading, backlight and animation settings.
-- MIDI file playback, recording and guided practice, including Synthesia integration.
+- MIDI file playback, recording and guided practice, including an opt-in Synthesia Learning bridge.
 - USB MIDI input with an Auto mode that keeps the current device connected and waits when no device is available.
 - RTP-MIDI routing through rtpmidid, with peer selection and connection diagnostics in the web interface.
 - Browser controls available in 12 languages, plus an optional Waveshare LCD menu.
@@ -36,7 +36,7 @@ Power the LED strip from its own supply connection and share ground with the Pi.
 
 ## Installation
 
-Start with Raspberry Pi OS Lite. The [installation guide](Docs/manual_installation.md) covers OS setup, SPI, dependencies and the systemd service. For a headless setup, see the [Wi-Fi guide](Docs/wifi_setup.md).
+Start with Raspberry Pi OS Lite Bookworm or Trixie (armhf or arm64). The [installation guide](Docs/manual_installation.md) covers OS setup, SPI, dependencies and the systemd service. For a headless setup, see the [Wi-Fi guide](Docs/wifi_setup.md).
 
 The installer configures system packages, the hostname, the `plv` account and services. Review [autoinstall.sh](autoinstall.sh), then run it on the Pi:
 
@@ -65,6 +65,14 @@ Auto selects local device inputs; RTP-MIDI, Midi Through and internal Pi ports a
 
 The playback output is a separate setting. Choose the destination under **Playback**, or disable it when you only need the LEDs.
 
+### Synthesia Learning bridge
+
+In **Ports Settings → Synthesia Learning bridge**, choose the four piano and
+computer input/output ports, select **Learning**, save and restart the
+visualizer. Disconnect direct MIDI links between those devices first. The
+bridge routes guide lights separately from piano sound; see the
+[setup and safety notes](Docs/features.md#learning_with_synthesia).
+
 ### OSC Midi Tool and RTP-MIDI
 
 1. Start [OSC Midi Tool](https://github.com/GoulagmanYt/RTP-OSC-Midi-tool) on your computer and configure its MIDI routing.
@@ -87,10 +95,10 @@ Use **Settings → Update Visualizer** in the web interface, or run the updater 
 
 ```bash
 cd /home/Piano-LED-Visualizer
-sudo python3 scripts/reliable_update.py --project-dir /home/Piano-LED-Visualizer
+sudo .venv/bin/python scripts/reliable_update.py --project-dir /home/Piano-LED-Visualizer
 ```
 
-The updater fetches this fork's `master` branch, validates the release and backs up configuration and user data. It restarts the service, checks the HTTP health endpoint and attempts rollback if activation or the health check fails. Uncommitted source changes block the update.
+On legacy installations using system Python instead of `.venv`, use `sudo python3` for this command. The updater fetches this fork's `master` branch, validates the release and backs up configuration and user data. It restarts the service, checks the HTTP health endpoint and attempts rollback if activation or the health check fails. Uncommitted source changes block the update.
 
 ## Documentation
 

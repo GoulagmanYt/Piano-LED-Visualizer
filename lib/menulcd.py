@@ -1760,8 +1760,11 @@ class MenuLCD:
                 self.midiports.connectall()
 
             if choice == "Disconnect ports":
-                self.render_message("Disconnecting ports", "", 1000)
-                call("sudo aconnect -x", shell=True)
+                if getattr(self.midiports, "learning_bridge_enabled", False):
+                    self.render_message("Learning bridge", "Disable first", 1500)
+                else:
+                    self.render_message("Disconnecting ports", "", 1000)
+                    call("sudo aconnect -x", shell=True)
 
         if location == "LED_animations":
             self.is_animation_running = True

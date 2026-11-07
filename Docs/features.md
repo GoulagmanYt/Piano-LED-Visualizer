@@ -175,11 +175,32 @@ If you still want to try, follow [this link](https://github.com/GoulagmanYt/Pian
 
 ### Configuring Synthesia
 
-You have to enable light support in Synthesia by setting "Key Light" option to "Finger-based channel".
-In Visualizer settings you have to change "input" to either *RPI Bluetooth* (for bluetooth connection), *rtpmidi raspberrypi* (for RTP connections) or *MIDI USB-USB* (for cable connection).
-After that when learning new song next-to-play keys will be illuminated in corresponding colors, blue for left hand and green for right hand.
+In Synthesia, set **Key Light** to **Finger-based channel**. In the web
+interface, open **Ports Settings → Synthesia Learning bridge**, select the
+piano input and output and the computer input and output (USB or RTP-MIDI),
+choose **Learning**, and save. Restart the visualizer to apply the change.
+The selections are separate from the existing Auto input and playback settings.
 
-If you are getting mixed colors, meaning that leds are lighting up with your predefined and next-to-play colors at the same time, you can use "Skipped notes" option in Visualizer to disable one of them.
+Disconnect any direct ALSA connections between the piano and computer before
+starting the bridge. It refuses to open if it detects a direct connection, if
+ports are missing/ambiguous, or if it cannot inspect the ALSA graph. Refresh the
+card to see its status. Remove any other MIDI routing loop in external software;
+the ALSA check cannot detect loops outside the Pi. Do not run a separate MIDI
+thru between the same endpoints.
+
+Piano notes are forwarded to the computer and remain available for local
+recording/practice. The computer's velocity-1 guide notes light the strip;
+sound notes are forwarded to the piano. Guide releases and partial chords use
+the upstream Synthesia routing rules. Control and program changes from the
+computer are blocked by default; the checkbox can allow them. To return to
+normal fork routing, select **Off**, save and restart. The bridge settings are
+currently web-only and cannot be switched from the LCD.
+
+Local song playback and practice own the LED display while active; guide events
+received during them are discarded rather than replayed afterwards. Avoid using
+local playback simultaneously with an external Synthesia session because both
+can send notes to the piano. See [integration notes](upstream_learning_integration.md)
+for testing and limitations.
 
 
 ## Managing songs <a name="managing_songs"></a>

@@ -5,6 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 PLV_DIR="${PLV_DIR:-$PROJECT_ROOT}"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+PYTHON="/usr/bin/python3"
+if [ -x "${PLV_DIR}/.venv/bin/python" ]; then
+  PYTHON="${PLV_DIR}/.venv/bin/python"
+fi
 
 run() {
   if [ "$(id -u)" -eq 0 ]; then
@@ -82,9 +86,9 @@ Wants=plv-lowlatency.service
 [Service]
 WorkingDirectory=${PLV_DIR}/
 ExecStart=
-ExecStart=/usr/bin/python3 ${PLV_DIR}/visualizer.py
+ExecStart=${PYTHON} ${PLV_DIR}/visualizer.py
 ExecStopPost=
-ExecStopPost=/usr/bin/python3 ${PLV_DIR}/scripts/clear_leds.py
+ExecStopPost=${PYTHON} ${PLV_DIR}/scripts/clear_leds.py
 TimeoutStopSec=15
 Restart=always
 RestartSec=1

@@ -32,9 +32,12 @@ if __name__ == '__main__':
     source = target if target.exists() else Path('/lib/systemd/system/visualizer.service')
     # Ordering dependencies cannot be removed by an empty drop-in assignment.
     write_backup(target, remove_network_dependencies(source.read_text()))
+    python = project / '.venv/bin/python'
+    if not python.is_file():
+        python = Path('/usr/bin/python3')
     override = Path('/etc/systemd/system/visualizer.service.d/zz-safety.conf')
     write_backup(override, '[Service]\nExecStopPost=\n'
-                 f'ExecStopPost=/usr/bin/python3 {project}/scripts/clear_leds.py\n'
+                 f'ExecStopPost={python} {project}/scripts/clear_leds.py\n'
                  'TimeoutStopSec=15\nUMask=0022\n'
                  'CPUSchedulingPolicy=other\nCPUSchedulingPriority=0\n')
     tuning = Path('/etc/systemd/system/plv-lowlatency.service')

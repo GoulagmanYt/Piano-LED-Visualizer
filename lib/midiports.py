@@ -93,6 +93,15 @@ class MidiPorts:
 
         # midi queues contain tuples (midi_msg, timestamp)
         self.queues = MidiQueues()
+        self.learning_bridge_enabled = str(usersettings.get_setting_value("midi_bridge_mode")) == "learning"
+        self.learning_bridge = None
+        if self.learning_bridge_enabled:
+            from lib.learning_bridge import LearningBridge
+            self.learning_bridge = LearningBridge(
+                self.queues, usersettings,
+                practice_active=lambda: bool(getattr(getattr(self, 'practice_state', None), 'practice_active', False)),
+                activity=lambda: setattr(self, 'last_activity', time.time()),
+            )
         self.queues.set_forwarding_enabled(False)
         self._output_lock = threading.RLock()
         self.midifile_queue = self.queues.file_queue
@@ -665,6 +674,9 @@ class MidiPorts:
 
     def close(self):
         self.stop_midi_monitor()
+        bridge = getattr(self, "learning_bridge", None)
+        if bridge is not None and not bridge.close():
+            logger.error("Learning bridge cleanup incomplete; ports remain owned by their workers")
         self.worker_running = False
         self._notify_forward_worker()
         for worker in (self.live_forward_thread, self.websocket_publish_thread):
@@ -1012,6 +1024,9 @@ class MidiPorts:
 
     def connectall(self):
         """Reconnect mido ports and then manage aconnect connections."""
+        if getattr(self, "learning_bridge_enabled", False):
+            logger.warning("connectall is disabled while Learning bridge mode is active")
+            return
         self.connection_manager.connectall()
 
     def add_instance(self, menu):
@@ -1162,6 +1177,10 @@ class MidiPorts:
         self._ensure_runtime_diagnostics().reset()
 
     def msg_callback(self, msg):
+        # In Learning mode only the bridge's explicitly tagged inputs are used.
+        # Fail closed even while the bridge is waiting for missing ports.
+        if getattr(self, "learning_bridge_enabled", False):
+            return
         callback_started = time.perf_counter()
         if self._should_ignore_live_message(msg):
             self._increment_ignored(getattr(msg, "type", "unknown"))
@@ -1342,6 +1361,11 @@ class MidiPorts:
         input_names = _get_cached_input_names()
         output_names = _get_cached_output_names()
 
+        bridge = getattr(self, "learning_bridge", None)
+        if bridge is not None:
+            bridge.reconcile(input_names, output_names)
+            return last_input_present, last_secondary_present, last_play_present
+
         input_port = self.usersettings.get_setting_value("input_port")
         secondary_input_port = self.usersettings.get_setting_value("secondary_input_port")
         play_port = self.usersettings.get_setting_value("play_port")
@@ -1420,7 +1444,8 @@ class MidiPorts:
                             "RTP autoconnect updated session (port %s). Reconnecting play port.",
                             rtp_res.get("port"),
                         )
-                        self._reconnect_output(force=True)
+                        if not getattr(self, "learning_bridge_enabled", False):
+                            self._reconnect_output(force=True)
                 if not self.monitor_running:
                     break
                 last_input_present, last_secondary_present, last_play_present = self._auto_reconnect_once(

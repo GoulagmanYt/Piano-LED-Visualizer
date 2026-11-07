@@ -8,6 +8,19 @@ PLV_USER="plv"
 PLV_PASSWORD="visualizer"
 PLV_HOSTNAME="pianoledvisualizer"
 
+# Restrict OS/architecture before making any changes to the machine.
+detect_platform() {
+  local version_codename arch
+  version_codename="$(. /etc/os-release; printf '%s' "${VERSION_CODENAME:-}")"
+  arch="$(dpkg --print-architecture)"
+  case "$version_codename:$arch" in
+    bookworm:armhf|bookworm:arm64|trixie:armhf|trixie:arm64) ;;
+    *) display_error "Unsupported OS/architecture: ${version_codename:-unknown}/$arch (expected Bookworm or Trixie on armhf or arm64)" ;;
+  esac
+  PLV_OS="$version_codename"
+  PLV_ARCH="$arch"
+}
+
 # Function to display error message and exit
 display_error() {
   echo "Error: $1" >&2
@@ -94,58 +107,6 @@ configure_pi_identity() {
   fi
 }
 
-# Function to create and configure the autoconnect script
-configure_autoconnect_script() {
-  # Create connectall.py file
-  cat <<EOF | sudo tee /usr/local/bin/connectall.py > /dev/null
-#!/usr/bin/python3
-import subprocess
-
-ports = subprocess.check_output(["aconnect", "-i", "-l"], text=True)
-port_list = []
-client = "0"
-for line in str(ports).splitlines():
-    if line.startswith("client "):
-        client = line[7:].split(":",2)[0]
-        if client == "0" or "Through" in line:
-            client = "0"
-    else:
-        if client == "0" or line.startswith('\t'):
-            continue
-        port = line.split()[0]
-        port_list.append(client+":"+port)
-for source in port_list:
-    for target in port_list:
-        if source != target:
-            subprocess.call("aconnect %s %s" % (source, target), shell=True)
-EOF
-  execute_command "sudo chmod +x /usr/local/bin/connectall.py"
-
-  # Create udev rules file
-  echo 'ACTION=="add|remove", SUBSYSTEM=="usb", DRIVER=="usb", RUN+="/usr/local/bin/connectall.py"' | sudo tee -a /etc/udev/rules.d/33-midiusb.rules > /dev/null
-
-  # Reload services
-  execute_command "sudo udevadm control --reload"
-  execute_command "sudo service udev restart"
-
-  # Create midi.service file
-  cat <<EOF | sudo tee /lib/systemd/system/midi.service > /dev/null
-[Unit]
-Description=Initial USB MIDI connect
-
-[Service]
-ExecStart=/usr/local/bin/connectall.py
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  # Reload daemon and enable service
-  execute_command "sudo systemctl daemon-reload"
-  execute_command "sudo systemctl enable midi.service"
-  execute_command "sudo systemctl start midi.service"
-}
-
 # Function to enable SPI interface
 enable_spi_interface() {
   # Edit config.txt file to enable SPI interface
@@ -154,7 +115,13 @@ enable_spi_interface() {
 
 # Function to install required packages
 install_packages() {
-  execute_command "sudo apt-get install -y ruby git wget iw python3-pip autotools-dev libtool autoconf libasound2 libavahi-client3 libavahi-common3 libc6 libfmt9 libgcc-s1 libstdc++6 python3 libopenblas-dev libavahi-client-dev libasound2-dev libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev libatlas-base-dev libopenjp2-7 libtiff6 libjack0 libjack-dev fonts-freefont-ttf gcc make build-essential scons swig abcmidi overlayroot" "check_internet"
+  local os_packages
+  if [ "$PLV_OS" = "trixie" ]; then
+    os_packages="libasound2t64 cmake pkg-config ninja-build libfmt-dev"
+  else
+    os_packages="libasound2 libfmt9 libatlas-base-dev"
+  fi
+  execute_command "sudo apt-get install -y ruby git wget iw python3-pip python3-venv autotools-dev libtool autoconf libavahi-client3 libavahi-common3 libc6 libgcc-s1 libstdc++6 python3 libopenblas-dev libavahi-client-dev libasound2-dev libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev libopenjp2-7 libtiff6 libjack0 libjack-dev fonts-freefont-ttf libfreetype6 gcc make build-essential scons swig abcmidi overlayroot ${os_packages}" "check_internet"
 }
 
 # Function to disable audio output and configure fast boot
@@ -175,11 +142,39 @@ disable_audio_output() {
 
 # Function to install RTP-midi server
 install_rtpmidi_server() {
-  execute_command "cd /home/"
-  execute_command "sudo wget https://github.com/davidmoreno/rtpmidid/releases/download/v24.12/rtpmidid_24.12.2_armhf.deb" "check_internet"
-  execute_command "sudo dpkg -i rtpmidid_24.12.2_armhf.deb"
-  execute_command "sudo apt -f install -y"
-  execute_command "rm rtpmidid_24.12.2_armhf.deb"
+  if [ "$PLV_OS" = "trixie" ] && [ "$PLV_ARCH" = "armhf" ]; then
+    # Upstream supplies no Trixie armhf package. Build in an isolated directory.
+    local source_dir
+    source_dir="$(mktemp -d /tmp/plv-rtpmidid-XXXXXX)"
+    echo "Building rtpmidid for Trixie armhf; this may take a long time."
+    execute_command "git clone --depth 1 --branch v26.01 https://github.com/davidmoreno/rtpmidid.git ${source_dir}/src" "check_internet"
+    execute_command "cmake -S ${source_dir}/src -B ${source_dir}/src/build -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DENABLE_PCH=OFF -DUSE_FMT=ON -DCPP_VERSION=17 -GNinja"
+    execute_command "cmake --build ${source_dir}/src/build"
+    execute_command "sudo install -m 755 ${source_dir}/src/build/src/rtpmidid /usr/bin/rtpmidid"
+    execute_command "sudo mkdir -p /etc/rtpmidid"
+    if [ ! -e /etc/rtpmidid/default.ini ]; then
+      execute_command "sudo cp ${source_dir}/src/default.ini /etc/rtpmidid/default.ini"
+    fi
+    execute_command "sudo cp ${source_dir}/src/debian/rtpmidid.service /lib/systemd/system/rtpmidid.service"
+    if ! id -u rtpmidid >/dev/null 2>&1; then
+      execute_command "sudo useradd -r -s /usr/sbin/nologin -G audio rtpmidid"
+    fi
+    execute_command "sudo systemctl daemon-reload"
+    rm -rf "$source_dir"
+  else
+    local url package temp_dir
+    if [ "$PLV_OS" = "trixie" ]; then
+      package="rtpmidid-debian-trixie-arm64-26.01.deb"
+      url="https://github.com/davidmoreno/rtpmidid/releases/download/v26.01/${package}"
+    else
+      package="rtpmidid_24.12.2_${PLV_ARCH}.deb"
+      url="https://github.com/davidmoreno/rtpmidid/releases/download/v24.12/${package}"
+    fi
+    temp_dir="$(mktemp -d /tmp/plv-rtpmidid-XXXXXX)"
+    execute_command "wget -O ${temp_dir}/${package} ${url}" "check_internet"
+    execute_command "sudo apt-get install -y ${temp_dir}/${package}" "check_internet"
+    rm -rf "$temp_dir"
+  fi
 }
 
 
@@ -201,25 +196,10 @@ install_piano_led_visualizer() {
   execute_command "sudo chown -R ${PLV_USER}:${PLV_USER} ${APP_DIR}"
   execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} config --local pull.ff only"
   execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} config --local core.filemode false"
-  execute_command "sudo pip3 install -r ${APP_DIR}/requirements.txt --break-system-packages" "check_internet"
+  execute_command "sudo -u ${PLV_USER} python3 -m venv ${APP_DIR}/.venv"
+  execute_command "sudo -u ${PLV_USER} ${APP_DIR}/.venv/bin/python -m pip install -r ${APP_DIR}/requirements.txt" "check_internet"
   execute_command "sudo raspi-config nonint do_boot_behaviour B2"
-  cat <<EOF | sudo tee /lib/systemd/system/visualizer.service > /dev/null
-[Unit]
-Description=Piano LED Visualizer
-After=network-online.target
-Wants=network-online.target
-
-[Install]
-WantedBy=multi-user.target
-
-[Service]
-WorkingDirectory=${APP_DIR}/
-ExecStart=/usr/bin/python3 ${APP_DIR}/visualizer.py
-Restart=always
-Type=simple
-User=root
-Group=root
-EOF
+  execute_command "sudo install -m 0644 ${APP_DIR}/systemd/visualizer.service /lib/systemd/system/visualizer.service"
   execute_command "sudo systemctl daemon-reload"
   execute_command "sudo systemctl enable visualizer.service"
 }
@@ -279,9 +259,9 @@ echo "
 "
 
 # Main script execution
+detect_platform
 configure_pi_identity
 update_os
-configure_autoconnect_script
 enable_spi_interface
 install_packages
 disable_audio_output

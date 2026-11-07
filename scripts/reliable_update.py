@@ -169,8 +169,11 @@ def install_requirements(requirements: Path) -> None:
     if not requirements.exists():
         raise UpdateError(f"Missing requirements file: {requirements}")
     base_command = [sys.executable, "-m", "pip", "install", "-r", str(requirements)]
-    result = run(base_command + ["--break-system-packages"], check=False)
-    if result.returncode and "no such option: --break-system-packages" in result.stderr:
+    # The updater is launched with the same interpreter as visualizer.service.
+    # Never install into the system Python when that service uses a venv.
+    in_venv = sys.prefix != sys.base_prefix
+    result = run(base_command if in_venv else base_command + ["--break-system-packages"], check=False)
+    if not in_venv and result.returncode and "no such option: --break-system-packages" in result.stderr:
         result = run(base_command, check=False)
     if result.returncode:
         detail = (result.stderr or result.stdout).strip()
@@ -281,12 +284,15 @@ def perform_update(
     try:
         status.update("validating", "Validation de la nouvelle version")
         staging = prepare_staging(project_dir, target_revision)
-        install_requirements(staging / "requirements.txt")
 
         status.update("backing_up", "Sauvegarde de la configuration")
         ensure_backup_space(project_dir, backup_dir)
         run(["systemctl", "stop", "visualizer.service"])
         backup_path = create_backup(project_dir, backup_dir, previous_revision)
+        # Installing dependencies mutates the running interpreter environment;
+        # do it only after the service is stopped and rollback is possible.
+        status.update("installing_dependencies", "Installation des dépendances")
+        install_requirements(staging / "requirements.txt")
         status.update("activating", "Activation de la nouvelle version", backup=str(backup_path))
         activate_revision(project_dir, target_revision, backup_path)
         validate_release(project_dir)

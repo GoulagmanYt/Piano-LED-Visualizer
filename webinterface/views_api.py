@@ -1266,10 +1266,14 @@ def change_setting():
             return jsonify(result), status_code
 
     if setting_name == "connect_ports":
+        if getattr(app_state.midiports, 'learning_bridge_enabled', False):
+            return jsonify(success=False, error='Connect all is disabled while the Learning bridge is active'), 409
         app_state.midiports.connectall()
         return jsonify(success=True, reload_ports=True)
 
     if setting_name == "disconnect_ports":
+        if getattr(app_state.midiports, 'learning_bridge_enabled', False):
+            return jsonify(success=False, error='Disconnect all is disabled while the Learning bridge is active'), 409
         call("sudo aconnect -x", shell=True)
         return jsonify(success=True, reload_ports=True)
 
@@ -2350,6 +2354,64 @@ def get_songs():
 
     return render_template('songs_list.html', len=len(songs_list_dict), songs_list_dict=songs_list_dict, page=page,
                            max_page=max_page, total_songs=total_songs)
+
+
+LEARNING_BRIDGE_KEYS = (
+    "learning_piano_input", "learning_piano_output",
+    "learning_computer_input", "learning_computer_output",
+)
+
+
+@webinterface.route('/api/learning_bridge', methods=['GET', 'POST'])
+def learning_bridge_settings():
+    from lib.learning_bridge import alsa_id
+    settings = app_state.usersettings
+    bridge = getattr(app_state.midiports, "learning_bridge", None)
+    if request.method == 'GET':
+        try:
+            inputs = list(dict.fromkeys(mido.get_input_names()))
+            outputs = list(dict.fromkeys(mido.get_output_names()))
+        except Exception:
+            inputs, outputs = [], []
+        return jsonify(
+            mode=settings.get_setting_value('midi_bridge_mode') or 'off',
+            ports={key: settings.get_setting_value(key) or 'None' for key in LEARNING_BRIDGE_KEYS},
+            block_control=str(settings.get_setting_value('learning_block_control')) != '0',
+            inputs=inputs, outputs=outputs,
+            active=bool(getattr(app_state.midiports, 'learning_bridge_enabled', False)),
+            status=bridge.status if bridge else 'off',
+        )
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify(success=False, error='Expected JSON object'), 400
+    mode = data.get('mode')
+    ports = data.get('ports')
+    block = data.get('block_control')
+    if mode not in ('off', 'learning') or not isinstance(ports, dict) or not isinstance(block, bool):
+        return jsonify(success=False, error='Invalid Learning settings'), 400
+    values = []
+    for key in LEARNING_BRIDGE_KEYS:
+        value = ports.get(key)
+        if not isinstance(value, str) or len(value) > 512 or not value:
+            return jsonify(success=False, error='Invalid port selection'), 400
+        values.append(value)
+    if mode == 'learning':
+        try:
+            inputs, outputs = mido.get_input_names(), mido.get_output_names()
+        except Exception:
+            return jsonify(success=False, error='Cannot enumerate MIDI ports'), 503
+        if values[0] not in inputs or values[2] not in inputs or values[1] not in outputs or values[3] not in outputs:
+            return jsonify(success=False, error='Select four currently available MIDI ports'), 400
+        ids = [alsa_id(value) for value in values]
+        if (any(item is None for item in ids) or ids[0] == ids[2] or ids[1] == ids[3]
+                or ids[0] == ids[3] or ids[2] == ids[1]):
+            return jsonify(success=False, error='Piano and computer ALSA endpoints must be distinct'), 400
+    for key, value in zip(LEARNING_BRIDGE_KEYS, values):
+        settings.change_setting_value(key, value)
+    settings.change_setting_value('learning_block_control', '1' if block else '0')
+    settings.change_setting_value('midi_bridge_mode', mode)
+    settings.save_changes()
+    return jsonify(success=True, restart_required=True)
 
 
 @webinterface.route('/api/get_ports', methods=['GET'])

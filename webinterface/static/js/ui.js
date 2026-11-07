@@ -3501,3 +3501,59 @@ if (document.readyState === 'loading') {
         }
     } catch (e) { /* no-op */ }
 })();
+
+async function initialize_learning_bridge() {
+    const card = document.getElementById('learning_bridge_card');
+    if (!card) return;
+    const status = card.querySelector('#learning_bridge_status');
+    card.querySelector('#learning_bridge_refresh').onclick = () => initialize_learning_bridge();
+    const keys = ['learning_piano_input', 'learning_piano_output', 'learning_computer_input', 'learning_computer_output'];
+    try {
+        const response = await fetch('/api/learning_bridge', {cache: 'no-store'});
+        if (!response.ok) throw new Error('Unable to load Learning bridge settings');
+        const data = await response.json();
+        if (document.getElementById('learning_bridge_card') !== card) return;
+        card.querySelector('#learning_bridge_mode').value = data.mode;
+        card.querySelector('#learning_block_control').checked = data.block_control;
+        keys.forEach((key, index) => {
+            const select = card.querySelector('#' + key);
+            const list = index % 2 === 0 ? data.inputs : data.outputs;
+            select.replaceChildren();
+            const choices = ['None', ...list];
+            const configured = data.ports[key] || 'None';
+            if (!choices.includes(configured)) choices.push(configured);
+            choices.forEach(value => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value === configured && !list.includes(value) && value !== 'None'
+                    ? value + ' (offline)' : value;
+                select.appendChild(option);
+            });
+            select.value = configured;
+        });
+        status.textContent = data.active ? data.status : translate('learning_bridge_inactive');
+        card.querySelector('#learning_bridge_save').onclick = async () => {
+            const button = card.querySelector('#learning_bridge_save');
+            button.disabled = true;
+            try {
+                const payload = {
+                    mode: card.querySelector('#learning_bridge_mode').value,
+                    block_control: card.querySelector('#learning_block_control').checked,
+                    ports: Object.fromEntries(keys.map(key => [key, card.querySelector('#' + key).value])),
+                };
+                const result = await fetch('/api/learning_bridge', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
+                });
+                const body = await result.json();
+                if (!result.ok || !body.success) throw new Error(body.error || 'Unable to save');
+                status.textContent = translate('learning_bridge_restart');
+            } catch (error) {
+                status.textContent = error.message;
+            } finally {
+                button.disabled = false;
+            }
+        };
+    } catch (error) {
+        status.textContent = error.message;
+    }
+}

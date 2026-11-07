@@ -198,3 +198,51 @@ def test_perform_update_rolls_back_when_health_check_fails(tmp_path, monkeypatch
     assert (project / "config/sequences.xml").read_text(encoding="utf-8") == "<user-sequences/>\n"
     assert status.payload["state"] == "rolled_back"
     assert status.payload["rollback_healthy"] is True
+
+
+def test_install_requirements_uses_running_virtualenv_without_system_override(tmp_path, monkeypatch):
+    requirements = tmp_path / 'requirements.txt'
+    requirements.write_text('mido\n')
+    commands = []
+    monkeypatch.setattr(reliable_update.sys, 'prefix', '/app/.venv')
+    monkeypatch.setattr(reliable_update.sys, 'base_prefix', '/usr')
+    monkeypatch.setattr(reliable_update.sys, 'executable', '/app/.venv/bin/python')
+    monkeypatch.setattr(reliable_update, 'run', lambda command, **kwargs: (
+        commands.append(command) or subprocess.CompletedProcess(command, 0, '', '')
+    ))
+    reliable_update.install_requirements(requirements)
+    assert commands == [['/app/.venv/bin/python', '-m', 'pip', 'install', '-r', str(requirements)]]
+
+
+def test_install_requirements_legacy_python_falls_back_for_older_pip(tmp_path, monkeypatch):
+    requirements = tmp_path / 'requirements.txt'
+    requirements.write_text('mido\n')
+    commands = []
+    monkeypatch.setattr(reliable_update.sys, 'prefix', '/usr')
+    monkeypatch.setattr(reliable_update.sys, 'base_prefix', '/usr')
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 1 if len(commands) == 1 else 0, '',
+                                           'no such option: --break-system-packages')
+    monkeypatch.setattr(reliable_update, 'run', run)
+    reliable_update.install_requirements(requirements)
+    assert commands[0][-1] == '--break-system-packages'
+    assert '--break-system-packages' not in commands[1]
+
+
+def test_dependency_failure_after_backup_restores_old_release(tmp_path, monkeypatch):
+    project, remote, previous_revision, _ = create_update_fixture(tmp_path)
+    isolate_system_commands(monkeypatch)
+    monkeypatch.setattr(reliable_update, 'wait_for_health', lambda project_dir: True)
+    installs = []
+    def install(requirements):
+        installs.append(requirements)
+        if len(installs) == 1:
+            raise reliable_update.UpdateError('pip failed')
+    monkeypatch.setattr(reliable_update, 'install_requirements', install)
+    status = reliable_update.StatusWriter(tmp_path / 'state/status.json')
+    assert reliable_update.perform_update(project, status, tmp_path / 'backups', str(remote), 'master') == 2
+    assert git(project, 'rev-parse', 'HEAD') == previous_revision
+    assert installs[1] == project / 'requirements.txt'
+    assert status.payload['state'] == 'rolled_back'
+    assert status.payload['rollback_healthy'] is True
