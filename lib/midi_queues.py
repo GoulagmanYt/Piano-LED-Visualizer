@@ -116,7 +116,7 @@ class MidiQueues:
             return queued_visualizer or queued_learning
 
     def enqueue_learning_piano(self, msg, timestamp=None):
-        """Feed practice and recording without letting piano notes drive guides."""
+        """Feed practice, recording and the separate physical-piano LED lane."""
         if timestamp is None:
             timestamp = time.perf_counter()
         with self._lock:

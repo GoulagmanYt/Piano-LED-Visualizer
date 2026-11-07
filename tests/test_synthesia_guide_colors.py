@@ -274,3 +274,36 @@ def test_learning_piano_events_feed_recording_without_modifying_guides(rainbow_s
     assert scene.processor.saving.add_track.call_args_list[1].args == ('note_off', 60, 0, 3)
     assert scene.ledstrip.keylist_guide == [1]
     assert scene.pixels[0] == (40, 80, 120)
+
+
+def test_bridge_piano_notes_render_and_release_without_double_recording(rainbow_scene, monkeypatch):
+    from unittest.mock import Mock
+    scene = rainbow_scene
+    queues = make_guide_queue_scene(scene, monkeypatch)
+    scene.processor.saving.is_recording = True
+    scene.processor.saving.add_track = Mock()
+    queues.enqueue_learning_piano(mido.Message('note_on', note=60, velocity=100), 2)
+    scene.processor.process_learning_piano_events()
+    assert scene.ledstrip.keylist_status == [1]
+    scene.effects.process_fade_effects(0)
+    assert scene.pixels[0] != (0, 0, 0)
+    queues.enqueue_learning_piano(mido.Message('note_off', note=60), 3)
+    scene.processor.process_learning_piano_events()
+    assert scene.ledstrip.keylist_status == [0]
+    assert scene.pixels[0] == (0, 0, 0)
+    assert scene.processor.saving.add_track.call_count == 2
+
+
+@pytest.mark.parametrize('owner', ['playback', 'learning', 'practice'])
+def test_bridge_piano_does_not_override_local_display(rainbow_scene, monkeypatch, owner):
+    scene = rainbow_scene
+    queues = make_guide_queue_scene(scene, monkeypatch)
+    if owner == 'playback':
+        scene.processor.saving.is_playing_midi = True
+    elif owner == 'learning':
+        scene.processor.learning.is_started_midi = True
+    else:
+        monkeypatch.setattr(midi_module.app_state, 'practice_active', True, raising=False)
+    queues.enqueue_learning_piano(mido.Message('note_on', note=60, velocity=100), 1)
+    scene.processor.process_learning_piano_events()
+    assert scene.ledstrip.keylist_status == [0]

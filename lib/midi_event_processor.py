@@ -182,13 +182,38 @@ class MIDIEventProcessor:
         if not events:
             return False
         self._mark_learning_activity()
-        if self.saving.is_recording:
-            for msg, timestamp in events:
-                kind = getattr(msg, "type", None)
+        # Local playback and practice own the display. Physical notes still
+        # reach recording and the learning input, but must not overwrite them.
+        render_live = not (self.saving.is_playing_midi or self.learning.is_started_midi or
+                           getattr(app_state, "practice_active", False))
+        position_fn = getattr(self.ledstrip, "get_note_position", None)
+        for msg, timestamp in events:
+            kind = getattr(msg, "type", None)
+            if self.saving.is_recording:
                 if kind == "note_on" and msg.velocity > 0:
                     self.saving.add_track("note_on", msg.note, msg.velocity, timestamp)
                 elif kind == "note_off" or (kind == "note_on" and msg.velocity == 0):
                     self.saving.add_track("note_off", msg.note, 0, timestamp)
+            if not render_live:
+                continue
+            if kind == "control_change":
+                self.handle_control_change(msg, timestamp)
+                continue
+            if kind not in ("note_on", "note_off") or self.ledsettings.mode == "Disabled":
+                continue
+            position = (position_fn(msg.note, self.ledsettings) if callable(position_fn)
+                        else get_note_position(msg.note, self.ledstrip, self.ledsettings))
+            if not 0 <= position < self.ledstrip.led_number:
+                continue
+            guides = getattr(self.ledstrip, "keylist_guide", None)
+            if guides is not None and guides[position]:
+                # Guide state belongs to the computer stream; a piano release
+                # must not extinguish a partially completed chord.
+                continue
+            if kind == "note_off" or msg.velocity == 0:
+                self.handle_note_off(msg, timestamp, position, record=False)
+            else:
+                self.handle_note_on(msg, timestamp, position, record=False)
         return True
 
     def clear_guide_lights(self):
@@ -292,7 +317,7 @@ class MIDIEventProcessor:
     def _is_right_hand_channel(msg):
         return getattr(msg, "channel", None) in (12, "12")
     
-    def handle_note_off(self, msg, msg_timestamp, note_position):
+    def handle_note_off(self, msg, msg_timestamp, note_position, record=True):
         """
         Handle note-off MIDI events.
         
@@ -361,10 +386,10 @@ class MIDIEventProcessor:
             self._apply_idle_color(note_position, idle_color, use_backlight)
 
         # Record the note-off event if recording is active
-        if self.saving.is_recording and not was_guide:
+        if record and self.saving.is_recording and not was_guide:
             self.saving.add_track("note_off", msg.note, velocity, msg_timestamp)
 
-    def handle_note_on(self, msg, msg_timestamp, note_position, is_guide=False):
+    def handle_note_on(self, msg, msg_timestamp, note_position, is_guide=False, record=True):
         """
         Handle note-on MIDI events.
         
@@ -466,7 +491,7 @@ class MIDIEventProcessor:
             self.ledstrip.set_adjacent_colors(note_position, guide_color, False)
 
         # Record the note-on event if recording is active
-        if self.saving.is_recording and not is_guide:
+        if record and self.saving.is_recording and not is_guide:
             if self.ledsettings.color_mode == "Multicolor":
                 import webcolors as wc
                 # Include color information in multicolor mode
