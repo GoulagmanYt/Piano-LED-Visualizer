@@ -1,6 +1,6 @@
 import time
 
-from lib.rpi_drivers import GPIO
+from lib.rpi_drivers import GPIO, HAT_DISABLED
 
 from lib.functions import fastColorWipe
 
@@ -23,6 +23,8 @@ class GPIOHandler:
         self.setup_gpio()
 
     def setup_gpio(self):
+        if HAT_DISABLED:
+            return
         if self.args.rotatescreen != "true":
             self.KEYRIGHT = 26
             self.KEYLEFT = 5
@@ -55,6 +57,8 @@ class GPIOHandler:
             self.state_manager.update_user_activity()
 
     def process_gpio_keys(self):
+        if HAT_DISABLED:
+            return
         now = time.time()
 
         # -------------------------------------------------------------

@@ -136,3 +136,13 @@ Based on [onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Visuali
 The Pacifica animation is by Mark Kriegsman and Mary Corey March (FastLED). The Meteor Rain effect is based on the Tweaking4All example.
 
 Released under the [MIT license](LICENSE).
+
+### Using another GPIO HAT
+
+To free the LCD control HAT's GPIO pins and SPI0 for another HAT, set
+`<disable_hat>1</disable_hat>` in `config/settings.xml` and restart the
+visualizer service. The setting defaults to `0`; existing installations get
+it from the default settings on startup. With it enabled the LCD, joystick,
+buttons and cover sensor are unavailable (the cover is treated as open).
+Control the visualizer through the web interface instead. The LED driver is
+not disabled; choose its pin so it does not conflict with your other hardware.

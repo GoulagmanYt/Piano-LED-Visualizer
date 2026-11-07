@@ -124,3 +124,48 @@ def test_update_status_marks_stale_operation_as_failed(monkeypatch, tmp_path):
 
     assert status["state"] == "failed"
     assert "interrompue" in status["message"]
+
+
+def test_hotspot_disables_pmf(monkeypatch):
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, 'Hotspot', '')
+    monkeypatch.setattr('lib.platform.subprocess.run', run)
+    assert PlatformRasp.create_hotspot_profile('secret')
+    modify = next(args for args in calls if 'modify' in args)
+    assert modify[modify.index('802-11-wireless-security.pmf') + 1] == '1'
+
+
+def test_wifi_explicit_profile_and_no_password_in_log(monkeypatch, caplog):
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        if 'show' in args:
+            return subprocess.CompletedProcess(args, 10, '', '')
+        if 'add' in args:
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0, '', '')
+    monkeypatch.setattr('lib.platform.subprocess.run', run)
+    fallback = []
+    monkeypatch.setattr(PlatformRasp, 'enable_hotspot', lambda *a, **kw: fallback.append((a, kw)))
+    settings = FakeSettings()
+    assert PlatformRasp().connect_to_wifi('Hotspot', 'secret-password', FakeHotspot(), settings) is False
+    add = next(args for args in calls if 'add' in args)
+    assert add[add.index('con-name') + 1].startswith('PLV-')
+    assert add[add.index('wifi-sec.key-mgmt') + 1] == 'wpa-psk'
+    assert 'secret-password' not in caplog.text
+    assert fallback and ('is_hotspot_active', 1) in settings.changes
+
+
+def test_wifi_open_profile_success(monkeypatch):
+    calls = []
+    def run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 10 if 'show' in args else 0, '', '')
+    monkeypatch.setattr('lib.platform.subprocess.run', run)
+    settings = FakeSettings()
+    assert PlatformRasp().connect_to_wifi('My WiFi', '', FakeHotspot(), settings) is True
+    add = next(args for args in calls if 'add' in args)
+    assert 'wifi-sec.key-mgmt' not in add
+    assert ('is_hotspot_active', 0) in settings.changes
