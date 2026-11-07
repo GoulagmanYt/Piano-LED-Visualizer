@@ -48,6 +48,7 @@ def main():
 
     app.color_mode.MidiEvent = trace_processed
     process = psutil.Process()
+    app.ci.usersettings.change_setting_value('rtp_autoconnect', 'None')
     app.ci.midiports.stop_midi_monitor()
     app.ci.midiports._safe_close_port(app.ci.midiports.inport)
     app.ci.midiports._safe_close_port(app.ci.midiports.playport)
