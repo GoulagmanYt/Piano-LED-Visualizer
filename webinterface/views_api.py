@@ -2364,7 +2364,7 @@ LEARNING_BRIDGE_KEYS = (
 
 @webinterface.route('/api/learning_bridge', methods=['GET', 'POST'])
 def learning_bridge_settings():
-    from lib.learning_bridge import alsa_id
+    from lib.learning_bridge import alsa_id, resolve_unique
     settings = app_state.usersettings
     bridge = getattr(app_state.midiports, "learning_bridge", None)
     if request.method == 'GET':
@@ -2373,13 +2373,23 @@ def learning_bridge_settings():
             outputs = list(dict.fromkeys(mido.get_output_names()))
         except Exception:
             inputs, outputs = [], []
+        status = bridge.status if bridge else 'off'
+        # The monitor reconciles asynchronously and may be busy with RTP.
+        # Avoid presenting its last successful status as current if this fresh
+        # port scan already shows that an active endpoint has disappeared.
+        snapshot = getattr(bridge, '_settings', None)
+        if bridge and status == 'connected' and snapshot:
+            available = (inputs, outputs, inputs, outputs)
+            if any(resolve_unique(snapshot.get(key), names) is None
+                   for key, names in zip(LEARNING_BRIDGE_KEYS, available)):
+                status = 'configured port unavailable; reconciliation pending'
         return jsonify(
             mode=settings.get_setting_value('midi_bridge_mode') or 'off',
             ports={key: settings.get_setting_value(key) or 'None' for key in LEARNING_BRIDGE_KEYS},
             block_control=str(settings.get_setting_value('learning_block_control')) != '0',
             inputs=inputs, outputs=outputs,
             active=bool(getattr(app_state.midiports, 'learning_bridge_enabled', False)),
-            status=bridge.status if bridge else 'off',
+            status=status,
         )
     data = request.get_json(silent=True)
     if not isinstance(data, dict):

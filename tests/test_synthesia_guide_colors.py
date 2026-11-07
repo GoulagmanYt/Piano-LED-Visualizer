@@ -307,3 +307,54 @@ def test_bridge_piano_does_not_override_local_display(rainbow_scene, monkeypatch
     queues.enqueue_learning_piano(mido.Message('note_on', note=60, velocity=100), 1)
     scene.processor.process_learning_piano_events()
     assert scene.ledstrip.keylist_status == [0]
+
+
+def test_bridge_partial_chord_reaches_real_guide_renderer(rainbow_scene, monkeypatch):
+    from lib.learning_bridge import LearningBridge
+    scene = rainbow_scene
+    queues = make_guide_queue_scene(scene, monkeypatch)
+    led = scene.ledstrip
+    led.led_number = 2
+    for name in ('keylist', 'keylist_status', 'keylist_sustained', 'keylist_external_software', 'keylist_guide'):
+        setattr(led, name, [0, 0])
+    led.keylist_color = [(0, 0, 0), (0, 0, 0)]
+    led.get_note_position = lambda note, settings: {55: 0, 67: 1}[note]
+    names = {'learning_piano_input': 'Piano:Keys 20:0', 'learning_piano_output': 'Piano:Keys 20:0',
+             'learning_computer_input': 'PC:MIDI 30:0', 'learning_computer_output': 'PC:MIDI 30:0',
+             'learning_block_control': '1'}
+    inputs = {}
+    class Port:
+        closed = False
+        def close(self): self.closed = True
+        def send(self, msg): pass
+    def open_input(name, callback):
+        port = Port()
+        port.callback = callback
+        inputs[name] = port
+        return port
+    bridge = LearningBridge(queues, SimpleNamespace(get_setting_value=names.get),
+                            open_input=open_input, open_output=lambda name: Port(),
+                            verify_links=lambda *args: None)
+    try:
+        bridge.reconcile([names['learning_piano_input'], names['learning_computer_input']],
+                         [names['learning_piano_output'], names['learning_computer_output']])
+        pc = inputs[names['learning_computer_input']].callback
+        piano = inputs[names['learning_piano_input']].callback
+        for note, channel in ((55, 1), (67, 10)):
+            pc(mido.Message('note_on', note=note, channel=channel, velocity=1))
+        scene.processor.process_guide_events()
+        assert led.keylist_guide == [1, 1]
+        assert scene.pixels == {0: (40, 80, 120), 1: (120, 80, 40)}
+        piano(mido.Message('note_on', note=67, velocity=80))
+        piano(mido.Message('note_off', note=67))
+        pc(mido.Message('note_off', note=67))
+        scene.processor.process_guide_events()
+        scene.processor.process_learning_piano_events()
+        assert led.keylist_guide == [1, 1]
+        piano(mido.Message('note_on', note=55, velocity=80))
+        pc(mido.Message('note_off', note=55))
+        scene.processor.process_guide_events()
+        assert led.keylist_guide == [0, 0]
+        assert scene.pixels == {0: (0, 0, 0), 1: (0, 0, 0)}
+    finally:
+        assert bridge.close()

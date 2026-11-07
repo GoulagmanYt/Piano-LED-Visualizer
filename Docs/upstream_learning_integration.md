@@ -34,3 +34,30 @@ external MIDI feedback loops, measure latency and verify audio/LED behavior.
 Do not rely on software note-off cleanup as the only way to stop a piano if a
 cable or device fails. Avoid running local song playback concurrently with an
 external Synthesia session, since both may send notes to the piano.
+
+## Automated regression coverage and RTP diagnosis
+
+Run the source-aware router, simulated four-port bridge, guide renderer and
+API regressions with:
+
+```sh
+python -m pytest -q tests/test_learning_router.py tests/test_learning_session.py \
+  tests/test_learning_bridge.py tests/test_synthesia_guide_colors.py \
+  tests/test_learning_bridge_api.py tests/test_audit_regressions.py
+```
+
+These tests simulate MIDI devices and output workers; they do **not** prove
+Synthesia's real message timings, actual ALSA subscription survival, network
+connectivity, or behavior on a Raspberry Pi. On loss of a configured ALSA port,
+the API reports the freshly observed absence even if the monitor has not yet
+processed it. A `connected` bridge status describes its local MIDI port
+ownership only, **not** RTP network health; verify the rtpmidid/OSCMidi peer
+separately. A port disappearing and reappearing with the same ALSA name and ID
+between monitor scans may also require additional diagnosis.
+
+If RTP repeatedly reconnects, collect `rtpmidid-cli status`,
+`journalctl -u rtpmidid.service`, the visualizer log and `aconnect -l` around
+the failure. RTP auto-reconciliation can remove an announced listener that has
+no active client; without a daemon status snapshot from the failure, repeated
+"autoconnect updated" logs alone do not establish why the session was rebuilt.
+Do not disconnect devices or send notes while diagnosing a possible MIDI loop.

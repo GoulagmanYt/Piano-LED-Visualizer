@@ -194,3 +194,99 @@ def test_bridge_does_not_reopen_while_an_output_worker_is_stuck():
     bridge.reconcile([PI, CI], [PO, CO])
     assert bridge.status == 'connected' and len(outputs) == 4
     assert bridge.close()
+
+
+@pytest.mark.parametrize('channel', range(1, 13))
+def test_bridge_separates_synthesia_guide_channels_from_piano_sound(channel):
+    """Drive the real callbacks and workers, not just the router in isolation."""
+    inputs, outputs = {}, {}
+    def open_input(name, callback):
+        inputs[name] = FakeInput(callback)
+        return inputs[name]
+    def open_output(name):
+        outputs[name] = FakeOutput()
+        return outputs[name]
+    queues = MidiQueues()
+    bridge = LearningBridge(queues, Settings(), open_input=open_input,
+                            open_output=open_output, verify_links=lambda *args: None)
+    try:
+        bridge.reconcile([PI, CI], [PO, CO])
+        inputs[CI].callback(mido.Message('note_on', note=60, channel=channel, velocity=1))
+        inputs[CI].callback(mido.Message('note_on', note=60, channel=channel, velocity=90))
+        inputs[CI].callback(mido.Message('note_on', note=60, channel=channel, velocity=0))
+        inputs[CI].callback(mido.Message('note_off', note=60, channel=channel))
+        guides = [msg for msg, _ in queues.drain_guides()]
+        assert [(msg.type, msg.velocity) for msg in guides] == [('note_on', 1), ('note_off', 64)]
+        wait(lambda: len(outputs[PO].events) == 2)
+        assert [(msg.type, msg.velocity) for msg in outputs[PO].events] == [
+            ('note_on', 90), ('note_on', 0)]
+        assert outputs[CO].events == []
+    finally:
+        assert bridge.close()
+
+
+def test_bridge_partial_chord_guides_and_echo_filter_end_to_end():
+    inputs, outputs = {}, {}
+    def open_input(name, callback):
+        inputs[name] = FakeInput(callback)
+        return inputs[name]
+    def open_output(name):
+        outputs[name] = FakeOutput()
+        return outputs[name]
+    queues = MidiQueues()
+    bridge = LearningBridge(queues, Settings(), open_input=open_input,
+                            open_output=open_output, verify_links=lambda *args: None)
+    try:
+        bridge.reconcile([PI, CI], [PO, CO])
+        for note, channel in ((55, 1), (67, 10)):
+            inputs[CI].callback(mido.Message('note_on', note=note, channel=channel, velocity=1))
+        assert [msg.note for msg, _ in queues.drain_guides()] == [55, 67]
+        inputs[PI].callback(mido.Message('note_on', note=67, velocity=80))
+        inputs[CI].callback(mido.Message('note_on', note=67, velocity=80))  # echo
+        inputs[CI].callback(mido.Message('note_off', note=67))  # partial chord
+        assert queues.drain_guides() == []
+        inputs[PI].callback(mido.Message('note_on', note=55, velocity=70))
+        inputs[CI].callback(mido.Message('note_off', note=55))
+        assert sorted(msg.note for msg, _ in queues.drain_guides()) == [55, 67]
+        wait(lambda: len(outputs[CO].events) == 2)
+        assert [msg.note for msg in outputs[CO].events] == [67, 55]
+        assert outputs[PO].events == []
+    finally:
+        assert bridge.close()
+
+
+def test_bridge_rtp_endpoint_disappearance_cleanup_and_return():
+    """The port monitor must reconcile on endpoint loss before reporting recovery."""
+    inputs, opened = {}, []
+    def open_input(name, callback):
+        inputs[name] = FakeInput(callback)
+        return inputs[name]
+    def open_output(name):
+        port = FakeOutput()
+        opened.append((name, port))
+        return port
+    queues = MidiQueues()
+    bridge = LearningBridge(queues, Settings(), open_input=open_input,
+                            open_output=open_output, verify_links=lambda *args: None)
+    try:
+        bridge.reconcile([PI, CI], [PO, CO])
+        inputs[CI].callback(mido.Message('note_on', note=62, channel=2, velocity=80))
+        inputs[PI].callback(mido.Message('control_change', control=64, value=127))
+        inputs[PI].callback(mido.Message('note_on', note=60, velocity=80))
+        wait(lambda: len(opened[0][1].events) >= 1 and len(opened[1][1].events) >= 2)
+        bridge.reconcile([PI], [PO])
+        assert bridge.status == 'waiting for all configured ports'
+        assert all(port.closed for _, port in opened)
+        assert any(msg.type == 'note_off' and msg.note == 62 for msg in opened[0][1].events)
+        assert any(msg.type == 'note_off' and msg.note == 60 for msg in opened[1][1].events)
+        assert any(msg.type == 'control_change' and msg.control == 64 and msg.value == 0
+                   for msg in opened[1][1].events)
+        assert any(msg is None for msg, _ in queues.drain_guides())
+        bridge.reconcile([PI, CI], [PO, CO])
+        assert bridge.status == 'connected'
+        assert len(opened) == 4 and all(not port.events for _, port in opened[2:])
+        inputs[PI].callback(mido.Message('note_on', note=65, velocity=85))
+        wait(lambda: len(opened[3][1].events) == 1)
+        assert opened[3][1].events[0].note == 65
+    finally:
+        assert bridge.close()

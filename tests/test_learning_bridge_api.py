@@ -60,3 +60,28 @@ def test_legacy_global_mesh_actions_are_blocked_when_bridge_is_running(scene, mo
     monkeypatch.setattr(app_state, 'midiports', SimpleNamespace(learning_bridge_enabled=True))
     response = scene.client.get('/api/change_setting', query_string={'setting_name': action, 'value': '0'})
     assert response.status_code == 409
+
+
+def test_status_does_not_claim_connected_when_active_endpoint_disappears(scene, monkeypatch):
+    bridge = SimpleNamespace(status='connected', _settings=dict(scene.ports))
+    monkeypatch.setattr(app_state, 'midiports', SimpleNamespace(
+        learning_bridge=bridge, learning_bridge_enabled=True))
+    assert scene.client.get('/api/learning_bridge').json['status'] == 'connected'
+    monkeypatch.setattr(api.mido, 'get_input_names', lambda: ['Piano:Keys 20:0'])
+    result = scene.client.get('/api/learning_bridge').json
+    assert result['active'] is True  # mode selected, not a network health claim
+    assert result['status'] == 'configured port unavailable; reconciliation pending'
+    # A saved configuration for the next restart must not override the
+    # endpoints actually owned by the current bridge generation.
+    scene.values['learning_computer_input'] = 'New:Port 40:0'
+    assert scene.client.get('/api/learning_bridge').json['status'] != 'connected'
+
+
+def test_status_handles_port_enumeration_failure(scene, monkeypatch):
+    bridge = SimpleNamespace(status='connected', _settings=dict(scene.ports))
+    monkeypatch.setattr(app_state, 'midiports', SimpleNamespace(
+        learning_bridge=bridge, learning_bridge_enabled=True))
+    def failed():
+        raise OSError('ALSA unavailable')
+    monkeypatch.setattr(api.mido, 'get_input_names', failed)
+    assert scene.client.get('/api/learning_bridge').json['status'] != 'connected'
