@@ -22,7 +22,9 @@ id() {{ return 0; }}
 {installer_function(name)}
 {name}
 '''
-    return subprocess.run(['bash', '-c', harness], check=True, text=True, capture_output=True).stdout
+    import shutil
+    bash = shutil.which('bash') or r'C:\Program Files\Git\bin\bash.exe'
+    return subprocess.run([bash, '-c', harness], check=True, text=True, capture_output=True).stdout
 
 
 def test_package_selection_for_bookworm_and_trixie():
