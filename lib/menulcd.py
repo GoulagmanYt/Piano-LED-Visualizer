@@ -1751,6 +1751,21 @@ class MenuLCD:
         if location == "Playback":
             self.midiports.change_port("playport", choice)
 
+        if location == "Mode":
+            if choice == "Learning":
+                if hasattr(self.midiports, "set_learning_bridge_mode"):
+                    self.midiports.set_learning_bridge_mode(True)
+                else:
+                    self.usersettings.change_setting_value("midi_bridge_mode", "learning")
+                self.render_message("Learning Mode", "Active", 1500)
+            elif choice in ("Normal", "Light show"):
+                if hasattr(self.midiports, "set_learning_bridge_mode"):
+                    self.midiports.set_learning_bridge_mode(False)
+                else:
+                    self.usersettings.change_setting_value("midi_bridge_mode", "normal")
+                self.render_message("Normal Mode", "Active", 1500)
+            self.go_back()
+
         if location == "Ports_Settings":
             if choice == "Refresh ports" or choice == "Input" or choice == "Playback":
                 self.update_ports()
@@ -1760,11 +1775,14 @@ class MenuLCD:
                 self.midiports.connectall()
 
             if choice == "Disconnect ports":
-                if getattr(self.midiports, "learning_bridge_enabled", False):
-                    self.render_message("Learning bridge", "Disable first", 1500)
+                self.render_message("Disconnecting ports", "", 1000)
+                if hasattr(self.midiports, "disconnect_all_ports"):
+                    self.midiports.disconnect_all_ports()
                 else:
-                    self.render_message("Disconnecting ports", "", 1000)
                     call("sudo aconnect -x", shell=True)
+                    if getattr(self.midiports, "learning_bridge_enabled", False) and getattr(self.midiports, "learning_bridge", None) is not None:
+                        self.midiports.learning_bridge.reset_after_alsa_flush()
+                        self.midiports.setup_ports()
 
         if location == "LED_animations":
             self.is_animation_running = True
@@ -2266,4 +2284,22 @@ class MenuLCD:
     def get_pointer_color(self):
         """Get the current pointer color as RGB tuple"""
         return self.theme.pointer_color
+
+    def toggle_learning_bridge_mode(self, direction="Right"):
+        """Toggle between Normal MIDI mode and Synthesia Learning Bridge mode from the LCD."""
+        currently_enabled = bool(getattr(self.midiports, "learning_bridge_enabled", False))
+        target_enabled = not currently_enabled
+        if hasattr(self.midiports, "set_learning_bridge_mode"):
+            self.midiports.set_learning_bridge_mode(target_enabled)
+        else:
+            self.usersettings.change_setting_value("midi_bridge_mode", "learning" if target_enabled else "normal")
+
+    def set_learning_block_control(self, enable=True):
+        """Enable or disable computer control blocking in Learning Bridge mode from the LCD."""
+        val = "1" if enable else "0"
+        self.usersettings.change_setting_value("learning_block_control", val)
+        if getattr(self.midiports, "learning_bridge", None) is not None:
+            self.midiports.learning_bridge.refresh_settings(self.usersettings)
+            if getattr(self.midiports, "learning_bridge_enabled", False):
+                self.midiports.setup_ports()
 

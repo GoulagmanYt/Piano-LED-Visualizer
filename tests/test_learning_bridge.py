@@ -83,6 +83,10 @@ def test_bridge_fails_closed_on_missing_or_ambiguous_ports():
     assert bridge.status == 'waiting for all configured ports'
     opener.assert_not_called()
     assert resolve_unique('Piano:Keys 20:0', ['Piano:Keys 21:0', 'Piano:Keys 22:0']) is None
+    # Substring & case-insensitive matching
+    assert resolve_unique('USB AudioDevice', ['USB AudioDevice:USB AudioDevice MIDI 1 16:0']) == 'USB AudioDevice:USB AudioDevice MIDI 1 16:0'
+    assert resolve_unique('piano:keys', ['Piano:Keys 20:0']) == 'Piano:Keys 20:0'
+    assert resolve_unique('Piano', ['Piano A 20:0', 'Piano B 21:0']) is None
 
 
 def test_direct_alsa_subscription_blocks_bridge(monkeypatch):

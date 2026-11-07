@@ -268,9 +268,128 @@ class TestAutoinstallRetry(unittest.TestCase):
             match.group(0),
             'execute_command "false" "check_internet"',
         ])
-        result = subprocess.run(["bash", "-c", harness], capture_output=True, text=True)
+        import shutil
+        bash = shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
+        result = subprocess.run([bash, "-c", harness], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout.count("Command failed with exit code 1."), 18)
+
+
+class TestSymmetricEndpointResolution(unittest.TestCase):
+    def test_symmetric_pairing_when_outputs_unset(self):
+        from lib.learning_bridge import resolve_bridge_endpoints
+        settings = {
+            "learning_piano_input": "Digital Piano 20:0",
+            "learning_piano_output": "",
+            "learning_computer_input": "rtpmidid:OSCMidi 128:1",
+            "learning_computer_output": "none",
+        }
+        inputs = ["Digital Piano 20:0", "rtpmidid:OSCMidi 128:1"]
+        outputs = ["Digital Piano 20:0", "rtpmidid:OSCMidi 128:1"]
+        pi, po, ci, co = resolve_bridge_endpoints(settings, inputs, outputs)
+        self.assertEqual(pi, "Digital Piano 20:0")
+        self.assertEqual(po, "Digital Piano 20:0")
+        self.assertEqual(ci, "rtpmidid:OSCMidi 128:1")
+        self.assertEqual(co, "rtpmidid:OSCMidi 128:1")
+
+    def test_auto_fallback_to_standard_ports(self):
+        from lib.learning_bridge import resolve_bridge_endpoints
+        settings = {
+            "learning_piano_input": "auto",
+            "learning_piano_output": "auto",
+            "learning_computer_input": "auto",
+            "learning_computer_output": "auto",
+            "input_port": "MyPiano 16:0",
+            "secondary_input_port": "MyComputer 24:0",
+        }
+        inputs = ["MyPiano 16:0", "MyComputer 24:0"]
+        outputs = ["MyPiano 16:0", "MyComputer 24:0"]
+        pi, po, ci, co = resolve_bridge_endpoints(settings, inputs, outputs)
+        self.assertEqual(pi, "MyPiano 16:0")
+        self.assertEqual(po, "MyPiano 16:0")
+        self.assertEqual(ci, "MyComputer 24:0")
+        self.assertEqual(co, "MyComputer 24:0")
+
+
+class TestDynamicLearningBridgeModeSwitching(unittest.TestCase):
+    def test_set_learning_bridge_mode_toggles_cleanly(self):
+        from lib.midiports import MidiPorts
+        from lib.midi_queues import MidiQueues
+
+        settings_dict = {"midi_bridge_mode": "normal", "input_port": "None", "secondary_input_port": "None", "play_port": "None"}
+        class DummySettings:
+            def get_setting_value(self, k):
+                return settings_dict.get(k, "")
+            def change_setting_value(self, k, v):
+                settings_dict[k] = str(v)
+
+        ports = MidiPorts.__new__(MidiPorts)
+        ports.usersettings = DummySettings()
+        ports.queues = MidiQueues()
+        ports.learning_bridge = None
+        ports.learning_bridge_enabled = False
+        ports.inport = None
+        ports.playport = None
+        ports.actual_input_port = None
+        ports.actual_play_port = None
+        ports.setup_ports = MagicMock()
+        ports._close_standard_ports_for_bridge = MagicMock()
+
+        ports.set_learning_bridge_mode(True)
+        self.assertTrue(ports.learning_bridge_enabled)
+        self.assertEqual(settings_dict["midi_bridge_mode"], "learning")
+        self.assertIsNotNone(ports.learning_bridge)
+        ports.setup_ports.assert_called()
+
+        ports.set_learning_bridge_mode(False)
+        self.assertFalse(ports.learning_bridge_enabled)
+        self.assertEqual(settings_dict["midi_bridge_mode"], "normal")
+
+
+class TestMenuLCDModeSwitching(unittest.TestCase):
+    def test_lcd_mode_toggle_and_block_control(self):
+        from lib.menulcd import MenuLCD
+
+        fake_menu = MenuLCD.__new__(MenuLCD)
+        fake_midiports = SimpleNamespace(learning_bridge_enabled=False, set_learning_bridge_mode=MagicMock())
+        saved = {}
+        fake_menu.midiports = fake_midiports
+        fake_menu.usersettings = SimpleNamespace(change_setting_value=lambda k, v: saved.__setitem__(k, v))
+
+        fake_menu.toggle_learning_bridge_mode()
+        fake_midiports.set_learning_bridge_mode.assert_called_with(True)
+
+        fake_menu.set_learning_block_control(True)
+        self.assertEqual(saved.get("learning_block_control"), "1")
+
+
+class TestSurgicalDirectLinkDisconnect(unittest.TestCase):
+    def test_disconnect_direct_links_removes_piano_to_computer_link(self):
+        from lib.learning_bridge import disconnect_direct_links
+
+        mock_aconnect_l = (
+            "client 14: 'Midi Through' [type=kernel]\n"
+            "    0 'Midi Through Port-0'\n"
+            "client 16: 'USB AudioDevice' [type=kernel,card=1]\n"
+            "    0 'USB AudioDevice MIDI 1'\n"
+            "        Connecting To: 128:2\n"
+            "client 128: 'rtpmidid' [type=user,pid=351]\n"
+            "    2 'OSCMidi'\n"
+        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                SimpleNamespace(stdout=mock_aconnect_l, returncode=0),
+                SimpleNamespace(stdout="", returncode=0),
+            ]
+            res = disconnect_direct_links("Piano 16:0", "Piano 16:0", "Computer 128:2", "Computer 128:2")
+            self.assertEqual(res, [("16:0", "128:2")])
+            mock_run.assert_any_call(
+                ["aconnect", "-d", "16:0", "128:2"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=3,
+            )
 
 
 if __name__ == "__main__":

@@ -55,11 +55,22 @@ def test_bridge_can_be_disabled_while_ports_are_offline(scene):
     assert scene.values['midi_bridge_mode'] == 'off'
 
 
-@pytest.mark.parametrize('action', ['connect_ports', 'disconnect_ports'])
-def test_legacy_global_mesh_actions_are_blocked_when_bridge_is_running(scene, monkeypatch, action):
+def test_legacy_global_mesh_actions_are_blocked_when_bridge_is_running(scene, monkeypatch):
     monkeypatch.setattr(app_state, 'midiports', SimpleNamespace(learning_bridge_enabled=True))
-    response = scene.client.get('/api/change_setting', query_string={'setting_name': action, 'value': '0'})
+    response = scene.client.get('/api/change_setting', query_string={'setting_name': 'connect_ports', 'value': '0'})
     assert response.status_code == 409
+
+
+def test_disconnect_ports_allowed_when_bridge_is_running(scene, monkeypatch):
+    disconnected = []
+    ports = SimpleNamespace(
+        learning_bridge_enabled=True,
+        disconnect_all_ports=lambda: disconnected.append(True)
+    )
+    monkeypatch.setattr(app_state, 'midiports', ports)
+    response = scene.client.get('/api/change_setting', query_string={'setting_name': 'disconnect_ports', 'value': '0'})
+    assert response.status_code == 200
+    assert disconnected == [True]
 
 
 def test_status_does_not_claim_connected_when_active_endpoint_disappears(scene, monkeypatch):

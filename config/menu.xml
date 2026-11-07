@@ -232,6 +232,10 @@
     <menu text="Ports Settings">
         <Ports_Settings text="Input"></Ports_Settings>
         <Ports_Settings text="Playback"></Ports_Settings>
+        <Ports_Settings text="Mode">
+            <Mode text="Normal"></Mode>
+            <Mode text="Learning"></Mode>
+        </Ports_Settings>
         <Ports_Settings text="Refresh ports"></Ports_Settings>
         <Ports_Settings text="Connect ports"></Ports_Settings>
         <Ports_Settings text="Disconnect ports"></Ports_Settings>

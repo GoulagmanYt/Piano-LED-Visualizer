@@ -1,3 +1,4 @@
+import subprocess
 import threading
 import time
 
@@ -998,11 +999,91 @@ class MidiPorts:
             return self._reconnect_input(force=True)
         return False
 
-    def setup_ports(self):
-        """Try to open the configured or first available ports."""
+    def _close_standard_ports_for_bridge(self):
+        """Ensure standard inport and playport are closed when LearningBridge owns MIDI routing."""
+        if getattr(self, "inport", None) is not None:
+            try:
+                self.inport.close()
+            except Exception as error:
+                logger.debug("Error closing inport for learning bridge: %s", error)
+            self.inport = None
+        if getattr(self, "playport", None) is not None:
+            try:
+                self.playport.close()
+            except Exception as error:
+                logger.debug("Error closing playport for learning bridge: %s", error)
+            self.playport = None
+        self.actual_input_port = None
+        self.actual_play_port = None
+
+    def setup_ports(self, clean_direct_links=False):
+        """Initialize or reconcile MIDI ports according to current mode."""
+        if getattr(self, "learning_bridge_enabled", False) and self.learning_bridge is not None:
+            self._close_standard_ports_for_bridge()
+            try:
+                _refresh_port_cache()
+                inputs = _get_cached_input_names()
+                outputs = _get_cached_output_names()
+                if clean_direct_links and hasattr(self.learning_bridge, "disconnect_direct_alsa_links"):
+                    self.learning_bridge.disconnect_direct_alsa_links(inputs, outputs)
+                self.learning_bridge.reconcile(inputs, outputs)
+            except Exception as error:
+                logger.warning("Learning bridge reconciliation failed during setup_ports: %s", error)
+            return
+
+        # Standard mode (non-bridge) port setup
         _refresh_port_cache()
         self._reconnect_input(force=True)
         self._reconnect_output(force=True)
+
+    def disconnect_all_ports(self):
+        """Disconnect all ALSA sequencer subscriptions and re-reconcile LearningBridge if active."""
+        try:
+            subprocess.run(["aconnect", "-x"], check=False, capture_output=True, text=True, timeout=3)
+        except Exception as error:
+            logger.warning("Failed to execute aconnect -x: %s", error)
+
+        if getattr(self, "learning_bridge_enabled", False) and self.learning_bridge is not None:
+            self._close_standard_ports_for_bridge()
+            self.learning_bridge.reset_after_alsa_flush()
+            self.setup_ports()
+
+    def set_learning_bridge_mode(self, enabled):
+        """Dynamically switch between Standard MIDI mode and Synthesia Learning Bridge mode."""
+        target_enabled = bool(enabled) and str(enabled).strip().lower() not in (
+            "0", "false", "off", "normal", "light_show"
+        )
+        self.usersettings.change_setting_value(
+            "midi_bridge_mode", "learning" if target_enabled else "normal"
+        )
+
+        if target_enabled == getattr(self, "learning_bridge_enabled", False):
+            if target_enabled and self.learning_bridge is not None:
+                self.learning_bridge.refresh_settings(self.usersettings)
+                self.setup_ports(clean_direct_links=True)
+            return
+
+        self.learning_bridge_enabled = target_enabled
+        if target_enabled:
+            from lib.learning_bridge import LearningBridge
+            self._close_standard_ports_for_bridge()
+            if self.learning_bridge is None:
+                self.learning_bridge = LearningBridge(
+                    self.queues,
+                    self.usersettings,
+                    practice_active=lambda: bool(
+                        getattr(getattr(self, "learning", None), "is_started_midi", False)
+                    ),
+                    activity=self.queues.activity.set,
+                )
+            else:
+                self.learning_bridge._closed = False
+                self.learning_bridge.refresh_settings(self.usersettings)
+            self.setup_ports(clean_direct_links=True)
+        else:
+            if self.learning_bridge is not None:
+                self.learning_bridge.close()
+            self.setup_ports()
 
     def _extract_device_name(self, port_string):
         """Extract device name from a port string."""

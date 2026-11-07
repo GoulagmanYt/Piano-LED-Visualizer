@@ -1272,9 +1272,13 @@ def change_setting():
         return jsonify(success=True, reload_ports=True)
 
     if setting_name == "disconnect_ports":
-        if getattr(app_state.midiports, 'learning_bridge_enabled', False):
-            return jsonify(success=False, error='Disconnect all is disabled while the Learning bridge is active'), 409
-        call("sudo aconnect -x", shell=True)
+        if hasattr(app_state.midiports, "disconnect_all_ports"):
+            app_state.midiports.disconnect_all_ports()
+        else:
+            call("sudo aconnect -x", shell=True)
+            if getattr(app_state.midiports, "learning_bridge_enabled", False) and getattr(app_state.midiports, "learning_bridge", None) is not None:
+                app_state.midiports.learning_bridge.reset_after_alsa_flush()
+                app_state.midiports.setup_ports()
         return jsonify(success=True, reload_ports=True)
 
     if setting_name == "restart_rtp":
@@ -1902,6 +1906,27 @@ def change_setting():
         else:
             return jsonify(success=False, error="Failed to change hotspot password")
 
+    if setting_name == "midi_bridge_mode":
+        if hasattr(app_state.midiports, "set_learning_bridge_mode"):
+            app_state.midiports.set_learning_bridge_mode(value)
+        else:
+            app_state.usersettings.change_setting_value("midi_bridge_mode", value)
+        return jsonify(success=True, reload_ports=True)
+
+    if setting_name in (
+        "learning_piano_input",
+        "learning_piano_output",
+        "learning_computer_input",
+        "learning_computer_output",
+        "learning_block_control",
+    ):
+        app_state.usersettings.change_setting_value(setting_name, value)
+        if getattr(app_state.midiports, "learning_bridge", None) is not None:
+            app_state.midiports.learning_bridge.refresh_settings(app_state.usersettings)
+            if getattr(app_state.midiports, "learning_bridge_enabled", False):
+                app_state.midiports.setup_ports()
+        return jsonify(success=True, reload_ports=True)
+
     return jsonify(success=True)
 
 
@@ -2523,15 +2548,30 @@ def reset_runtime_diagnostics():
 
 @webinterface.route('/api/switch_ports', methods=['GET'])
 def switch_ports():
-    active_input = app_state.usersettings.get_setting_value("input_port")
-    secondary_input = app_state.usersettings.get_setting_value("secondary_input_port")
-    app_state.midiports.change_port("inport", secondary_input)
-    app_state.usersettings.change_setting_value("secondary_input_port", active_input)
-    app_state.usersettings.change_setting_value("input_port", secondary_input)
+    mode = request.args.get('mode', '').strip().lower()
+    if mode in ('bridge', 'learning', 'midi_mode'):
+        currently_enabled = bool(getattr(app_state.midiports, 'learning_bridge_enabled', False))
+        if hasattr(app_state.midiports, 'set_learning_bridge_mode'):
+            app_state.midiports.set_learning_bridge_mode(not currently_enabled)
+        return jsonify(
+            success=True,
+            learning_bridge_enabled=bool(getattr(app_state.midiports, 'learning_bridge_enabled', False)),
+            reload_ports=True,
+        )
 
+    if getattr(app_state.midiports, 'learning_bridge_enabled', False):
+        return jsonify(
+            success=False,
+            error="Active/Secondary port switching is disabled while Synthesia Learning Bridge mode is active.",
+        ), 409
+
+    active_port = app_state.usersettings.get_setting_value("input_port")
+    secondary_port = app_state.usersettings.get_setting_value("secondary_input_port")
+    app_state.midiports.change_port("inport", secondary_port)
+    app_state.usersettings.change_setting_value("secondary_input_port", active_port)
+    app_state.usersettings.change_setting_value("input_port", secondary_port)
     fastColorWipe(app_state.ledstrip.strip, True, app_state.ledsettings)
-
-    return jsonify(success=True)
+    return jsonify(success=True, reload_ports=True)
 
 
 @webinterface.route('/api/get_sequences', methods=['GET'])
