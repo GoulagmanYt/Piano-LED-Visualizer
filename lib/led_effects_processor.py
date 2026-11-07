@@ -25,6 +25,8 @@ class LEDEffectsProcessor:
         keylist_status = ledstrip.keylist_status
         keylist_sustained = ledstrip.keylist_sustained
         keylist_color = ledstrip.keylist_color
+        external_software = getattr(ledstrip, "keylist_external_software", None)
+        use_hand_colors = getattr(ledsettings, "skipped_notes", "Normal") != "Finger-based"
         mode = ledsettings.mode
         color_update = self.color_mode.ColorUpdate
         set_pixel_color = ledstrip.strip.setPixelColor
@@ -63,10 +65,13 @@ class LEDEffectsProcessor:
             red, green, blue = keylist_color[n]
 
             led_changed = False
-            new_color = color_update(None, n, (red, green, blue))
-            if new_color is not None:
-                red, green, blue = new_color
-                led_changed = True
+            # Hand-colored guides retain their color; finger-based notes and
+            # ordinary notes still receive the color mode's frame updates.
+            if not (use_hand_colors and external_software is not None and external_software[n] == 1):
+                new_color = color_update(None, n, (red, green, blue))
+                if new_color is not None:
+                    red, green, blue = new_color
+                    led_changed = True
 
             fading = 1
 

@@ -283,6 +283,14 @@ class MIDIEventProcessor:
         else:
             red, green, blue = (0, 0, 0)
 
+        # Keep the assigned hand color in the state used by effects as well as
+        # the immediate LED write, so Rainbow cannot replace it next frame.
+        is_external = self._is_external_software_channel(msg)
+        use_hand_color = is_external and self.ledsettings.skipped_notes != "Finger-based"
+        if use_hand_color:
+            hand_color = self.learning.hand_colorR if self._is_right_hand_channel(msg) else self.learning.hand_colorL
+            red, green, blue = map(int, self.learning.hand_colorList[hand_color])
+
         # Store the note color
         self.ledstrip.keylist_color[note_position] = (red, green, blue)
 
@@ -322,17 +330,10 @@ class MIDIEventProcessor:
             self.ledstrip.keylist[note_position] = 0  # Pulse handles lighting
 
         # Handle special channels for hand coloring (channels 11 and 12)
-        if self._is_external_software_channel(msg):
+        if is_external:
             # Mark this LED as externally controlled by external software
             self.ledstrip.keylist_external_software[note_position] = 1
-            if self.ledsettings.skipped_notes != "Finger-based":
-                # Apply right hand or left hand color
-                if self._is_right_hand_channel(msg):
-                    hand_color = self.learning.hand_colorR
-                else:
-                    hand_color = self.learning.hand_colorL
-
-                red, green, blue = map(int, self.learning.hand_colorList[hand_color])
+            if use_hand_color:
                 s_color = Color(red, green, blue)
                 self.ledstrip.strip.setPixelColor(note_position, s_color)
                 self.ledstrip.set_adjacent_colors(note_position, s_color, False)
