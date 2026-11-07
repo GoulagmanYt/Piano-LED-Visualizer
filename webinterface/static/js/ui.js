@@ -49,6 +49,7 @@ function updateChart(chartId, value) {
 }
 
 function remove_page_indicators() {
+    stop_led_power_loop();
     document.getElementById("home").classList.remove("glass-light");
     document.getElementById("ledsettings").classList.remove("glass-light");
     document.getElementById("songs").classList.remove("glass-light");
@@ -226,6 +227,103 @@ function get_homepage_data_loop() {
     xhttp.open("GET", "/api/get_homepage_data", true);
     xhttp.send();
 }
+function stop_led_power_loop() {
+    clearInterval(window.led_power_interval);
+    window.led_power_interval = null;
+    const pending = window.led_power_request;
+    window.led_power_request = null;
+    if (pending) pending.abort();
+}
+
+function toggle_led_power() {
+    const card = document.getElementById('led_power_card');
+    if (!card || !card.open) {
+        stop_led_power_loop();
+    } else if (window.led_power_interval == null) {
+        get_led_power_loop();
+        window.led_power_interval = setInterval(get_led_power_loop, 1000);
+    }
+}
+
+function show_led_power_unavailable(card) {
+    for (const id of ['led_power_current', 'led_power_watts', 'led_power_max']) {
+        card.querySelector('#' + id).textContent = '—';
+    }
+    card.querySelector('#led_power_status').textContent = translate('led_power_unavailable');
+}
+
+function get_led_power_loop() {
+    const card = document.getElementById('led_power_card');
+    if (!card || !card.open) {
+        stop_led_power_loop();
+        return;
+    }
+    if (window.led_power_request) return;
+    const xhttp = new XMLHttpRequest();
+    window.led_power_request = xhttp;
+    xhttp.timeout = 5000;
+    const isCurrent = () => window.led_power_request === xhttp &&
+        document.getElementById('led_power_card') === card && card.open;
+    const failed = () => {
+        if (!isCurrent()) return;
+        window.led_power_request = null;
+        show_led_power_unavailable(card);
+    };
+    xhttp.onerror = failed;
+    xhttp.ontimeout = failed;
+    xhttp.onreadystatechange = function () {
+        if (this.readyState !== 4 || !isCurrent()) return;
+        if (this.status !== 200) { failed(); return; }
+        let data;
+        try { data = JSON.parse(this.responseText); }
+        catch (_) { failed(); return; }
+        window.led_power_request = null;
+        if (!data || !data.available || !['led_current_a', 'led_power_w', 'led_current_max_a'].every(key => Number.isFinite(data[key]))) {
+            show_led_power_unavailable(card);
+            return;
+        }
+        card.querySelector('#led_power_current').textContent = data.led_current_a.toFixed(2) + ' A';
+        card.querySelector('#led_power_watts').textContent = data.led_power_w.toFixed(1) + ' W';
+        card.querySelector('#led_power_max').textContent = data.led_current_max_a.toFixed(2) + ' A';
+        card.querySelector('#led_power_status').textContent = '';
+        for (const key of ['led_ma_per_channel', 'led_idle_ma', 'led_supply_voltage']) {
+            const input = card.querySelector('#' + key);
+            if (input && document.activeElement !== input && !input.disabled) input.value = data[key];
+        }
+    };
+    xhttp.open('GET', '/api/get_led_power', true);
+    xhttp.send();
+}
+
+async function save_led_power_setting(input) {
+    input.setCustomValidity('');
+    const number = input.valueAsNumber;
+    const invalid = !Number.isFinite(number) || number < 0 ||
+        (input.name === 'led_supply_voltage' && number === 0);
+    if (invalid) {
+        input.setCustomValidity(translate('led_power_invalid'));
+        input.reportValidity();
+        return;
+    }
+    const card = input.closest('#led_power_card');
+    input.disabled = true;
+    try {
+        const query = new URLSearchParams({ setting_name: input.name, value: input.value });
+        const response = await fetch('/api/change_setting?' + query);
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error('Calibration rejected');
+        if (document.getElementById('led_power_card') === card) {
+            card.querySelector('#led_power_status').textContent = '';
+        }
+    } catch (_) {
+        if (document.getElementById('led_power_card') === card) {
+            card.querySelector('#led_power_status').textContent = translate('led_power_invalid');
+        }
+    } finally {
+        input.disabled = false;
+    }
+}
+
 function get_colormap_gradients() {
     const xhttp = new XMLHttpRequest();
     xhttp.onreadystatechange = function () {

@@ -44,6 +44,7 @@ import ast
 import re
 from lib.rpi_drivers import GPIO
 from lib.log_setup import logger
+from lib.led_power import POWER_DEFAULTS, estimate_led_power, parse_power_setting
 from flask import abort
 from lib.song_file_security import (
     SongFileError,
@@ -62,6 +63,22 @@ GPIO.setup(SENSECOVER, GPIO.IN, GPIO.PUD_UP)
 pid = psutil.Process(os.getpid())
 SONGS_DIR = Path("Songs").resolve()
 SHEET_MUSIC_EXTENSIONS = (".musicxml", ".xml", ".mxl", ".abc")
+
+
+@webinterface.route('/api/get_led_power', methods=['GET'])
+def get_led_power():
+    try:
+        strip = app_state.ledstrip.strip
+        pixels = strip.getPixels()
+        if len(pixels) != strip.numPixels():
+            raise ValueError('Incomplete pixel snapshot')
+        settings = {name: app_state.usersettings.get_setting_value(name) for name in POWER_DEFAULTS}
+        data = estimate_led_power(pixels, strip.getBrightness(), settings)
+    except (AttributeError, IndexError, TypeError, ValueError, OverflowError, RuntimeError, OSError):
+        data = {'available': False}
+    response = jsonify(data)
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 @webinterface.route('/api/health', methods=['GET'])
@@ -1860,6 +1877,14 @@ def change_setting():
         app_state.usersettings.change_setting_value("led_gamma", value)
         app_state.ledstrip.change_gamma(float(value))
 
+        return jsonify(success=True)
+
+    if setting_name in POWER_DEFAULTS:
+        try:
+            calibration = parse_power_setting(setting_name, value)
+        except ValueError:
+            return jsonify(success=False, error="Use a finite nonnegative number; voltage must be positive"), 400
+        app_state.usersettings.change_setting_value(setting_name, calibration)
         return jsonify(success=True)
 
     if setting_name == "hotspot_password":

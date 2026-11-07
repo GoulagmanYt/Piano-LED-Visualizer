@@ -63,6 +63,16 @@ function getLanguage() {
 
 const translations = {
     en: {
+        led_power_title: "Estimated LED power draw",
+        led_power_note: "Estimate from RGB and brightness. Excludes gamma correction, Pi consumption and wiring losses.",
+        led_power_current: "Current estimate",
+        led_power_max: "Full-white current at maximum brightness",
+        led_ma_per_channel: "mA per color channel",
+        led_idle_ma: "Idle mA per LED",
+        led_supply_voltage: "Supply voltage (V)",
+        led_power_unavailable: "Estimate unavailable",
+        led_power_invalid: "Enter a finite nonnegative number; voltage must be greater than zero.",
+        led_power_watts_label: "Power",
         input_auto: "Auto (first available)",
         input_auto_waiting: "waiting for a device",
         //index
@@ -463,6 +473,16 @@ const translations = {
 
     },
     pl: {
+        led_power_title: "Szacowany pobór mocy LED",
+        led_power_note: "Szacunek na podstawie RGB i jasności. Bez korekcji gamma, poboru mocy Pi i strat w przewodach.",
+        led_power_current: "Szacowany prąd",
+        led_power_max: "Prąd przy pełnej jasności bieli",
+        led_ma_per_channel: "mA na kanał koloru",
+        led_idle_ma: "Prąd spoczynkowy na LED (mA)",
+        led_supply_voltage: "Napięcie zasilania (V)",
+        led_power_unavailable: "Szacunek niedostępny",
+        led_power_invalid: "Wpisz skończoną liczbę nieujemną; napięcie musi być większe od zera.",
+        led_power_watts_label: "Moc",
         input_auto: "Auto (pierwsze dostępne)",
         input_auto_waiting: "oczekiwanie na urządzenie",
         //index
@@ -852,6 +872,16 @@ const translations = {
     },
 
     fr: {
+        led_power_title: "Consommation LED estimée",
+        led_power_note: "Estimation d’après les couleurs et la luminosité, hors correction gamma, consommation du Pi et pertes de câblage.",
+        led_power_current: "Courant estimé",
+        led_power_max: "Courant à pleine luminosité en blanc",
+        led_ma_per_channel: "mA par canal de couleur",
+        led_idle_ma: "mA au repos par LED",
+        led_supply_voltage: "Tension d’alimentation (V)",
+        led_power_unavailable: "Estimation indisponible",
+        led_power_invalid: "Saisissez un nombre fini positif ou nul ; la tension doit être supérieure à zéro.",
+        led_power_watts_label: "Puissance",
         input_auto: "Auto (premier disponible)",
         input_auto_waiting: "en attente d'un appareil",
         //index
@@ -1251,6 +1281,16 @@ const translations = {
     },
 
     de: {
+        led_power_title: "Geschätzter LED-Stromverbrauch",
+        led_power_note: "Schätzung aus RGB und Helligkeit. Ohne Gammakorrektur, Verbrauch des Pi und Leitungsverluste.",
+        led_power_current: "Geschätzter Strom",
+        led_power_max: "Strom bei Weiß und voller Helligkeit",
+        led_ma_per_channel: "mA pro Farbkanal",
+        led_idle_ma: "Ruhestrom pro LED (mA)",
+        led_supply_voltage: "Versorgungsspannung (V)",
+        led_power_unavailable: "Schätzung nicht verfügbar",
+        led_power_invalid: "Eine endliche, nicht negative Zahl eingeben; die Spannung muss größer als null sein.",
+        led_power_watts_label: "Leistung",
         input_auto: "Auto (erstes verfügbares Gerät)",
         input_auto_waiting: "Warten auf ein Gerät",
         //index
@@ -1640,6 +1680,16 @@ const translations = {
     },
 
     es: {
+        led_power_title: "Consumo estimado de los LED",
+        led_power_note: "Estimación según RGB y brillo. Excluye la corrección gamma, el consumo del Pi y las pérdidas del cableado.",
+        led_power_current: "Corriente estimada",
+        led_power_max: "Corriente en blanco al brillo máximo",
+        led_ma_per_channel: "mA por canal de color",
+        led_idle_ma: "mA en reposo por LED",
+        led_supply_voltage: "Tensión de alimentación (V)",
+        led_power_unavailable: "Estimación no disponible",
+        led_power_invalid: "Introduce un número finito no negativo; la tensión debe ser mayor que cero.",
+        led_power_watts_label: "Potencia",
         input_auto: "Auto (primer dispositivo disponible)",
         input_auto_waiting: "esperando un dispositivo",
 
@@ -2029,6 +2079,16 @@ const translations = {
     },
 
     zh: {
+        led_power_title: "LED 功耗估算",
+        led_power_note: "根据 RGB 和亮度估算，不含伽马校正、Pi 功耗及线路损耗。",
+        led_power_current: "估算电流",
+        led_power_max: "最高亮度全白电流",
+        led_ma_per_channel: "每个颜色通道电流 (mA)",
+        led_idle_ma: "每颗 LED 待机电流 (mA)",
+        led_supply_voltage: "供电电压 (V)",
+        led_power_unavailable: "估算不可用",
+        led_power_invalid: "请输入有限的非负数；电压必须大于零。",
+        led_power_watts_label: "功率",
         input_auto: "自动（首个可用设备）",
         input_auto_waiting: "等待设备连接",
         //index
@@ -2418,6 +2478,16 @@ const translations = {
     },
 
     hi: {
+        led_power_title: "अनुमानित LED बिजली खपत",
+        led_power_note: "RGB और चमक पर आधारित अनुमान। गामा सुधार, Pi की खपत और तारों के नुकसान शामिल नहीं हैं।",
+        led_power_current: "अनुमानित विद्युत धारा",
+        led_power_max: "पूरी चमक पर सफेद रंग की धारा",
+        led_ma_per_channel: "प्रति रंग चैनल mA",
+        led_idle_ma: "प्रति LED निष्क्रिय धारा (mA)",
+        led_supply_voltage: "आपूर्ति वोल्टेज (V)",
+        led_power_unavailable: "अनुमान उपलब्ध नहीं है",
+        led_power_invalid: "सीमित गैर-ऋणात्मक संख्या दर्ज करें; वोल्टेज शून्य से अधिक होना चाहिए।",
+        led_power_watts_label: "विद्युत शक्ति",
         input_auto: "ऑटो (पहला उपलब्ध उपकरण)",
         input_auto_waiting: "उपकरण की प्रतीक्षा में",
         //index
@@ -2807,6 +2877,16 @@ const translations = {
     },
 
     pt: {
+        led_power_title: "Consumo estimado dos LEDs",
+        led_power_note: "Estimativa baseada em RGB e brilho. Exclui correção gama, consumo do Pi e perdas na cablagem.",
+        led_power_current: "Corrente estimada",
+        led_power_max: "Corrente em branco com brilho máximo",
+        led_ma_per_channel: "mA por canal de cor",
+        led_idle_ma: "mA em repouso por LED",
+        led_supply_voltage: "Tensão de alimentação (V)",
+        led_power_unavailable: "Estimativa indisponível",
+        led_power_invalid: "Introduza um número finito não negativo; a tensão deve ser superior a zero.",
+        led_power_watts_label: "Potência",
         input_auto: "Auto (primeiro dispositivo disponível)",
         input_auto_waiting: "à espera de um dispositivo",
         //index
@@ -3197,6 +3277,16 @@ const translations = {
     },
 
     ja: {
+        led_power_title: "LED消費電力の推定",
+        led_power_note: "RGBと明るさから推定します。ガンマ補正、Piの消費電力、配線損失は含みません。",
+        led_power_current: "推定電流",
+        led_power_max: "最大輝度の白色時の電流",
+        led_ma_per_channel: "色チャンネルごとの電流 (mA)",
+        led_idle_ma: "LEDごとの待機電流 (mA)",
+        led_supply_voltage: "電源電圧 (V)",
+        led_power_unavailable: "推定できません",
+        led_power_invalid: "有限の非負数を入力してください。電圧はゼロより大きい必要があります。",
+        led_power_watts_label: "電力",
         input_auto: "自動（最初の利用可能なデバイス）",
         input_auto_waiting: "デバイスの接続待ち",
         //index
@@ -3587,6 +3677,16 @@ const translations = {
     },
 
     ko: {
+        led_power_title: "예상 LED 소비 전력",
+        led_power_note: "RGB와 밝기를 기준으로 추정합니다. 감마 보정, Pi 소비 전력 및 배선 손실은 제외합니다.",
+        led_power_current: "예상 전류",
+        led_power_max: "최대 밝기 흰색에서의 전류",
+        led_ma_per_channel: "색상 채널당 전류 (mA)",
+        led_idle_ma: "LED당 대기 전류 (mA)",
+        led_supply_voltage: "공급 전압 (V)",
+        led_power_unavailable: "추정값을 사용할 수 없습니다",
+        led_power_invalid: "유한한 음이 아닌 수를 입력하세요. 전압은 0보다 커야 합니다.",
+        led_power_watts_label: "전력",
         input_auto: "자동 (첫 번째 사용 가능한 장치)",
         input_auto_waiting: "장치 연결 대기 중",
     //index
@@ -3974,6 +4074,16 @@ const translations = {
         
 },
 he: {
+        led_power_title: "צריכת חשמל משוערת של נורות LED",
+        led_power_note: "הערכה לפי RGB ובהירות. אינה כוללת תיקון גמא, צריכת Pi ואובדן בחיווט.",
+        led_power_current: "זרם משוער",
+        led_power_max: "זרם בלבן בבהירות מרבית",
+        led_ma_per_channel: "מיליאמפר לערוץ צבע",
+        led_idle_ma: "זרם מנוחה לכל LED במיליאמפר",
+        led_supply_voltage: "מתח אספקה (V)",
+        led_power_unavailable: "ההערכה אינה זמינה",
+        led_power_invalid: "יש להזין מספר סופי שאינו שלילי; המתח חייב להיות גדול מאפס.",
+        led_power_watts_label: "הספק",
     input_auto: "אוטומטי (המכשיר הזמין הראשון)",
     input_auto_waiting: "ממתין למכשיר",
     //index
@@ -4364,6 +4474,16 @@ he: {
     
 },
 ar:{
+        led_power_title: "استهلاك طاقة LED التقديري",
+        led_power_note: "تقدير حسب RGB والسطوع. لا يشمل تصحيح غاما أو استهلاك Pi أو فقد الأسلاك.",
+        led_power_current: "التيار التقديري",
+        led_power_max: "التيار باللون الأبيض بأقصى سطوع",
+        led_ma_per_channel: "مللي أمبير لكل قناة لونية",
+        led_idle_ma: "تيار الخمول لكل LED بالمللي أمبير",
+        led_supply_voltage: "جهد التغذية (V)",
+        led_power_unavailable: "التقدير غير متاح",
+        led_power_invalid: "أدخل رقمًا محدودًا غير سالب؛ يجب أن يكون الجهد أكبر من الصفر.",
+        led_power_watts_label: "القدرة",
     input_auto: "تلقائي (أول جهاز متاح)",
     input_auto_waiting: "في انتظار جهاز",
     //index

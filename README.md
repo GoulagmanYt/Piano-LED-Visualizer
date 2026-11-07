@@ -16,6 +16,7 @@ This fork of [onlaj/Piano-LED-Visualizer](https://github.com/onlaj/Piano-LED-Vis
 - USB MIDI input with an Auto mode that keeps the current device connected and waits when no device is available.
 - RTP-MIDI routing through rtpmidid, with peer selection and connection diagnostics in the web interface.
 - Browser controls available in 12 languages, plus an optional Waveshare LCD menu.
+- LED current and power estimates with calibration for your strip, under LED Settings.
 - Updates with configuration backups, service health checks and rollback on failure.
 
 The [feature guide](Docs/features.md) covers the color modes, song controls and animations.

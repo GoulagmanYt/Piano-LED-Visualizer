@@ -1,0 +1,43 @@
+<details id="led_power_card" class="glass shadow-glass-lg rounded-glass mb-6 m-1"
+    ontoggle="toggle_led_power()">
+    <summary class="p-3 cursor-pointer font-semibold text-sm" data-translate="led_power_title">
+        Estimated LED power draw
+    </summary>
+    <div class="p-3 pt-0 space-y-3">
+        <div class="flex flex-wrap gap-6">
+            <div>
+                <span class="text-sm" data-translate="led_power_current">Current estimate</span>
+                <div class="text-xl font-semibold" id="led_power_current">—</div>
+            </div>
+            <div>
+                <span class="text-sm" data-translate="led_power_watts_label">Power</span>
+                <div class="text-xl font-semibold" id="led_power_watts">—</div>
+            </div>
+            <div>
+                <span class="text-sm" data-translate="led_power_max">Full-white current at maximum brightness</span>
+                <div class="text-xl font-semibold" id="led_power_max">—</div>
+            </div>
+        </div>
+        <p class="text-sm" data-translate="led_power_note">
+            Estimate from RGB and brightness. Excludes gamma correction, Pi consumption and wiring losses.
+        </p>
+        <div class="flex flex-wrap gap-4">
+            <label class="text-sm">
+                <span class="block mb-1" data-translate="led_ma_per_channel">mA per color channel</span>
+                <input id="led_ma_per_channel" name="led_ma_per_channel" type="number" min="0" step="any"
+                    class="h-10 w-24 glass-light rounded-glass px-3" onchange="save_led_power_setting(this)">
+            </label>
+            <label class="text-sm">
+                <span class="block mb-1" data-translate="led_idle_ma">Idle mA per LED</span>
+                <input id="led_idle_ma" name="led_idle_ma" type="number" min="0" step="any"
+                    class="h-10 w-24 glass-light rounded-glass px-3" onchange="save_led_power_setting(this)">
+            </label>
+            <label class="text-sm">
+                <span class="block mb-1" data-translate="led_supply_voltage">Supply voltage (V)</span>
+                <input id="led_supply_voltage" name="led_supply_voltage" type="number" min="0" step="any"
+                    class="h-10 w-24 glass-light rounded-glass px-3" onchange="save_led_power_setting(this)">
+            </label>
+        </div>
+        <p id="led_power_status" role="status" class="text-sm"></p>
+    </div>
+</details>
