@@ -310,12 +310,27 @@ class MIDIEventProcessor:
         return False
 
     @staticmethod
-    def _is_external_software_channel(msg):
-        return getattr(msg, "channel", None) in (11, 12, "11", "12")
+    def _is_external_software_channel(msg, is_guide=False):
+        if is_guide:
+            channel = getattr(msg, "channel", msg)
+            try:
+                channel = int(channel)
+            except (TypeError, ValueError):
+                return False
+            return is_guide_channel(channel)
+        channel = getattr(msg, "channel", None)
+        return channel in (11, 12, "11", "12")
 
     @staticmethod
-    def _is_right_hand_channel(msg):
-        return getattr(msg, "channel", None) in (12, "12")
+    def _is_right_hand_channel(msg, is_guide=False):
+        channel = getattr(msg, "channel", msg)
+        try:
+            channel = int(channel)
+        except (TypeError, ValueError):
+            return False
+        if is_guide:
+            return is_right_hand(channel)
+        return channel in (12, "12")
     
     def handle_note_off(self, msg, msg_timestamp, note_position, record=True):
         """
@@ -332,8 +347,9 @@ class MIDIEventProcessor:
         # Allow local piano input to also turn off LEDs even if they were lit by external software
         # This is essential for learning mode where Synthesia lights the LED (channels 11/12)
         # but the user's piano (channel 0) should be able to turn it off
+        channel = getattr(msg, "channel", None)
         if self.ledstrip.keylist_external_software[note_position] == 1:
-            if self._is_external_software_channel(msg):
+            if self._is_external_software_channel(msg) or channel in (0, "0"):
                 # External software is turning off the LED - clear tracking
                 self.ledstrip.keylist_external_software[note_position] = 0
         
@@ -419,10 +435,10 @@ class MIDIEventProcessor:
         # Keep the assigned hand color in the state used by effects as well as
         # the immediate LED write, so Rainbow cannot replace it next frame.
         channel = getattr(msg, "channel", None)
-        is_external = self._is_external_software_channel(msg) or (is_guide and is_guide_channel(channel))
+        is_external = self._is_external_software_channel(msg, is_guide=is_guide)
         use_hand_color = is_external and self.ledsettings.skipped_notes != "Finger-based"
         if use_hand_color:
-            right_hand = is_right_hand(channel) if is_guide else self._is_right_hand_channel(msg)
+            right_hand = self._is_right_hand_channel(msg, is_guide=is_guide)
             hand_color = self.learning.hand_colorR if right_hand else self.learning.hand_colorL
             red, green, blue = map(int, self.learning.hand_colorList[hand_color])
 
