@@ -275,6 +275,7 @@ class PlatformRasp(PlatformBase):
                 'ipv4.method', 'shared',
                 'ipv6.method', 'ignore',
                 'wifi-sec.key-mgmt', 'wpa-psk',
+                '802-11-wireless-security.pmf', '1',
                 'wifi-sec.psk', password
             ], check=True)
             logger.info("Hotspot profile is configured.")
@@ -414,31 +415,50 @@ class PlatformRasp(PlatformBase):
         # Disable the hotspot first
         self.disable_hotspot()
 
+        # Use a project-owned name so similarly named SSIDs or existing system
+        # profiles (including Hotspot) cannot overwrite one another.
+        import hashlib
+        password = password or ""
+        digest = hashlib.sha256(ssid.encode("utf-8")).hexdigest()[:24]
+        con_name = "PLV-" + digest + ("-wpa" if password else "-open")
         try:
-            result = subprocess.run(
-                ['sudo', 'nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
-                capture_output=True,
-                text=True,
-                timeout=30  # Set a timeout for the connection attempt
+            existing = subprocess.run(
+                ['sudo', 'nmcli', 'connection', 'show', con_name],
+                capture_output=True, text=True, check=False,
             )
-            # Check if the connection was successful
+            if existing.returncode != 0:
+                command = [
+                    'sudo', 'nmcli', 'connection', 'add', 'type', 'wifi',
+                    'ifname', self.HOTSPOT_IFACE, 'con-name', con_name,
+                    'ssid', ssid, 'connection.autoconnect', 'yes',
+                ]
+                if password:
+                    command += ['wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password]
+                subprocess.run(command, check=True, capture_output=True, text=True)
+            elif password:
+                subprocess.run([
+                    'sudo', 'nmcli', 'connection', 'modify', con_name,
+                    'wifi-sec.key-mgmt', 'wpa-psk', 'wifi-sec.psk', password,
+                ], check=True, capture_output=True, text=True)
+
+            result = subprocess.run(
+                ['sudo', 'nmcli', 'connection', 'up', con_name],
+                capture_output=True, text=True, timeout=45,
+            )
             if result.returncode == 0:
-                logger.info(f"Successfully connected to {ssid}")
+                logger.info("Successfully connected to Wi-Fi")
                 usersettings.change_setting_value("is_hotspot_active", 0)
                 return True
-            else:
-                logger.warning(f"Failed to connect to {ssid}. Error: {result.stderr}")
-                usersettings.change_setting_value("is_hotspot_active", 1)
-                self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
-
+            logger.warning("Failed to activate Wi-Fi profile")
         except subprocess.TimeoutExpired:
-            logger.warning(f"Connection attempt to {ssid} timed out")
-            usersettings.change_setting_value("is_hotspot_active", 1)
-            self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
-        except Exception as e:
-            logger.warning(f"An error occurred while connecting to {ssid}: {str(e)}")
-            usersettings.change_setting_value("is_hotspot_active", 1)
-            self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
+            logger.warning("Wi-Fi connection attempt timed out")
+        except Exception:
+            # CalledProcessError contains the full command, including the PSK.
+            logger.warning("Failed to configure or activate Wi-Fi profile")
+
+        usersettings.change_setting_value("is_hotspot_active", 1)
+        self.enable_hotspot(self._get_hotspot_password(usersettings), force=True)
+        return False
 
     def disconnect_from_wifi(self, hotspot, usersettings):
         logger.info("Disconnecting from wifi")

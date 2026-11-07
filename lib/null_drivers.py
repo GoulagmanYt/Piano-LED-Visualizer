@@ -21,10 +21,8 @@ class GPIOnull():
         pass
 
     def input(self, pin):
-        if pin == 12: # SENSECOVER
-            return 1
-        else:
-            return 0
+        # Inputs on the HAT use pull-ups; an absent switch is not pressed.
+        return 1
 
 class SPInull():
     def __getattr__(self, name):
