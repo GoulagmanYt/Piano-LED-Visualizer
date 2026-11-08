@@ -101,7 +101,7 @@ class MidiPorts:
             self.learning_bridge = LearningBridge(
                 self.queues, usersettings,
                 practice_active=lambda: bool(getattr(getattr(self, 'practice_state', None), 'practice_active', False)),
-                activity=lambda: setattr(self, 'last_activity', time.time()),
+                activity=lambda: (setattr(self, 'last_activity', time.time()), self.queues.activity.set()),
             )
         self.queues.set_forwarding_enabled(False)
         self._output_lock = threading.RLock()
@@ -209,7 +209,20 @@ class MidiPorts:
             return 0.0
         return max(0.0, (now_perf - timestamp) * 1000.0)
 
+    def has_Listeners_or_active_burst(self):
+        """Return True if RTP forwarding or input queues have active traffic in flight."""
+        queues = getattr(self, "queues", None)
+        if queues is None:
+            return bool(getattr(self, "live_forward_queue", None) or getattr(self, "midi_queue", None))
+        return bool(
+            getattr(queues, "live_forward_queue", None)
+            or getattr(queues, "live_visualizer_queue", None)
+            or getattr(queues, "guide_queue", None)
+            or getattr(queues, "learning_piano_queue", None)
+        )
+
     def refresh_queue_diagnostics(self, now_perf=None, force=False):
+        self._sync_queue_drop_counters()
         diagnostics = self._ensure_runtime_diagnostics()
         if now_perf is None:
             now_perf = time.perf_counter()
@@ -1074,7 +1087,7 @@ class MidiPorts:
                     practice_active=lambda: bool(
                         getattr(getattr(self, "learning", None), "is_started_midi", False)
                     ),
-                    activity=self.queues.activity.set,
+                    activity=lambda: (setattr(self, "last_activity", time.time()), self.queues.activity.set()),
                 )
             else:
                 self.learning_bridge._closed = False
@@ -1281,10 +1294,6 @@ class MidiPorts:
             getattr(getattr(self, 'practice_state', None), 'practice_active', False))
         if hasattr(self, "queues"):
             wake_forward = self.queues.enqueue_all_live(msg, timestamp=ts, source="rtp_rx", is_note=publish_note)
-            self._sync_queue_drop_counters()
-            # A nonempty backlog is already being handled (or rechecked by
-            # the worker under its condition). Only the empty -> first item
-            # transition needs a notification; avoid callback lock convoys.
             if wake_forward:
                 self._notify_forward_worker()
         else:

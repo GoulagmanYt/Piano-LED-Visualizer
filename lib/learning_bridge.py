@@ -341,7 +341,6 @@ class LearningBridge:
         def receive(msg):
             try:
                 timestamp = time.perf_counter()
-                self._activity()
                 if source == 'piano':
                     if session.route_piano(msg, timestamp):
                         self.queues.enqueue_learning_piano(msg, timestamp)
@@ -350,6 +349,8 @@ class LearningBridge:
                             self.queues.enqueue_websocket_publish(msg, timestamp)
                 else:
                     session.route_computer(msg, timestamp)
+                # Signal main loop AFTER message is placed in queues
+                self._activity()
             except Exception:
                 logger.exception('Learning MIDI callback failed')
                 self._fault.set()

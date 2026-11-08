@@ -39,6 +39,16 @@ class MIDIEventProcessor:
         # Time tracking for sequence advancement to prevent rapid triggering
         self.last_sequence_advance = 0
 
+    def has_pending_events(self):
+        """Return True if any active MIDI queue still holds unprocessed events."""
+        if getattr(self.midiports, "midipending", None):
+            return True
+        queues = getattr(self.midiports, "queues", None)
+        if queues is not None:
+            if getattr(queues, "guide_queue", None) or getattr(queues, "learning_piano_queue", None):
+                return True
+        return False
+
     def process_midi_events(self):
         """
         Main method to process pending MIDI events from the queue.
@@ -130,7 +140,7 @@ class MIDIEventProcessor:
         diagnostics.set_gauge("midi_queue_depth_before", queue_depth)
         is_active_use = bool(self.state_manager and self.state_manager.is_active_use())
         max_messages = 1536 if is_active_use else 512
-        max_duration = 0.003
+        max_duration = 0.0025  # Tight 2.5ms slice to bound latency spikes
 
         if queue_depth > 768:
             max_messages = min(max(max_messages, queue_depth * 2), 8192)

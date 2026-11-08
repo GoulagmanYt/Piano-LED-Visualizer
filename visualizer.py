@@ -132,14 +132,22 @@ class VisualizerApp:
 
         original_show = strip.show
         diagnostics = self.runtime_diagnostics
+        show_lock = threading.RLock()
+        self._strip_show_lock = show_lock
+        self._last_strip_show_end = 0.0
+        self._min_dma_frame_interval = 0.0045  # 4.5ms DMA busy window guard (~220 FPS ceiling)
+        self._led_frame_dirty = False
 
         def instrumented_show(*args, **kwargs):
-            show_started = time.perf_counter()
-            try:
-                return original_show(*args, **kwargs)
-            finally:
-                diagnostics.increment_counter("strip_show_calls")
-                diagnostics.record_duration("strip_show", time.perf_counter() - show_started)
+            with show_lock:
+                show_started = time.perf_counter()
+                try:
+                    return original_show(*args, **kwargs)
+                finally:
+                    now_done = time.perf_counter()
+                    self._last_strip_show_end = now_done
+                    diagnostics.increment_counter("strip_show_calls")
+                    diagnostics.record_duration("strip_show", now_done - show_started)
 
         instrumented_show._plv_runtime_wrapped = True
         strip.show = instrumented_show
@@ -247,23 +255,20 @@ class VisualizerApp:
     def run(self):
         ci = self.ci
         platform = ci.platform
-        self._housekeeping_thread = threading.Thread(target=self._housekeeping_loop, name="housekeeping", daemon=True)
+        self._housekeeping_thread = threading.Thread(
+            target=self._housekeeping_loop, name="housekeeping", daemon=True
+        )
         self._housekeeping_thread.start()
         ci.ledstrip.strip.diagnostics = self.runtime_diagnostics
         activity = ci.midiports.queues.activity
+        min_dma_interval = getattr(self, "_min_dma_frame_interval", 0.0045)
+
         while not self.stop_event.is_set():
-            # Consume the wakeup before its work. Arrivals during this slice
-            # keep the event set and interrupt the following frame delay.
+            # Consume wakeup before draining queues so arrivals during this slice re-arm the event.
             activity.clear()
-            ci.ledstrip.strip.check_health()
-            if self.state_manager.is_active_use():
-                ci.menu.is_idle_animation_running = False
             loop_start = time.perf_counter()
-            try:
-                elapsed_time = loop_start - ci.saving.start_time
-            except Exception as e:
-                logger.warning(f"[elapsed time calculation] Unexpected exception occurred: {e}")
-                elapsed_time = 0
+            event_loop_time = loop_start - self.event_loop_stamp
+            self.event_loop_stamp = loop_start
 
             menu = ci.menu
             ledstrip = ci.ledstrip
@@ -271,15 +276,38 @@ class VisualizerApp:
             midiports = ci.midiports
             usersettings = ci.usersettings
             hotspot = ci.hotspot
-            now_wall = time.time()
 
-            # Update system state (syncs with midiports and menu activity)
+            # 1. PRIORITY 1: Drain incoming MIDI events immediately upon wakeup
+            midi_started = time.perf_counter()
+            midi_processed = self.midi_event_processor.process_midi_events()
+            self.runtime_diagnostics.record_duration(
+                "process_midi_events", time.perf_counter() - midi_started
+            )
+
+            # Immediately propagate sustain pedal changes (CC64) to effects processor in the same frame
+            self.led_effects_processor.last_sustain = self.midi_event_processor.last_sustain
+
+            # 2. PRIORITY 2: Process fade & sustain effects
+            fade_started = time.perf_counter()
+            fade_processed = self.led_effects_processor.process_fade_effects(event_loop_time)
+            self.runtime_diagnostics.record_duration(
+                "process_fade_effects", time.perf_counter() - fade_started
+            )
+
+            # 3. State & housekeeping checks
+            ci.ledstrip.strip.check_health()
+            now_wall = time.time()
             self.state_manager.update_state(midiports, menu, now_wall)
-            self.runtime_diagnostics.set_metadata("system_state", self.state_manager.current_state.value)
-            
-            # Get dynamic sleep interval based on current state
+            if self.state_manager.is_active_use():
+                menu.is_idle_animation_running = False
+            self.runtime_diagnostics.set_metadata(
+                "system_state", self.state_manager.current_state.value
+            )
+
             sleep_interval = self.state_manager.get_loop_delay()
-            self.runtime_diagnostics.set_gauge("requested_loop_sleep_ms", round(sleep_interval * 1000.0, 4))
+            self.runtime_diagnostics.set_gauge(
+                "requested_loop_sleep_ms", round(sleep_interval * 1000.0, 4)
+            )
 
             self.check_activity_backlight(ledstrip, ledsettings, midiports, now_wall)
             self.check_color_mode(ledsettings)
@@ -288,45 +316,47 @@ class VisualizerApp:
                 live_active=not (ci.learning.is_started_midi or ci.saving.is_playing_midi),
             )
 
-            event_loop_time = loop_start - self.event_loop_stamp
-            self.event_loop_stamp = loop_start
+            # 4. Non-blocking DMA Frame Pacing: coalesce burst notes while previous DMA transfer completes
+            if fade_processed or midi_processed:
+                self._led_frame_dirty = True
 
-            # Sync sustain pedal state between processors
-            self.led_effects_processor.last_sustain = self.midi_event_processor.last_sustain
+            self.runtime_diagnostics.set_gauge(
+                "led_update_requested", int(bool(self._led_frame_dirty))
+            )
 
-            midiports.refresh_queue_diagnostics(now_perf=loop_start)
-            fade_started = time.perf_counter()
-            fade_processed = self.led_effects_processor.process_fade_effects(event_loop_time)
-            self.runtime_diagnostics.record_duration("process_fade_effects", time.perf_counter() - fade_started)
-            midi_started = time.perf_counter()
-            midi_processed = self.midi_event_processor.process_midi_events()
-            self.runtime_diagnostics.record_duration("process_midi_events", time.perf_counter() - midi_started)
-
-            # Only update LEDs if effects changed them or MIDI events occurred
-            should_update = fade_processed or midi_processed
-            self.runtime_diagnostics.set_gauge("led_update_requested", int(bool(should_update)))
-            
-            if should_update:
-                ledstrip.strip.show()
-                self.update_fps_stats()
+            dma_wait_remaining = 0.0
+            if self._led_frame_dirty:
+                now_before_show = time.perf_counter()
+                elapsed_since_last_show = now_before_show - getattr(self, "_last_strip_show_end", 0.0)
+                if elapsed_since_last_show >= min_dma_interval or not midiports.has_Listeners_or_active_burst():
+                    ledstrip.strip.show()
+                    self._led_frame_dirty = False
+                    self.update_fps_stats()
+                else:
+                    # Previous hardware DMA transfer is still in flight; yield GIL to MIDI/RTP threads
+                    dma_wait_remaining = min_dma_interval - elapsed_since_last_show
             else:
-                # Clear FPS after short inactivity so UI doesn't show stale values
                 now_perf = time.perf_counter()
                 if (now_perf - self.last_frame_time) > 1.0:
                     ledstrip.current_fps = 0.0
-            midiports.refresh_queue_diagnostics()
-            self.runtime_diagnostics.record_duration("main_loop", time.perf_counter() - loop_start)
-            if midiports.midipending:
-                # A bounded processing slice may leave a chord/backlog. Drain
-                # it on the next frame without adding an artificial sleep.
+
+            midiports.refresh_queue_diagnostics(now_perf=time.perf_counter())
+            self.runtime_diagnostics.record_duration(
+                "main_loop", time.perf_counter() - loop_start
+            )
+
+            # Drain any remaining backlog immediately without sleeping
+            has_pending = getattr(self.midi_event_processor, 'has_pending_events', None)
+            if (has_pending() if callable(has_pending) else bool(getattr(midiports, 'midipending', None))):
                 continue
-            if should_update:
+
+            if dma_wait_remaining > 0.0:
+                activity.wait(dma_wait_remaining)
+            elif fade_processed or midi_processed:
                 activity.wait(sleep_interval)
             else:
-                # Quiescent idle wait: unblocks immediately (<50us) via activity.set() on MIDI,
-                # or times out after 25ms without spinning CPU cores.
+                # Quiescent idle wait: unblocks immediately (<50us) via activity.set() on MIDI
                 activity.wait(0.025)
-
     def update_fps_stats(self):
         now = time.perf_counter()
 
