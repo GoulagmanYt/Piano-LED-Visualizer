@@ -144,7 +144,7 @@ class MIDIEventProcessor:
         max_messages = 512 if is_active_use else 256
 
         while processed < max_messages:
-            if (processed & 0x07) == 0 and (time.perf_counter() - t0) >= max_duration:
+            if processed > 0 and (time.perf_counter() - t0) >= max_duration:
                 break
             if queues is not None:
                 batch = queues.drain_queue(
@@ -167,8 +167,6 @@ class MIDIEventProcessor:
                 diagnostics.record_duration("midi_receive_to_process", time.perf_counter() - msg_timestamp)
                 _process_one(msg, msg_timestamp)
                 processed += 1
-                if (processed & 0x07) == 0 and (time.perf_counter() - t0) >= max_duration:
-                    break
         diagnostics.increment_counter("midi_events_processed_total", processed)
         diagnostics.set_gauge("midi_events_processed_last", processed)
         if queues is not None:
