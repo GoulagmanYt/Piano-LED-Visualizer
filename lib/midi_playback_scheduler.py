@@ -71,21 +71,22 @@ class MidiPlaybackScheduler:
 
     def play(self, song_path):
         with self._lock:
-            if self.state in (PlaybackState.RUNNING, PlaybackState.STOPPING):
-                if self.menu is not None:
-                    self.menu.render_message(song_path, "Already playing", 2000)
-                return False
-            self.state = PlaybackState.RUNNING
-            self.current_song = song_path
-            self.stop_event.clear()
-            self.saving.is_playing_midi.clear()
-            self.saving.is_playing_midi[song_path] = True
-            self.playback_mode = "reliable"
-            self.last_error = None
-            logger.info("midi_playback transition=running song=%s", song_path)
+            already_active = self.state in (PlaybackState.RUNNING, PlaybackState.STOPPING)
+            if not already_active:
+                self.state = PlaybackState.RUNNING
+                self.current_song = song_path
+                self.stop_event.clear()
+                self.saving.is_playing_midi.clear()
+                self.saving.is_playing_midi[song_path] = True
+                self.playback_mode = "reliable"
+                self.last_error = None
+                logger.info("midi_playback transition=running song=%s", song_path)
 
-        if self.menu is not None:
-            self.menu.render_message("Playing: ", song_path, 2000)
+        if already_active:
+            self._show_message(song_path, "Already playing")
+            return False
+
+        self._show_message("Playing: ", song_path)
         if self.ledstrip is not None and self.ledsettings is not None:
             fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
 
@@ -95,13 +96,11 @@ class MidiPlaybackScheduler:
             return self._play_reliable(song_path, compiled)
         except FileNotFoundError:
             self.state = PlaybackState.ERROR
-            if self.menu is not None:
-                self.menu.render_message(song_path, "File not found", 2000)
+            self._show_message(song_path, "File not found")
             return False
         except Exception as e:
             self.state = PlaybackState.ERROR
-            if self.menu is not None:
-                self.menu.render_message(song_path, "Error while playing song " + str(e), 2000)
+            self._show_message(song_path, "Error while playing song " + str(e))
             logger.warning(e)
             return False
         finally:
@@ -137,8 +136,7 @@ class MidiPlaybackScheduler:
                     return False
                 self.playback_mode = "native_rtp_fallback"
                 self.last_error = str(e)
-            if self.menu is not None:
-                self.menu.render_message(song_path, "Using RTP fallback", 2000)
+            self._show_message(song_path, "Using RTP fallback")
             logger.info("midi_playback fallback=native_rtp song=%s", song_path)
             return self._play_native_rtp_events(song_path, compiled)
 
@@ -268,6 +266,24 @@ class MidiPlaybackScheduler:
                 if self.midiports.should_process_locally(message):
                     self._enqueue_file_message(message.copy(time=0), due_time)
                 index += 1
+
+    def _show_message(self, title, message, duration_ms=2000):
+        """Show an LCD notice without ever blocking playback, stop() or cleanup.
+
+        MenuLCD.render_message() sleeps for `duration_ms` while holding the LCD
+        lock, so it must never run on the playback path or under self._lock.
+        """
+        menu = self.menu
+        if menu is None:
+            return
+
+        def _render():
+            try:
+                menu.render_message(title, message, duration_ms)
+            except Exception as e:
+                logger.debug(f"LCD notice failed: {e}")
+
+        threading.Thread(target=_render, name="playback-notice", daemon=True).start()
 
     def _usersettings(self):
         return getattr(self.midiports, "usersettings", None)
