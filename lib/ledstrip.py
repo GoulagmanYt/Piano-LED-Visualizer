@@ -5,6 +5,53 @@ from lib.LED_drivers import PixelStrip_Emu
 from lib.async_strip import AsyncPixelStrip, dma_waiter
 from lib.log_setup import logger
 
+class ActiveIndexList(list):
+    """List subclass that tracks indices with positive (> 0) values in O(1) time.
+
+    Reads (`lst[i]`) run at native C list speed; writes (`lst[i] = v`) update
+    `active_indices` automatically so callers and tests mutating elements by index
+    never desynchronize the active set.
+    """
+    __slots__ = ("active_indices",)
+
+    def __init__(self, iterable=()):
+        super().__init__(iterable)
+        self.active_indices = {i for i, val in enumerate(self) if val and val > 0}
+
+    def _rebuild_active_indices(self):
+        self.active_indices = {i for i, val in enumerate(self) if val and val > 0}
+
+    def __setitem__(self, index, value):
+        super().__setitem__(index, value)
+        if isinstance(index, int):
+            if index < 0:
+                index += len(self)
+            if value and value > 0:
+                self.active_indices.add(index)
+            else:
+                self.active_indices.discard(index)
+        else:
+            self._rebuild_active_indices()
+
+    def clear(self):
+        super().clear()
+        self.active_indices.clear()
+
+    def append(self, value):
+        idx = len(self)
+        super().append(value)
+        if value and value > 0:
+            self.active_indices.add(idx)
+
+    def extend(self, iterable):
+        start = len(self)
+        super().extend(iterable)
+        for i in range(start, len(self)):
+            val = self[i]
+            if val and val > 0:
+                self.active_indices.add(i)
+
+
 class LedStrip:
     def __init__(self, usersettings, ledsettings, driver="rpi_ws281x"):
         self.usersettings = usersettings
@@ -54,10 +101,10 @@ class LedStrip:
         old_strip = getattr(self, "strip", None)
         if isinstance(old_strip, AsyncPixelStrip):
             old_strip.close()
-        self.keylist = [0] * self.led_number
+        self.keylist = ActiveIndexList(0 for _ in range(self.led_number))
         self.keylist_status = [0] * self.led_number
         self.keylist_color = [(0, 0, 0)] * self.led_number
-        self.keylist_sustained = [0] * self.led_number  # Track notes sustained by pedal
+        self.keylist_sustained = ActiveIndexList(0 for _ in range(self.led_number))  # Track notes sustained by pedal
         self.keylist_external_software = [0] * self.led_number  # Track LEDs lit by external software (channels 11/12)
         self.keylist_guide = [0] * self.led_number  # Explicit Learning-mode guide lights
         self.active_pulses = [] # For Pulse mode

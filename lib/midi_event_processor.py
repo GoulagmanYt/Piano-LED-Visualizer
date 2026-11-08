@@ -539,16 +539,28 @@ class MIDIEventProcessor:
             
             # Handle sustain pedal release - clear all sustained notes
             pedal_deadzone = 10  # Standard MIDI deadzone for sustain pedal
-            if value < pedal_deadzone and self.ledsettings.mode in ["Velocity", "Pedal"]:
+            if value < pedal_deadzone and self.ledsettings.mode in ("Velocity", "Pedal"):
+                keylist_sustained = self.ledstrip.keylist_sustained
+                sustained_indices_set = getattr(keylist_sustained, "active_indices", None)
+                if sustained_indices_set is not None:
+                    if not sustained_indices_set:
+                        return
+                    sustained_indices = tuple(sustained_indices_set)
+                else:
+                    sustained_indices = tuple(
+                        i for i, sustained in enumerate(keylist_sustained) if sustained == 1
+                    )
+                    if not sustained_indices:
+                        return
+
                 idle_color, use_backlight = self._resolve_idle_color()
-                for i, sustained in enumerate(self.ledstrip.keylist_sustained):
-                    if sustained == 1:
-                        # Clear sustained status
-                        self.ledstrip.keylist_sustained[i] = 0
-                        # If key is not currently pressed, turn it off
-                        if self.ledstrip.keylist_status[i] == 0:
-                            self.ledstrip.keylist[i] = 0  # Turn off immediately
-                            self._apply_idle_color(i, idle_color, use_backlight)
+                keylist_status = self.ledstrip.keylist_status
+                keylist = self.ledstrip.keylist
+                for i in sustained_indices:
+                    keylist_sustained[i] = 0
+                    if keylist_status[i] == 0:
+                        keylist[i] = 0
+                        self._apply_idle_color(i, idle_color, use_backlight)
 
         current_time = time.time()
         # Handle sequence advancement based on control values

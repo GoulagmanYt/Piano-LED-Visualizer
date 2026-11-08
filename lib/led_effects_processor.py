@@ -58,51 +58,70 @@ class LEDEffectsProcessor:
                 )
             return backlight_color
 
-        for n, strength in enumerate(keylist):
+        # Resolve active key indices in O(K) via ActiveIndexList (with safe fallback for mock lists)
+        active_indices_set = getattr(keylist, "active_indices", None)
+        if active_indices_set is not None:
+            if not active_indices_set:
+                if self.runtime_diagnostics is not None:
+                    self.runtime_diagnostics.set_gauge("active_leds", 0)
+                return False
+            candidate_indices = tuple(active_indices_set)
+        else:
+            candidate_indices = tuple(i for i, s in enumerate(keylist) if s > 0)
+            if not candidate_indices:
+                if self.runtime_diagnostics is not None:
+                    self.runtime_diagnostics.set_gauge("active_leds", 0)
+                return False
+
+        is_velocity_or_pedal = mode in ("Velocity", "Pedal")
+        is_fading_mode = (mode == "Fading")
+        cached_backlight_rgb = None
+
+        for n in candidate_indices:
+            strength = keylist[n]
             if strength <= 0:
+                if active_indices_set is not None:
+                    active_indices_set.discard(n)
                 continue
+
             active_leds += 1
-
             red, green, blue = keylist_color[n]
-
             led_changed = False
-            # Hand-colored guides retain their color; finger-based notes and
-            # ordinary notes still receive the color mode's frame updates.
-            if not (use_hand_colors and external_software is not None and external_software[n] == 1):
+
+            if not (use_hand_colors and external_software and external_software[n] == 1):
                 new_color = color_update(None, n, (red, green, blue))
                 if new_color is not None:
                     red, green, blue = new_color
                     led_changed = True
 
-            fading = 1
-
-            is_guide = guide_lights is not None and guide_lights[n] == 1
-            if not is_guide and (mode == "Velocity" or mode == "Pedal" or (
-                    mode == "Fading" and keylist_status[n] == 0)):
-                fading = (strength / float(100)) / 10
+            fading = 1.0
+            is_guide = bool(guide_lights and guide_lights[n] == 1)
+            if not is_guide and (is_velocity_or_pedal or (is_fading_mode and keylist_status[n] == 0)):
+                fading = strength * 0.001
                 red = int(red * fading)
                 green = int(green * fading)
                 blue = int(blue * fading)
-
-                keylist[n] = max(0, keylist[n] - decrease_amount)
+                new_strength = strength - decrease_amount
+                if new_strength > 0:
+                    keylist[n] = new_strength
+                else:
+                    keylist[n] = 0
                 led_changed = True
 
-            if not is_guide and (mode == "Velocity" or mode == "Pedal"):
-                # Check if key is pressed or sustained
+            if not is_guide and is_velocity_or_pedal:
                 key_active = keylist_status[n] == 1 or keylist_sustained[n] == 1
-                
                 if int(sustain_value) >= self.pedal_deadzone and not key_active:
-                    # Keep the lights on when the pedal is pressed and key was released
                     keylist[n] = 1000
                     led_changed = True
                 elif int(sustain_value) < self.pedal_deadzone and keylist_status[n] == 0 and keylist_sustained[n] == 0:
-                    # Turn off if pedal is not pressed and key is not active or sustained
                     keylist[n] = 0
                     red, green, blue = (0, 0, 0)
                     led_changed = True
 
             if keylist[n] <= 0 and screensaver_is_running is not True:
-                red, green, blue = get_backlight_color()
+                if cached_backlight_rgb is None:
+                    cached_backlight_rgb = get_backlight_color()
+                red, green, blue = cached_backlight_rgb
                 led_changed = True
 
             if led_changed:
