@@ -253,6 +253,11 @@ class VisualizerApp:
             raise RuntimeError("Another visualizer already owns the process lock") from error
 
     def run(self):
+        import gc
+        # Prevent cyclic GC pauses during high-density MIDI bursts on Cortex-A53
+        gc.set_threshold(50000, 50, 50)
+        gc_idle_cleaned = True
+
         ci = self.ci
         platform = ci.platform
         self._housekeeping_thread = threading.Thread(
@@ -316,9 +321,10 @@ class VisualizerApp:
                 live_active=not (ci.learning.is_started_midi or ci.saving.is_playing_midi),
             )
 
-            # 4. Non-blocking DMA Frame Pacing: coalesce burst notes while previous DMA transfer completes
+            # 4. Strict Non-Blocking DMA Frame Pacing: never call strip.show() while DMA is busy
             if fade_processed or midi_processed:
                 self._led_frame_dirty = True
+                gc_idle_cleaned = False
 
             self.runtime_diagnostics.set_gauge(
                 "led_update_requested", int(bool(self._led_frame_dirty))
@@ -328,17 +334,20 @@ class VisualizerApp:
             if self._led_frame_dirty:
                 now_before_show = time.perf_counter()
                 elapsed_since_last_show = now_before_show - getattr(self, "_last_strip_show_end", 0.0)
-                if elapsed_since_last_show >= min_dma_interval or not midiports.has_Listeners_or_active_burst():
+                if elapsed_since_last_show >= min_dma_interval:
                     ledstrip.strip.show()
                     self._led_frame_dirty = False
                     self.update_fps_stats()
                 else:
-                    # Previous hardware DMA transfer is still in flight; yield GIL to MIDI/RTP threads
+                    # Hardware DMA is still transmitting previous frame; yield GIL for remaining window
                     dma_wait_remaining = min_dma_interval - elapsed_since_last_show
             else:
                 now_perf = time.perf_counter()
                 if (now_perf - self.last_frame_time) > 1.0:
                     ledstrip.current_fps = 0.0
+                    if not gc_idle_cleaned:
+                        gc.collect(0)
+                        gc_idle_cleaned = True
 
             midiports.refresh_queue_diagnostics(now_perf=time.perf_counter())
             self.runtime_diagnostics.record_duration(

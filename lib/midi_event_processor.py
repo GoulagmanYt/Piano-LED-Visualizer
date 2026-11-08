@@ -55,6 +55,9 @@ class MIDIEventProcessor:
         Handles different event types and routes them to appropriate handlers.
         Selects input source based on playback/learning state.
         """
+        t0 = time.perf_counter()
+        max_duration = 0.0020  # Strict 2.0ms slice budget across all MIDI queues
+
         # Guides have their own source-aware queue and are never inferred from
         # channels on the normal live input.
         guides_processed = self.process_guide_events()
@@ -99,7 +102,6 @@ class MIDIEventProcessor:
         led_count = ledstrip.led_number
 
         # Process a bounded slice per frame to avoid jitter while preserving FIFO order.
-        t0 = time.perf_counter()
         processed = 0
 
         def _process_one(msg, msg_timestamp):
@@ -139,28 +141,19 @@ class MIDIEventProcessor:
         diagnostics.set_metadata("selected_midi_queue", queue_name)
         diagnostics.set_gauge("midi_queue_depth_before", queue_depth)
         is_active_use = bool(self.state_manager and self.state_manager.is_active_use())
-        max_messages = 1536 if is_active_use else 512
-        max_duration = 0.0025  # Tight 2.5ms slice to bound latency spikes
+        max_messages = 512 if is_active_use else 256
 
-        if queue_depth > 768:
-            max_messages = min(max(max_messages, queue_depth * 2), 8192)
-            max_duration = max(max_duration, 0.02 if is_active_use else 0.01)
-        elif queue_depth > 512:
-            max_messages = min(max(max_messages, queue_depth * 2), 4096)
-            max_duration = max(max_duration, 0.015 if is_active_use else 0.008)
-        elif queue_depth > 256:
-            max_messages = min(max(max_messages, queue_depth), 2048)
-            max_duration = max(max_duration, 0.01 if is_active_use else 0.006)
-
-        while processed < max_messages and (time.perf_counter() - t0) < max_duration:
+        while processed < max_messages:
+            if (processed & 0x07) == 0 and (time.perf_counter() - t0) >= max_duration:
+                break
             if queues is not None:
                 batch = queues.drain_queue(
                     midipending,
-                    max_messages=min(16, max_messages - processed),
+                    max_messages=min(8, max_messages - processed),
                 )
             else:
                 batch = []
-                while midipending and len(batch) < min(16, max_messages - processed):
+                while midipending and len(batch) < min(8, max_messages - processed):
                     batch.append(midipending.popleft())
             if not batch:
                 break
@@ -174,6 +167,8 @@ class MIDIEventProcessor:
                 diagnostics.record_duration("midi_receive_to_process", time.perf_counter() - msg_timestamp)
                 _process_one(msg, msg_timestamp)
                 processed += 1
+                if (processed & 0x07) == 0 and (time.perf_counter() - t0) >= max_duration:
+                    break
         diagnostics.increment_counter("midi_events_processed_total", processed)
         diagnostics.set_gauge("midi_events_processed_last", processed)
         if queues is not None:
