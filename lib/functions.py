@@ -620,9 +620,10 @@ def clear_ledstrip_state(ledstrip, *, show=True):
         strip.show()
 
     # Reset internal note tracking so fade logic cannot relight pixels.
-    ledstrip.keylist = [0] * ledstrip.led_number
+    from lib.ledstrip import ActiveIndexList
+    ledstrip.keylist = ActiveIndexList(0 for _ in range(ledstrip.led_number))
     ledstrip.keylist_status = [0] * ledstrip.led_number
-    ledstrip.keylist_sustained = [0] * ledstrip.led_number
+    ledstrip.keylist_sustained = ActiveIndexList(0 for _ in range(ledstrip.led_number))
     ledstrip.keylist_external_software = [0] * ledstrip.led_number
     ledstrip.keylist_guide = [0] * ledstrip.led_number
     ledstrip.keylist_color = [(0, 0, 0)] * ledstrip.led_number
