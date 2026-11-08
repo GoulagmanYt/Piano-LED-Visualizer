@@ -392,5 +392,139 @@ class TestSurgicalDirectLinkDisconnect(unittest.TestCase):
             )
 
 
+
+
+class TestPulseModeActiveWhenKeylistEmpty(unittest.TestCase):
+    def test_pulse_effects_process_even_when_keylist_empty(self):
+        from lib.led_effects_processor import LEDEffectsProcessor
+        from lib.ledstrip import ActiveIndexList
+
+        fake_strip = SimpleNamespace(
+            led_number=88,
+            keylist=ActiveIndexList([0] * 88),
+            keylist_status=ActiveIndexList([0] * 88),
+            keylist_sustained=ActiveIndexList([0] * 88),
+            keylist_color=[(0, 0, 0)] * 88,
+            active_pulses=[{"pos": 10.0, "color": (255, 0, 0), "speed": 1.0, "life": 1.0}],
+            strip=SimpleNamespace(setPixelColor=MagicMock()),
+            set_adjacent_colors=MagicMock(),
+            sustain_value=0,
+        )
+        fake_settings = SimpleNamespace(
+            mode="Pulse",
+            fadingspeed="100",
+            backlight_brightness_percent="0",
+            get_backlight_color=lambda c: 0,
+        )
+        fake_menu = SimpleNamespace(screensaver_is_running=False)
+        fake_color_mode = SimpleNamespace(ColorUpdate=MagicMock())
+        processor = LEDEffectsProcessor(fake_strip, fake_settings, fake_menu, fake_color_mode, 0, 10)
+        processor.process_pulse_effects = MagicMock(return_value=True)
+
+        res = processor.process_fade_effects(0.01)
+        self.assertTrue(res)
+        processor.process_pulse_effects.assert_called_once()
+
+
+class TestSustainReleaseRecordsWhenNoNotesSustained(unittest.TestCase):
+    def test_cc64_release_calls_saving_when_no_notes_sustained(self):
+        import time
+        from lib.midi_event_processor import MIDIEventProcessor
+        from lib.ledstrip import ActiveIndexList
+
+        fake_saving = SimpleNamespace(
+            add_control_change=MagicMock(),
+            is_recording=True,
+            start_time=0.0,
+        )
+        fake_ledstrip = SimpleNamespace(
+            led_number=88,
+            keylist=ActiveIndexList([0] * 88),
+            keylist_status=ActiveIndexList([0] * 88),
+            keylist_sustained=ActiveIndexList([0] * 88),
+            keylist_color=[(0, 0, 0)] * 88,
+            strip=SimpleNamespace(setPixelColor=MagicMock()),
+            set_adjacent_colors=MagicMock(),
+        )
+        fake_settings = SimpleNamespace(mode="Velocity", sequence_active=False, next_step=None)
+        fake_usersettings = SimpleNamespace(get_setting_value=lambda k: "0")
+        fake_ports = SimpleNamespace(last_activity=0)
+
+        processor = MIDIEventProcessor(
+            fake_ports, fake_ledstrip, fake_settings, fake_usersettings, fake_saving,
+            None, None, None
+        )
+        msg = mido.Message("control_change", control=64, value=0)
+        processor.handle_control_change(msg, time.time())
+        fake_saving.add_control_change.assert_called_once_with("control_change", 0, 64, 0, unittest.mock.ANY)
+
+
+class TestStateManagerScreensaverDelayRobustness(unittest.TestCase):
+    def test_string_and_invalid_delays_handled(self):
+        from lib.state_manager import StateManager
+
+        fake_usersettings = SimpleNamespace(get_setting_value=lambda k: "0")
+        sm = StateManager(fake_usersettings)
+        menu_decimal = SimpleNamespace(screensaver_delay="5.5", screensaver_is_running=False)
+        menu_invalid = SimpleNamespace(screensaver_delay="invalid", screensaver_is_running=False)
+        menu_none = SimpleNamespace(screensaver_delay=None, screensaver_is_running=False)
+
+        self.assertFalse(sm.should_run_screensaver(menu_invalid))
+        self.assertFalse(sm.should_run_screensaver(menu_none))
+        sm.last_user_activity = 0
+        sm.last_midi_activity = 0
+        self.assertTrue(sm.should_run_screensaver(menu_decimal))
+
+
+class TestBufferedMidiInputCorruptedFrames(unittest.TestCase):
+    def test_corrupted_frame_does_not_crash_thread(self):
+        import time
+        from collections import deque
+        from lib.buffered_midi_input import BufferedMidiInput
+
+        class MockNative:
+            def __init__(self):
+                self.events = deque([([], 0.0), ([0x90, 60, 80], 0.001)])
+                self.opened = None
+                self.closed = False
+                self.cleaned = False
+                self.filters = None
+
+            def get_ports(self):
+                return ["MockPort"]
+
+            def open_port(self, index):
+                self.opened = index
+
+            def ignore_types(self, **kwargs):
+                self.filters = kwargs
+
+            def set_callback(self, *args):
+                pass
+
+            def get_message(self):
+                try:
+                    return self.events.popleft()
+                except IndexError:
+                    return None
+
+            def close_port(self):
+                self.closed = True
+
+            def delete(self):
+                self.cleaned = True
+
+        native = MockNative()
+        received = []
+        port = BufferedMidiInput("MockPort", callback=received.append, native_input=native)
+        try:
+            time.sleep(0.05)
+            self.assertEqual(len(received), 1)
+            self.assertEqual(received[0].note, 60)
+            self.assertIsNone(port.error)
+        finally:
+            port.close()
+
+
 if __name__ == "__main__":
     unittest.main()

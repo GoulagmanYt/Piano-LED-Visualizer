@@ -366,6 +366,7 @@ class VisualizerApp:
             else:
                 # Quiescent idle wait: unblocks immediately (<50us) via activity.set() on MIDI
                 activity.wait(0.025)
+
     def update_fps_stats(self):
         now = time.perf_counter()
 
@@ -431,6 +432,25 @@ class VisualizerApp:
                 ledsettings.backlight_stopped = False
                 fastColorWipe(ledstrip.strip, True, ledsettings)
                 self.backlight_cleared = False
+                # Re-apply any notes that woke the system in this same frame so fastColorWipe does not erase them
+                keylist_status = getattr(ledstrip, "keylist_status", None)
+                keylist_color = getattr(ledstrip, "keylist_color", None)
+                keylist = getattr(ledstrip, "keylist", None)
+                if isinstance(keylist_status, list) and isinstance(keylist_color, list):
+                    restored_any = False
+                    for idx, is_active in enumerate(keylist_status):
+                        if is_active and idx < len(keylist_color):
+                            r, g, b = keylist_color[idx]
+                            scale = 1.0
+                            if isinstance(keylist, list) and idx < len(keylist) and 0 < keylist[idx] < 1000:
+                                scale = keylist[idx] / 999.0
+                            color = Color(int(r * scale), int(g * scale), int(b * scale))
+                            ledstrip.strip.setPixelColor(idx, color)
+                            if hasattr(ledstrip, "set_adjacent_colors"):
+                                ledstrip.set_adjacent_colors(idx, color, False)
+                            restored_any = True
+                    if restored_any:
+                        self._led_frame_dirty = True
 
     def update_display(self, elapsed_time, menu):
         if menu.screensaver_is_running:
@@ -462,7 +482,6 @@ class VisualizerApp:
             should_refresh=should_refresh,
         ):
             menu.show()
-
 
     def check_color_mode(self, ledsettings):
         if ledsettings.color_mode != self.color_mode_name or ledsettings.incoming_setting_change:

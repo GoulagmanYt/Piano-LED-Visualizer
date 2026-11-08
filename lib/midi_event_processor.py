@@ -543,24 +543,21 @@ class MIDIEventProcessor:
                 keylist_sustained = self.ledstrip.keylist_sustained
                 sustained_indices_set = getattr(keylist_sustained, "active_indices", None)
                 if sustained_indices_set is not None:
-                    if not sustained_indices_set:
-                        return
-                    sustained_indices = tuple(sustained_indices_set)
+                    sustained_indices = tuple(sustained_indices_set) if sustained_indices_set else ()
                 else:
                     sustained_indices = tuple(
                         i for i, sustained in enumerate(keylist_sustained) if sustained == 1
                     )
-                    if not sustained_indices:
-                        return
 
-                idle_color, use_backlight = self._resolve_idle_color()
-                keylist_status = self.ledstrip.keylist_status
-                keylist = self.ledstrip.keylist
-                for i in sustained_indices:
-                    keylist_sustained[i] = 0
-                    if keylist_status[i] == 0:
-                        keylist[i] = 0
-                        self._apply_idle_color(i, idle_color, use_backlight)
+                if sustained_indices:
+                    idle_color, use_backlight = self._resolve_idle_color()
+                    keylist_status = self.ledstrip.keylist_status
+                    keylist = self.ledstrip.keylist
+                    for i in sustained_indices:
+                        keylist_sustained[i] = 0
+                        if keylist_status[i] == 0:
+                            keylist[i] = 0
+                            self._apply_idle_color(i, idle_color, use_backlight)
 
         current_time = time.time()
         # Handle sequence advancement based on control values

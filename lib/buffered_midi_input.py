@@ -54,15 +54,19 @@ class BufferedMidiInput:
         return self._closed or self.error is not None
 
     def _receive(self):
+        stop_is_set = self._stop.is_set
+        stop_wait = self._stop.wait
+        get_message = self._rt.get_message
+        from_bytes = mido.Message.from_bytes
         try:
-            while not self._stop.is_set():
-                event = self._rt.get_message()
+            while not stop_is_set():
+                event = get_message()
                 if event is None:
-                    self._stop.wait(.0005)
+                    stop_wait(.0005)
                     continue
                 try:
-                    message = mido.Message.from_bytes(event[0])
-                except ValueError:
+                    message = from_bytes(event[0])
+                except (ValueError, IndexError, TypeError):
                     continue
                 self.callback(message)
         except Exception as error:

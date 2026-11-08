@@ -100,7 +100,10 @@ class MidiPorts:
             from lib.learning_bridge import LearningBridge
             self.learning_bridge = LearningBridge(
                 self.queues, usersettings,
-                practice_active=lambda: bool(getattr(getattr(self, 'practice_state', None), 'practice_active', False)),
+                practice_active=lambda: bool(
+                    getattr(getattr(self, 'practice_state', None), 'practice_active', False)
+                    or getattr(getattr(self, 'learning', None), 'is_started_midi', False)
+                ),
                 activity=lambda: (setattr(self, 'last_activity', time.time()), self.queues.activity.set()),
             )
         self.queues.set_forwarding_enabled(False)
@@ -964,6 +967,7 @@ class MidiPorts:
             self._ensure_runtime_diagnostics().increment_counter("port_runtime_reconnects")
 
         old_port = self.playport
+        had_old_port = old_port is not None
         if hasattr(self, "queues"):
             self.queues.set_forwarding_enabled(False)
         self.playport = None
@@ -984,7 +988,7 @@ class MidiPorts:
 
         if selected_port is None:
             self._safe_close_port(old_port)
-            return old_port is not None
+            return had_old_port
 
         try:
             self.playport = mido.open_output(selected_port)
@@ -1085,7 +1089,8 @@ class MidiPorts:
                     self.queues,
                     self.usersettings,
                     practice_active=lambda: bool(
-                        getattr(getattr(self, "learning", None), "is_started_midi", False)
+                        getattr(getattr(self, "practice_state", None), "practice_active", False)
+                        or getattr(getattr(self, "learning", None), "is_started_midi", False)
                     ),
                     activity=lambda: (setattr(self, "last_activity", time.time()), self.queues.activity.set()),
                 )

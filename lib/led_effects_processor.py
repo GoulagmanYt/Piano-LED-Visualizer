@@ -34,7 +34,7 @@ class LEDEffectsProcessor:
         set_adjacent_colors = ledstrip.set_adjacent_colors
         screensaver_is_running = self.menu.screensaver_is_running
         sustain_value = getattr(ledstrip, "sustain_value", self.last_sustain)
-        backlight_color = None
+        has_active_pulses = (mode == "Pulse" and bool(ledstrip.active_pulses))
 
         if mode == "Fading":
             speed = ledsettings.fadingspeed
@@ -47,34 +47,24 @@ class LEDEffectsProcessor:
 
         decrease_amount = max(0.0, event_loop_time) * 1000000.0 / max(1.0, float(speed))
 
-        def get_backlight_color():
-            nonlocal backlight_color
-            if backlight_color is None:
-                backlight_level = float(ledsettings.backlight_brightness_percent) / 100
-                backlight_color = (
-                    int(ledsettings.get_backlight_color("Red")) * backlight_level,
-                    int(ledsettings.get_backlight_color("Green")) * backlight_level,
-                    int(ledsettings.get_backlight_color("Blue")) * backlight_level,
-                )
-            return backlight_color
-
         # Resolve active key indices in O(K) via ActiveIndexList (with safe fallback for mock lists)
         active_indices_set = getattr(keylist, "active_indices", None)
         if active_indices_set is not None:
-            if not active_indices_set:
+            if not active_indices_set and not has_active_pulses:
                 if self.runtime_diagnostics is not None:
                     self.runtime_diagnostics.set_gauge("active_leds", 0)
                 return False
-            candidate_indices = tuple(active_indices_set)
+            candidate_indices = tuple(active_indices_set) if active_indices_set else ()
         else:
             candidate_indices = tuple(i for i, s in enumerate(keylist) if s > 0)
-            if not candidate_indices:
+            if not candidate_indices and not has_active_pulses:
                 if self.runtime_diagnostics is not None:
                     self.runtime_diagnostics.set_gauge("active_leds", 0)
                 return False
 
         is_velocity_or_pedal = mode in ("Velocity", "Pedal")
         is_fading_mode = (mode == "Fading")
+        sustain_on = int(sustain_value) >= self.pedal_deadzone
         cached_backlight_rgb = None
 
         for n in candidate_indices:
@@ -110,17 +100,22 @@ class LEDEffectsProcessor:
 
             if not is_guide and is_velocity_or_pedal:
                 key_active = keylist_status[n] == 1 or keylist_sustained[n] == 1
-                if int(sustain_value) >= self.pedal_deadzone and not key_active:
+                if sustain_on and not key_active:
                     keylist[n] = 1000
                     led_changed = True
-                elif int(sustain_value) < self.pedal_deadzone and keylist_status[n] == 0 and keylist_sustained[n] == 0:
+                elif not sustain_on and not key_active:
                     keylist[n] = 0
                     red, green, blue = (0, 0, 0)
                     led_changed = True
 
             if keylist[n] <= 0 and screensaver_is_running is not True:
                 if cached_backlight_rgb is None:
-                    cached_backlight_rgb = get_backlight_color()
+                    backlight_level = float(ledsettings.backlight_brightness_percent) / 100.0
+                    cached_backlight_rgb = (
+                        int(ledsettings.get_backlight_color("Red")) * backlight_level,
+                        int(ledsettings.get_backlight_color("Green")) * backlight_level,
+                        int(ledsettings.get_backlight_color("Blue")) * backlight_level,
+                    )
                 red, green, blue = cached_backlight_rgb
                 led_changed = True
 

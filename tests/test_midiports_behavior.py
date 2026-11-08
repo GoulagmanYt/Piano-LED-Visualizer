@@ -108,10 +108,11 @@ class TestMidiPortsBehavior(unittest.TestCase):
         midiports.monitor_running = True
         sleep_calls = {"count": 0}
 
-        def stop_after_second_sleep(_seconds):
+        def stop_after_second_wait(_timeout=None):
             sleep_calls["count"] += 1
             if sleep_calls["count"] >= 2:
                 midiports.monitor_running = False
+            return False
 
         with patch("lib.midiports._refresh_port_cache"), patch(
             "lib.midiports._get_cached_input_names",
@@ -129,9 +130,10 @@ class TestMidiPortsBehavior(unittest.TestCase):
                     "rtpmidid:OSCMidiRobin! 128:4",
                 ],
             ],
-        ), patch.object(midiports, "reconnect_ports") as reconnect_ports, patch(
-            "lib.midiports.time.sleep",
-            side_effect=stop_after_second_sleep,
+        ), patch.object(midiports, "reconnect_ports") as reconnect_ports, patch.object(
+            midiports.monitor_stop,
+            "wait",
+            side_effect=stop_after_second_wait,
         ):
             midiports.auto_reconnect_loop()
 
@@ -151,10 +153,11 @@ class TestMidiPortsBehavior(unittest.TestCase):
         midiports.monitor_running = True
         sleep_calls = {"count": 0}
 
-        def stop_after_second_sleep(_seconds):
+        def stop_after_second_wait(_timeout=None):
             sleep_calls["count"] += 1
             if sleep_calls["count"] >= 2:
                 midiports.monitor_running = False
+            return False
 
         with patch("lib.midiports._refresh_port_cache"), patch(
             "lib.midiports._get_cached_input_names",
@@ -165,9 +168,10 @@ class TestMidiPortsBehavior(unittest.TestCase):
                 ["rtpmidid:OSCMidiRobin 129:1"],
                 ["rtpmidid:OSCMidiRobin 128:1"],
             ],
-        ), patch.object(midiports, "reconnect_ports") as reconnect_ports, patch(
-            "lib.midiports.time.sleep",
-            side_effect=stop_after_second_sleep,
+        ), patch.object(midiports, "reconnect_ports") as reconnect_ports, patch.object(
+            midiports.monitor_stop,
+            "wait",
+            side_effect=stop_after_second_wait,
         ):
             midiports.auto_reconnect_loop()
 

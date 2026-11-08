@@ -85,12 +85,9 @@ class StateManager:
     def update_midi_activity(self, current_time=None):
         """Called when MIDI message is received"""
         if current_time is None:
-            self.last_midi_activity = time.time()
-            # MIDI activity also counts as general activity
-            self.last_user_activity = time.time()
-            return
-
+            current_time = time.time()
         self.last_midi_activity = current_time
+        # MIDI activity also counts as general activity
         self.last_user_activity = current_time
     
     def update_user_activity(self):
@@ -249,7 +246,10 @@ class StateManager:
             return False
         
         # Check screensaver delay setting
-        delay_minutes = int(getattr(menu, 'screensaver_delay', 0))
+        try:
+            delay_minutes = float(getattr(menu, 'screensaver_delay', 0) or 0)
+        except (TypeError, ValueError):
+            return False
         if delay_minutes <= 0:
             return False
         
@@ -274,4 +274,3 @@ class StateManager:
             'loop_delay': self.get_loop_delay(),
             'screen_refresh_interval': self.get_screen_refresh_interval(),
         }
-

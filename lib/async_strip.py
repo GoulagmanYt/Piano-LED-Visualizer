@@ -83,22 +83,26 @@ class AsyncPixelStrip:
     def _run(self):
         fps_started = time.perf_counter()
         completed_frames = 0
+        ready = lambda: self._dirty or self._closed
+        transmit = self._transmit
         try:
             while True:
                 with self._condition:
-                    self._condition.wait_for(lambda: self._dirty or self._closed)
+                    self._condition.wait_for(ready)
                     if self._closed:
                         return
-                    self._transmit[:] = self._pending
+                    transmit[:] = self._pending
                     submitted = self._submitted
                     brightness = self._brightness
                     self._dirty = False
                 started = time.perf_counter()
                 with self._hardware_lock:
-                    self.backend.setBrightness(brightness)
-                    for i in range(self._count):
-                        self.backend.setPixelColor(i, self._transmit[i])
-                    self.backend.show()
+                    backend = self.backend
+                    set_pixel = backend.setPixelColor
+                    backend.setBrightness(brightness)
+                    for i, color in enumerate(transmit):
+                        set_pixel(i, color)
+                    backend.show()
                     if self._wait_for_dma is not None:
                         self._wait_for_dma()
                 diagnostics = self.diagnostics
