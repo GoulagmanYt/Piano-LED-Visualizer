@@ -1131,7 +1131,25 @@ class MidiPorts:
     def add_instance(self, menu):
         self.menu = menu
 
-    def change_port(self, port, portname):
+    def _notify_menu(self, title, message, duration_ms=1500):
+        """Show an LCD notice, then restore the menu. Never raises."""
+        menu = getattr(self, "menu", None)
+        if menu is None:
+            return
+        try:
+            menu.render_message(title, message, duration_ms)
+            menu.show()
+        except Exception as e:
+            logger.debug(f"LCD notice failed: {e}")
+
+    def change_port(self, port, portname, async_notice=False):
+        """Switch an input/play port.
+
+        MenuLCD.render_message() sleeps for the whole notice delay, so web
+        callers pass async_notice=True to get their HTTP response right away
+        instead of 1.5 s later; the LCD itself keeps the sequential behaviour.
+        """
+        failed = False
         try:
             if port == "inport":
                 self.usersettings.change_setting_value("input_port", portname)
@@ -1143,11 +1161,19 @@ class MidiPorts:
                 self._reconnect_output(force=True)
                 if self.actual_play_port is None and not is_port_disabled(portname):
                     raise RuntimeError(f"Unable to activate play port '{portname}'")
-            self.menu.render_message("Changing " + port + " to:", portname, 1500)
-            self.menu.show()
         except Exception:
-            self.menu.render_message("Can't change " + port + " to:", portname, 1500)
-            self.menu.show()
+            failed = True
+
+        title = ("Can't change " if failed else "Changing ") + port + " to:"
+        if async_notice:
+            threading.Thread(
+                target=self._notify_menu,
+                args=(title, portname, 1500),
+                name="port-change-notice",
+                daemon=True,
+            ).start()
+        else:
+            self._notify_menu(title, portname, 1500)
 
     def reconnect_ports(self, force=False):
         """Reconnect input and output ports deterministically."""

@@ -16,8 +16,52 @@ webinterface.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 webinterface.config['MAX_CONTENT_LENGTH'] = 32 * 1000 * 1000
 webinterface.json.sort_keys = False
 
+WEBSOCKET_SEND_TIMEOUT_S = 2.0  # a client that cannot take a batch within this delay is dropped
+BROADCAST_POLL_INTERVAL_S = 0.01  # fallback poll, still needed for the learning outbox
+
+
+class WakeableDeque(deque):
+    """deque whose appends wake the websocket broadcast loop immediately.
+
+    The loop used to sleep 10 ms between polls, adding up to 10 ms to every
+    practice-mode echo. Appends now schedule a single event.set() on the
+    websocket loop (coalesced while a wake-up is already pending).
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._wake_loop = None
+        self._wake_event = None
+        self._wake_pending = False
+
+    def attach_wakeup(self, loop, event):
+        self._wake_pending = False
+        self._wake_event = event
+        self._wake_loop = loop
+
+    def detach_wakeup(self):
+        self._wake_loop = None
+        self._wake_event = None
+        self._wake_pending = False
+
+    def consume_wakeup(self):
+        """Called by the consumer right before it drains the queue."""
+        self._wake_pending = False
+
+    def append(self, item):
+        super().append(item)
+        loop = self._wake_loop
+        if loop is None or self._wake_pending:
+            return
+        self._wake_pending = True
+        try:
+            loop.call_soon_threadsafe(self._wake_event.set)
+        except RuntimeError:  # loop already closed (shutdown)
+            self._wake_pending = False
+
+
 webinterface.socket_input = []
-webinterface.websocket_midi_send = deque(maxlen=100)  # Thread-safe queue for MIDI messages to send to websocket clients
+webinterface.websocket_midi_send = WakeableDeque(maxlen=100)  # Thread-safe queue for MIDI messages to send to websocket clients
 webinterface.websocket_midi_send_lock = None  # Lock for synchronizing async consumers (initialized in start_server)
 
 
@@ -47,47 +91,80 @@ class AppState:
 app_state = AppState()
 
 
-def start_server(loop):
-    async def broadcast_midi_to_clients():
-        """Background task to broadcast MIDI messages to all connected clients."""
-        logger.info("Starting MIDI broadcast task")
+_closing_tasks = set()
 
-        async def send_batch(websocket, messages):
+
+async def _close_quietly(websocket):
+    try:
+        await asyncio.wait_for(websocket.close(), timeout=WEBSOCKET_SEND_TIMEOUT_S)
+    except Exception:
+        pass
+
+
+async def broadcast_midi_to_clients(wake_event=None, send_timeout=WEBSOCKET_SEND_TIMEOUT_S):
+    """Background task to broadcast MIDI messages to all connected clients."""
+    logger.info("Starting MIDI broadcast task")
+
+    async def send_batch(websocket, messages):
+        async def send_all():
             for message in messages:
                 await websocket.send(str(message))
 
-        while True:
-            try:
-                clients = list(app_state.websocket_midi_clients)
-                if clients:
-                    messages = []
-                    if app_state.practice_active:
-                        while webinterface.websocket_midi_send:
-                            messages.append(webinterface.websocket_midi_send.popleft())
+        # One stalled client must not freeze the broadcast for everybody else.
+        await asyncio.wait_for(send_all(), timeout=send_timeout)
 
-                    learning = getattr(app_state, "learning", None)
-                    learning_outbox = getattr(learning, "socket_send", None)
-                    if learning_outbox is not None:
-                        if hasattr(learning_outbox, "drain"):
-                            messages.extend(learning_outbox.drain())
-                        elif learning_outbox:
-                            messages.extend(learning_outbox[:])
-                            del learning_outbox[:]
+    while True:
+        try:
+            queue = webinterface.websocket_midi_send
+            if wake_event is not None:
+                try:
+                    await asyncio.wait_for(wake_event.wait(), timeout=BROADCAST_POLL_INTERVAL_S)
+                except asyncio.TimeoutError:
+                    pass
+                wake_event.clear()
+                consume = getattr(queue, "consume_wakeup", None)
+                if consume is not None:
+                    consume()
+            else:
+                await asyncio.sleep(BROADCAST_POLL_INTERVAL_S)
 
-                    if messages:
-                        results = await asyncio.gather(
-                            *(send_batch(ws, messages) for ws in clients),
-                            return_exceptions=True,
-                        )
-                        for ws, result in zip(clients, results):
-                            if isinstance(result, Exception):
-                                app_state.websocket_midi_clients.discard(ws)
+            clients = list(app_state.websocket_midi_clients)
+            if clients:
+                messages = []
+                if app_state.practice_active:
+                    while queue:
+                        messages.append(queue.popleft())
 
-                await asyncio.sleep(0.01)
-            except Exception as e:
-                logger.error(f"Error in MIDI broadcast task: {e}")
-                await asyncio.sleep(1)
+                learning = getattr(app_state, "learning", None)
+                learning_outbox = getattr(learning, "socket_send", None)
+                if learning_outbox is not None:
+                    if hasattr(learning_outbox, "drain"):
+                        messages.extend(learning_outbox.drain())
+                    elif learning_outbox:
+                        messages.extend(learning_outbox[:])
+                        del learning_outbox[:]
 
+                if messages:
+                    results = await asyncio.gather(
+                        *(send_batch(ws, messages) for ws in clients),
+                        return_exceptions=True,
+                    )
+                    for ws, result in zip(clients, results):
+                        if isinstance(result, BaseException):
+                            app_state.websocket_midi_clients.discard(ws)
+                            if isinstance(result, asyncio.TimeoutError):
+                                logger.warning("Dropping websocket MIDI client that stopped receiving")
+                                task = asyncio.ensure_future(_close_quietly(ws))
+                                _closing_tasks.add(task)
+                                task.add_done_callback(_closing_tasks.discard)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.error(f"Error in MIDI broadcast task: {e}")
+            await asyncio.sleep(1)
+
+
+def start_server(loop):
     async def learning(websocket):
         try:
             app_state.websocket_midi_clients.add(websocket)
@@ -223,8 +300,10 @@ def start_server(loop):
                     f"LED emulator client disconnected (handler cleanup). Active clients: {len(app_state.ledemu_clients)}")
 
     async def main():
-        # Initialize the global broadcast task
-        asyncio.create_task(broadcast_midi_to_clients())
+        # Initialize the global broadcast task, woken as soon as MIDI is queued
+        wake_event = asyncio.Event()
+        webinterface.websocket_midi_send.attach_wakeup(loop, wake_event)
+        asyncio.create_task(broadcast_midi_to_clients(wake_event))
         
         listen_ip = app_state.usersettings.get_setting_value("web_listen_ip")
 
@@ -244,6 +323,9 @@ def start_server(loop):
 
 # Stop the WebSocket server and cancel pending tasks on shutdown
 def stop_server(loop):
+    detach = getattr(webinterface.websocket_midi_send, "detach_wakeup", None)
+    if detach is not None:
+        detach()
     for task in asyncio.all_tasks(loop=loop):
         task.cancel()
     loop.stop()

@@ -2639,7 +2639,7 @@ function get_songs() {
                 }
                 translateStaticContent();
             };
-            xhttp.open("GET", "/api/get_songs?page=" + page + "&length=" + length + "&sortby=" + sortby + "&search=" + search, true);
+            xhttp.open("GET", "/api/get_songs?page=" + page + "&length=" + length + "&sortby=" + encodeURIComponent(sortby) + "&search=" + encodeURIComponent(search), true);
             xhttp.send();
         }
     };

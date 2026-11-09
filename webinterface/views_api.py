@@ -45,6 +45,7 @@ import re
 from lib.rpi_drivers import GPIO
 from lib.log_setup import logger
 from lib.led_power import POWER_DEFAULTS, estimate_led_power, parse_power_setting
+from lib.song_listing import list_songs_page
 from flask import abort
 from lib.song_file_security import (
     SongFileError,
@@ -463,14 +464,14 @@ def change_setting():
 
     if setting_name == "input_port":
         app_state.usersettings.change_setting_value("input_port", value)
-        app_state.midiports.change_port("inport", value)
+        app_state.midiports.change_port("inport", value, async_notice=True)
 
     if setting_name == "secondary_input_port":
         app_state.usersettings.change_setting_value("secondary_input_port", value)
 
     if setting_name == "play_port":
         app_state.usersettings.change_setting_value("play_port", value)
-        app_state.midiports.change_port("playport", value)
+        app_state.midiports.change_port("playport", value, async_notice=True)
 
     if setting_name == "skipped_notes":
         app_state.usersettings.change_setting_value("skipped_notes", value)
@@ -2321,64 +2322,18 @@ def get_song_list_setting():
 
 @webinterface.route('/api/get_songs', methods=['GET'])
 def get_songs():
-    page = request.args.get('page')
-    page = int(page) - 1
-    length = request.args.get('length')
-    sortby = request.args.get('sortby')
-    search = request.args.get('search')
-
-    start = int(page) * int(length)
-
-    songs_list_dict = {}
-
     _migrate_legacy_colon_song_files()
-    path = 'Songs/'
-    songs_list = os.listdir(path)
-    songs_list = [os.path.join(path, i) for i in songs_list]
-
-    songs_list = sorted(songs_list, key=os.path.getmtime)
-
-    if sortby == "dateAsc":
-        songs_list.reverse()
-
-    if sortby == "nameAsc":
-        songs_list.sort()
-
-    if sortby == "nameDesc":
-        songs_list.sort(reverse=True)
-
-    i = 0
-    total_songs = 0
-
-    for song in songs_list:
-        if "_#" in song or not song.endswith('.mid'):
-            continue
-        if search:
-            if search.lower() not in song.lower():
-                continue
-        total_songs += 1
-
-    max_page = int(math.ceil(total_songs / int(length)))
-
-    for song in songs_list:
-        song = song.replace("Songs/", "")
-        date = os.path.getmtime("Songs/" + song)
-        if "_#" in song or not song.endswith('.mid'):
-            continue
-
-        if search:
-            if search.lower() not in song.lower():
-                continue
-
-        i += 1
-        if i > int(start):
-            songs_list_dict[song] = date
-
-        if len(songs_list_dict) >= int(length):
-            break
-
-    return render_template('songs_list.html', len=len(songs_list_dict), songs_list_dict=songs_list_dict, page=page,
-                           max_page=max_page, total_songs=total_songs)
+    listing = list_songs_page(
+        'Songs/',
+        page=request.args.get('page'),
+        length=request.args.get('length'),
+        sortby=request.args.get('sortby'),
+        search=request.args.get('search'),
+    )
+    songs_list_dict = listing["songs"]
+    return render_template('songs_list.html', len=len(songs_list_dict), songs_list_dict=songs_list_dict,
+                           page=listing["page_index"], max_page=listing["max_page"],
+                           total_songs=listing["total_songs"])
 
 
 LEARNING_BRIDGE_KEYS = (
@@ -2567,7 +2522,7 @@ def switch_ports():
 
     active_port = app_state.usersettings.get_setting_value("input_port")
     secondary_port = app_state.usersettings.get_setting_value("secondary_input_port")
-    app_state.midiports.change_port("inport", secondary_port)
+    app_state.midiports.change_port("inport", secondary_port, async_notice=True)
     app_state.usersettings.change_setting_value("secondary_input_port", active_port)
     app_state.usersettings.change_setting_value("input_port", secondary_port)
     fastColorWipe(app_state.ledstrip.strip, True, app_state.ledsettings)
