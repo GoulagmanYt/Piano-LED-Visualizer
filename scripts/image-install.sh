@@ -9,7 +9,7 @@ test "$(. /etc/os-release; echo "$VERSION_CODENAME")" = bookworm
 test -x /usr/sbin/policy-rc.d
 
 apt-get update
-apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
+apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold full-upgrade
 apt-get install -y git curl ca-certificates python3-pip python3-venv python3-dev \
   build-essential pkg-config gfortran meson ninja-build cmake \
   libopenblas-dev libasound2-dev libjack-dev libavahi-client-dev libfmt9 \

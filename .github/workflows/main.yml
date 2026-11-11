@@ -14,8 +14,8 @@ jobs:
       run:
         shell: bash
     env:
-      BASE_IMAGE: 2024-11-19-raspios-bookworm-armhf-lite.img
-      BASE_URL: https://downloads.raspberrypi.com/raspios_lite_armhf/images/raspios_lite_armhf-2024-11-19
+      BASE_IMAGE: 2026-10-06-raspios-bookworm-armhf-lite.img
+      BASE_URL: https://downloads.raspberrypi.com/raspios_oldstable_lite_armhf/images/raspios_oldstable_lite_armhf-2026-10-06
     steps:
       - uses: actions/checkout@v6
         with:
