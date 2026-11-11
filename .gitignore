@@ -13,3 +13,7 @@ Piano-LED-Visualizersafe.code-workspace
 /.tmp
 /.serena
 Docs/audit_pass_4.md
+
+# Tooling caches
+.ruff_cache/
+.coverage

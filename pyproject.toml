@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "latency: timing-sensitive latency budget (skip with PLV_SKIP_LATENCY=1)",
+]
+
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["webinterface/static", "webinterface/templates"]
