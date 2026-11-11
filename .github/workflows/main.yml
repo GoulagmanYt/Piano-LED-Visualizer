@@ -78,7 +78,7 @@ jobs:
         run: |
           sudo chroot rootfs /home/Piano-LED-Visualizer/.venv/bin/python -m pip check
           sudo chroot rootfs /home/Piano-LED-Visualizer/.venv/bin/python -c \
-            'import flask, waitress, websockets, mido, rtmidi, numpy, PIL, RPi.GPIO, rpi_ws281x, spidev'
+            'import flask, waitress, websockets, mido, rtmidi, numpy, PIL, spidev; from importlib.metadata import version; print({p: version(p) for p in ("RPi.GPIO", "rpi-ws281x")})'
           sudo chroot rootfs systemctl is-enabled visualizer.service rtpmidid.service plv-lowlatency.service ssh.service plv-first-boot.service
           sudo chroot rootfs systemd-analyze verify visualizer.service rtpmidid.service plv-lowlatency.service plv-first-boot.service
           sudo test -s rootfs/boot/firmware/config.txt
