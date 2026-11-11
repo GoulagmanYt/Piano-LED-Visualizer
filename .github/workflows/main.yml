@@ -62,9 +62,14 @@ jobs:
         sudo mount -o bind /dev rootfs/dev
 
         sudo chroot rootfs /bin/bash -c " \
+          export DEBIAN_FRONTEND=noninteractive && \
           apt-get update && \
-          apt-get upgrade -y && \
-          apt-get install -y git wget python3-pip libopenblas-dev \
+          apt-get -o Dpkg::Options::=--force-confdef \
+            -o Dpkg::Options::=--force-confold \
+            upgrade -y && \
+          apt-get -o Dpkg::Options::=--force-confdef \
+            -o Dpkg::Options::=--force-confold \
+            install -y git wget python3-pip libopenblas-dev \
             libatlas-base-dev libavahi-client-dev libasound2-dev \
             libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev \
             libical-dev libreadline-dev fonts-freefont-ttf \
@@ -77,10 +82,11 @@ jobs:
     - name: Install RTP-MIDI
       run: |
         sudo chroot rootfs /bin/bash -c " \
+          export DEBIAN_FRONTEND=noninteractive && \
           cd /tmp && \
           wget https://github.com/davidmoreno/rtpmidid/releases/download/v24.12/rtpmidid_24.12.2_armhf.deb && \
           dpkg -i rtpmidid_24.12.2_armhf.deb && \
-          apt -f install -y && \
+          apt-get -f install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold && \
           systemctl enable rtpmidid && \
           rm rtpmidid_24.12.2_armhf.deb"
 
