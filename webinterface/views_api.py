@@ -2404,6 +2404,18 @@ def learning_bridge_settings():
     return jsonify(success=True, restart_required=True)
 
 
+def read_aconnect_listing():
+    """`aconnect -i -l` as the str() of its raw output, or an empty listing.
+
+    The ports page must keep working when aconnect is missing, fails or stalls.
+    """
+    try:
+        return str(subprocess.check_output(["aconnect", "-i", "-l"], timeout=3))
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("aconnect listing unavailable: %s", exc)
+        return str(b"")
+
+
 @webinterface.route('/api/get_ports', methods=['GET'])
 def get_ports():
     configured_input = app_state.usersettings.get_setting_value("input_port")
@@ -2423,7 +2435,7 @@ def get_ports():
         configured_secondary_input=configured_secondary_input,
         configured_play=configured_play,
         midi_logging=app_state.usersettings.get_setting_value("midi_logging"),
-        connected_ports=str(subprocess.check_output(["aconnect", "-i", "-l"])),
+        connected_ports=read_aconnect_listing(),
         rtp_diagnostics=diagnostics,
         runtime_diagnostics=runtime_diagnostics,
         rtpmidi_network_diagnostics=rtpmidi_network_diagnostics,
@@ -2558,7 +2570,11 @@ def get_steps_list():
     steps_list = []
     i = 0
 
-    for step in sequences_tree.getElementsByTagName("sequence_" + str(sequence))[0].childNodes:
+    sequence_nodes = sequences_tree.getElementsByTagName("sequence_" + str(sequence))
+    if not sequence_nodes:
+        return jsonify(success=False, error="Unknown sequence"), 404
+
+    for step in sequence_nodes[0].childNodes:
         if step.nodeType == 1:
             if step.nodeName == "settings":
                 response["control_number"] = step.getElementsByTagName("control_number")[0].firstChild.nodeValue

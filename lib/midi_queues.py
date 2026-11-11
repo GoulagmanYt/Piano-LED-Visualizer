@@ -42,6 +42,9 @@ class MidiQueues:
         self._lock = threading.RLock()
         self.forwarding_enabled = True
         self.activity = threading.Event()
+        # Wakes the websocket publish worker as soon as a note is queued for it,
+        # instead of letting it poll on a fixed 10 ms sleep.
+        self.websocket_publish_event = threading.Event()
 
     def set_forwarding_enabled(self, enabled):
         """A new output connection starts a new musical session, never a replay."""
@@ -181,8 +184,9 @@ class MidiQueues:
                 # The consumer may pop concurrently; an empty queue then
                 # means this item has already been handled, needing no wake.
                 wake_forward = len(self.live_forward_queue) == 1
+            queued_publish = False
             if is_note:
-                self.queue_with_policy(
+                queued_publish = self.queue_with_policy(
                     self.websocket_publish_queue,
                     item,
                     "websocket_publish",
@@ -196,6 +200,8 @@ class MidiQueues:
         # of a burst instead of acquiring Event's condition for every note.
         if not self.activity.is_set():
             self.activity.set()
+        if queued_publish and not self.websocket_publish_event.is_set():
+            self.websocket_publish_event.set()
         return wake_forward
 
     def enqueue_live_forward(self, msg, timestamp=None, source="forward"):
@@ -305,12 +311,15 @@ class MidiQueues:
         if timestamp is None:
             timestamp = time.perf_counter()
         with self._lock:
-            return self.queue_with_policy(
+            queued = self.queue_with_policy(
                 self.websocket_publish_queue,
                 (msg, timestamp),
                 "websocket_publish",
                 reserve_slots=0,
             )
+        if queued and not self.websocket_publish_event.is_set():
+            self.websocket_publish_event.set()
+        return queued
 
     def pop_websocket_publish(self):
         return self.pop_queue(self.websocket_publish_queue)

@@ -353,7 +353,10 @@ class MenuLCD:
         load_song_mc.setAttribute("text", "Load song")
         replace_node.parentNode.replaceChild(load_song_mc, replace_node)
         
-        songs_list = os.listdir("Songs")
+        # Only playable MIDI files: sidecar files (.musicxml, ...) cannot be opened
+        # by mido and in-flight uploads use hidden ".part" temporary names.
+        songs_list = [song for song in os.listdir("Songs")
+                      if not song.startswith(".") and song.lower().endswith(".mid")]
         for song in songs_list:
             # List of songs for Play_MIDI
             element = self.DOMTree.createElement("Choose_song")

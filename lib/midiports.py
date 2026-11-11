@@ -87,6 +87,9 @@ def _refresh_port_cache():
             _cached_output_names = []
 
 
+WEBSOCKET_PUBLISH_IDLE_TIMEOUT_S = 0.05  # safety net only; producers wake the worker
+
+
 class MidiPorts:
     def __init__(self, usersettings):
         self.usersettings = usersettings
@@ -670,12 +673,25 @@ class MidiPorts:
                 condition.wait(timeout=timeout)
 
     def _websocket_publish_loop(self):
+        wakeup = getattr(getattr(self, "queues", None), "websocket_publish_event", None)
         while self.worker_running:
+            if wakeup is not None:
+                # Clear before looking at the queue: a producer appending after
+                # this point sets the event again, so no wakeup can be lost.
+                wakeup.clear()
             if self._flush_websocket_publish_queue_once():
                 continue
             if self.websocket_publish_queue:
                 continue
-            time.sleep(0.01)
+            if wakeup is None:
+                time.sleep(0.01)
+            else:
+                wakeup.wait(WEBSOCKET_PUBLISH_IDLE_TIMEOUT_S)
+
+    def _wake_websocket_publish_worker(self):
+        wakeup = getattr(getattr(self, "queues", None), "websocket_publish_event", None)
+        if wakeup is not None:
+            wakeup.set()
 
     def start_background_workers(self):
         if self.worker_running:
@@ -696,6 +712,7 @@ class MidiPorts:
             logger.error("Learning bridge cleanup incomplete; ports remain owned by their workers")
         self.worker_running = False
         self._notify_forward_worker()
+        self._wake_websocket_publish_worker()
         for worker in (self.live_forward_thread, self.websocket_publish_thread):
             if worker is not None and worker is not threading.current_thread():
                 worker.join(timeout=2)

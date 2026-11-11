@@ -1,8 +1,10 @@
 from webinterface import webinterface, app_state
 from flask import render_template, request, jsonify
 import os
+import uuid
 
 import time
+from lib.log_setup import logger
 from lib.song_file_security import SongFileError, resolve_song_path, validate_song_filename
 
 ALLOWED_EXTENSIONS = {'mid', 'musicxml', 'mxl', 'xml', 'abc'}
@@ -70,6 +72,34 @@ def practice():
     return render_template('practice.html')
 
 
+def save_upload_atomically(file, song_path):
+    """Store an uploaded file without ever leaving a truncated song behind.
+
+    The upload is streamed to a hidden temporary file next to the target and
+    then published with os.link(), which is atomic and refuses to overwrite an
+    existing file. Returns False when `song_path` already exists. Any write
+    error (disk full, ...) propagates after the temporary file is removed.
+    """
+    tmp_path = song_path.with_name(f".{song_path.name}.{uuid.uuid4().hex}.part")
+    try:
+        file.save(str(tmp_path))
+        try:
+            os.link(tmp_path, song_path)
+        except FileExistsError:
+            return False
+        except OSError:
+            # Filesystem without hard links: fall back to a checked rename.
+            if song_path.exists():
+                return False
+            os.replace(tmp_path, song_path)
+        return True
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+
+
 @webinterface.route('/upload', methods=['POST'])
 def upload_file():
     if request.method == 'POST':
@@ -89,5 +119,12 @@ def upload_file():
         if song_path.exists():
             return jsonify(success=False, error="file already exists", song_name=filename)
 
-        file.save(str(song_path))
+        try:
+            saved = save_upload_atomically(file, song_path)
+        except OSError as e:
+            logger.warning("Upload of %s failed: %s", filename, e)
+            return jsonify(success=False, error="could not save file: " + (e.strerror or str(e)),
+                           song_name=filename)
+        if not saved:
+            return jsonify(success=False, error="file already exists", song_name=filename)
         return jsonify(success=True, reload_songs=True, song_name=filename)
