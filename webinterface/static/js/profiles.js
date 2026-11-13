@@ -84,8 +84,13 @@
                 toggle.style.opacity = '1';
                 toggle.style.backdropFilter = 'none';
             };
-            toggle.innerHTML = `<span class="truncate flex-1 min-w-0 mr-2 text-left" title="${selectedProfile ? selectedProfile.name : ''}">${selectedProfile ? selectedProfile.name : 'Select profile'}</span>
-                                <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>`;
+            // Profile names are user input: set them as text, never as HTML.
+            const toggleLabel = document.createElement('span');
+            toggleLabel.className = 'truncate flex-1 min-w-0 mr-2 text-left';
+            toggleLabel.title = selectedProfile ? selectedProfile.name : '';
+            toggleLabel.textContent = selectedProfile ? selectedProfile.name : 'Select profile';
+            toggle.appendChild(toggleLabel);
+            toggle.insertAdjacentHTML('beforeend', '<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>');
             container.appendChild(toggle);
 
             // Dropdown menu

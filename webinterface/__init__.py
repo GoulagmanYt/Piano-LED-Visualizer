@@ -1,5 +1,7 @@
 from flask import Flask
 import asyncio
+import os
+from urllib.parse import urlsplit
 import websockets
 from lib.functions import get_ip_address
 import json
@@ -89,6 +91,39 @@ class AppState:
 
 # Create a single instance of AppState
 app_state = AppState()
+
+
+def websocket_origin_allowed(headers):
+    """Browsers always send Origin on a WebSocket handshake; refuse other sites.
+
+    Any web page can open ws://<pi>:8765, which would let it inject MIDI notes
+    and read the live feed. Clients that send no Origin (scripts, native apps)
+    are unaffected. PLV_ALLOW_CROSS_SITE=1 disables the check.
+    """
+    if os.environ.get("PLV_ALLOW_CROSS_SITE") == "1":
+        return True
+    origin = headers.get("Origin")
+    if not origin:
+        return True
+    origin_host = urlsplit(origin).hostname
+    request_host = urlsplit("//" + headers.get("Host", "")).hostname
+    return origin_host is not None and origin_host == request_host
+
+
+async def reject_foreign_origin(websocket):
+    """Close the connection and return True if it comes from another site."""
+    request = getattr(websocket, "request", None)
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        headers = getattr(websocket, "request_headers", None)
+    if headers is None or websocket_origin_allowed(headers):
+        return False
+    logger.warning("Refused websocket connection from origin %s", headers.get("Origin"))
+    try:
+        await websocket.close(code=1008, reason="origin not allowed")
+    except Exception:
+        pass
+    return True
 
 
 _closing_tasks = set()
@@ -278,6 +313,8 @@ def start_server(loop):
 
     async def handler(websocket):
         try:
+            if await reject_foreign_origin(websocket):
+                return
             # Support both newer (websocket.request.path) and older (websocket.path) versions
             try:
                 path = websocket.request.path

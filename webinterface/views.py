@@ -2,6 +2,7 @@ from webinterface import webinterface, app_state
 from flask import render_template, request, jsonify
 import os
 import uuid
+from urllib.parse import urlsplit
 
 import time
 from lib.log_setup import logger
@@ -12,6 +13,42 @@ ALLOWED_EXTENSIONS = {'mid', 'musicxml', 'mxl', 'xml', 'abc'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+# State-changing actions (reboot, shutdown, Wi-Fi, updates, uploads...) are plain
+# GET/POST requests without authentication. A web page the user merely visits
+# could trigger them with an <img> or a form, so requests that a browser says
+# come from another site are refused. Non-browser clients send none of these
+# headers and are unaffected. Set PLV_ALLOW_CROSS_SITE=1 to disable the guard
+# (for example behind a reverse proxy that rewrites the Host header).
+GUARDED_PATH_PREFIXES = ("/api/", "/upload")
+
+
+def is_cross_site_request(req):
+    """True when the browser reports that `req` was triggered by another site."""
+    fetch_site = req.headers.get("Sec-Fetch-Site")
+    if fetch_site in ("same-origin", "none"):
+        return False
+    if fetch_site == "cross-site":
+        return True
+    # "same-site" (another port on this host), an unknown value, or an older
+    # browser without Fetch Metadata: fall back to Origin / Referer.
+    origin = req.headers.get("Origin") or req.headers.get("Referer")
+    if not origin:
+        return False
+    if origin == "null":
+        return True
+    return urlsplit(origin).netloc != req.host
+
+
+@webinterface.before_request
+def block_cross_site_requests():
+    if os.environ.get("PLV_ALLOW_CROSS_SITE") == "1":
+        return None
+    if request.path.startswith(GUARDED_PATH_PREFIXES) and is_cross_site_request(request):
+        logger.warning("Blocked cross-site request to %s", request.path)
+        return jsonify(success=False, error="cross-site request blocked"), 403
+    return None
 
 
 @webinterface.before_request
