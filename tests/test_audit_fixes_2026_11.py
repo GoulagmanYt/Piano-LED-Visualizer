@@ -266,13 +266,15 @@ class TestAutoinstallRetry(unittest.TestCase):
             "ping() { return 0; }",
             "sleep() { :; }",
             match.group(0),
-            'execute_command "false" "check_internet"',
+            'fail_operation() { echo OPERATION_ATTEMPT; return 1; }',
+            'execute_command "fail_operation" "check_internet"',
         ])
         import shutil
         bash = shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
         result = subprocess.run([bash, "-c", harness], capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout.count("Command failed with exit code 1."), 18)
+        self.assertEqual(result.stdout.splitlines().count("OPERATION_ATTEMPT"), 18)
+        self.assertEqual(result.stdout.count("Command failed with exit code 1"), 18)
 
 
 class TestSymmetricEndpointResolution(unittest.TestCase):

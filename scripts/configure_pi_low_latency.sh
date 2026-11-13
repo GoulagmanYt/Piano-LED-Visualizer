@@ -165,7 +165,8 @@ fi
 echo "Cleaning safe caches..."
 run apt-get clean || true
 run journalctl --vacuum-size=16M || true
-run find /tmp -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf -- {} + 2>/dev/null || true
+# Temporary directories can be old while their contents are still in use.
+# Their lifetime belongs to the OS and the programs that created them.
 
 echo "Reloading systemd and applying boot tuning..."
 run python3 "${PLV_DIR}/scripts/configure_service_safety.py"

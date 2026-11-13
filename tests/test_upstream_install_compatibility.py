@@ -1,14 +1,18 @@
 """Exercise installer command selection without modifying the host."""
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+BASH = shutil.which('bash') or r'C:\Program Files\Git\bin\bash.exe'
 
 
 def installer_function(name):
     script = (ROOT / 'autoinstall.sh').read_text()
-    match = re.search(r'^' + name + r'\(\) \{.*?^\}', script, re.M | re.S)
+    match = re.search(r'^' + name + r'\(\) \{.*?^\}', script, re.MULTILINE | re.DOTALL)
     assert match, name
     return match.group(0)
 
@@ -22,9 +26,7 @@ id() {{ return 0; }}
 {installer_function(name)}
 {name}
 '''
-    import shutil
-    bash = shutil.which('bash') or r'C:\Program Files\Git\bin\bash.exe'
-    return subprocess.run([bash, '-c', harness], check=True, text=True, capture_output=True).stdout
+    return subprocess.run([BASH, '-c', harness], check=True, text=True, capture_output=True).stdout
 
 
 def test_package_selection_for_bookworm_and_trixie():
@@ -67,3 +69,79 @@ def test_new_install_does_not_create_mesh_system_service():
     assert 'configure_autoconnect_script' not in script
     assert '33-midiusb.rules' not in script
     assert '/usr/local/bin/connectall.py' not in script
+
+
+@pytest.mark.parametrize('existing_user', [False, True])
+def test_identity_preserves_existing_password(existing_user):
+    harness = f'''set -euo pipefail
+PLV_HOSTNAME=pianoledvisualizer
+PLV_USER=plv
+PLV_PASSWORD=visualizer
+execute_command() {{ echo "COMMAND:$1"; }}
+getent() {{ return 0; }}
+id() {{ return {0 if existing_user else 1}; }}
+sudo() {{
+  if [ "$1" = chpasswd ]; then
+    cat >/dev/null
+    echo PASSWORD_CHANGED
+  elif [ "$1" = tee ]; then
+    cat >/dev/null
+  else
+    return 1
+  fi
+}}
+systemctl() {{ return 0; }}
+{installer_function('configure_pi_identity')}
+configure_pi_identity
+'''
+    result = subprocess.run([BASH, '-c', harness], check=True, text=True, capture_output=True)
+    assert ('PASSWORD_CHANGED' in result.stdout) is not existing_user
+    assert ('useradd' in result.stdout) is not existing_user
+
+
+def test_network_commands_work_when_icmp_is_blocked():
+    harness = f'''set -euo pipefail
+ping() {{ echo UNEXPECTED_PING; return 1; }}
+sleep() {{ :; }}
+download() {{ echo HTTPS_DOWNLOAD; }}
+{installer_function('execute_command')}
+execute_command download check_internet
+'''
+    result = subprocess.run([BASH, '-c', harness], check=False, text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'HTTPS_DOWNLOAD' in result.stdout
+    assert 'UNEXPECTED_PING' not in result.stdout
+
+
+def test_network_command_retry_preserves_failures_and_stops_on_success():
+    harness = f'''set -euo pipefail
+ping() {{ return 0; }}
+sleep() {{ :; }}
+attempts=0
+download() {{
+  attempts=$((attempts + 1))
+  echo "ATTEMPT:$attempts"
+  [ "$attempts" -eq 3 ]
+}}
+{installer_function('execute_command')}
+execute_command download check_internet
+echo "COMPLETED:$attempts"
+'''
+    result = subprocess.run([BASH, '-c', harness], check=False, text=True, capture_output=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'COMPLETED:3' in result.stdout
+
+
+def test_network_command_exhaustion_exits_with_failure():
+    harness = f'''set -euo pipefail
+ping() {{ return 0; }}
+sleep() {{ :; }}
+download() {{ echo ATTEMPT; return 23; }}
+{installer_function('execute_command')}
+execute_command download check_internet
+echo UNEXPECTED_SUCCESS
+'''
+    result = subprocess.run([BASH, '-c', harness], check=False, text=True, capture_output=True)
+    assert result.returncode != 0
+    assert result.stdout.splitlines().count('ATTEMPT') == 18
+    assert 'UNEXPECTED_SUCCESS' not in result.stdout

@@ -27,9 +27,9 @@ display_error() {
   exit 1
 }
 
-# Function to execute a command and handle errors, with optional internet connectivity check
+# Execute commands, retrying network operations against their actual endpoint.
 execute_command() {
-  local check_internet="${2:-}"  # Check for internet if this argument is provided
+  local check_internet="${2:-}"  # Legacy argument: retry network operations
 
   echo "Executing: $1"
 
@@ -37,24 +37,18 @@ execute_command() {
     local max_retries=18  # Total number of retries (18 retries * 10 seconds = 3 minutes)
     local retry_interval=10  # Retry interval in seconds
 
+    local attempt exit_code
     for ((attempt = 1; attempt <= max_retries; attempt++)); do
-      # Check for internet connectivity
-      if ping -q -c 1 -W 1 google.com &>/dev/null; then
-        # Internet is available, execute the command
-        # "|| exit_code=$?" : sous "set -e", un eval qui échoue arrêterait le script
-        # avant la boucle de retry.
-        local exit_code=0
-        eval "$1" || exit_code=$?
-
-        if [ $exit_code -eq 0 ]; then
-          return 0  # Command executed successfully
-        else
-          echo "Command failed with exit code $exit_code."
-          sleep $retry_interval  # Wait before retrying
-        fi
-      else
-        echo "Internet not available, retrying in $retry_interval seconds (Attempt $attempt/$max_retries)..."
-        sleep $retry_interval  # Wait before retrying
+      # ICMP may be blocked even when apt/Git/HTTPS work. Let the operation
+      # itself determine connectivity, including its DNS/proxy/TLS settings.
+      exit_code=0
+      eval "$1" || exit_code=$?
+      if [ "$exit_code" -eq 0 ]; then
+        return 0
+      fi
+      echo "Command failed with exit code $exit_code (Attempt $attempt/$max_retries)."
+      if [ "$attempt" -lt "$max_retries" ]; then
+        sleep "$retry_interval"
       fi
     done
 
@@ -94,9 +88,10 @@ configure_pi_identity() {
 
   if ! id -u "${PLV_USER}" >/dev/null 2>&1; then
     execute_command "sudo useradd -m -s /bin/bash -G ${user_groups} ${PLV_USER}"
+    # Reinstallation must preserve an existing account's chosen password.
+    echo "${PLV_USER}:${PLV_PASSWORD}" | sudo chpasswd
   fi
 
-  echo "${PLV_USER}:${PLV_PASSWORD}" | sudo chpasswd
   execute_command "sudo usermod -aG ${user_groups} ${PLV_USER}"
   echo "${PLV_USER} ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/010_pi-nopasswd >/dev/null
   execute_command "sudo chmod 0440 /etc/sudoers.d/010_pi-nopasswd"
