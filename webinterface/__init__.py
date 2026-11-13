@@ -1,6 +1,7 @@
 from flask import Flask
 import asyncio
 import os
+import threading
 from urllib.parse import urlsplit
 import websockets
 from lib.functions import get_ip_address
@@ -200,6 +201,11 @@ async def broadcast_midi_to_clients(wake_event=None, send_timeout=WEBSOCKET_SEND
 
 
 def start_server(loop):
+    loop._plv_server_thread = threading.current_thread()
+    if getattr(loop, "_plv_stop_requested", False):
+        loop.close()
+        return
+
     async def learning(websocket):
         try:
             app_state.websocket_midi_clients.add(websocket)
@@ -340,7 +346,7 @@ def start_server(loop):
         # Initialize the global broadcast task, woken as soon as MIDI is queued
         wake_event = asyncio.Event()
         webinterface.websocket_midi_send.attach_wakeup(loop, wake_event)
-        asyncio.create_task(broadcast_midi_to_clients(wake_event))
+        broadcast_task = asyncio.create_task(broadcast_midi_to_clients(wake_event))
         
         listen_ip = app_state.usersettings.get_setting_value("web_listen_ip")
 
@@ -351,21 +357,54 @@ def start_server(loop):
             listen_ip = "0.0.0.0"
 
         logger.info("WebSocket listening on: " + show_ip + ":8765")
-        async with websockets.serve(handler, listen_ip, 8765):
-            await asyncio.Future()
+        try:
+            async with websockets.serve(handler, listen_ip, 8765):
+                await asyncio.Future()
+        finally:
+            broadcast_task.cancel()
+            await asyncio.gather(broadcast_task, return_exceptions=True)
 
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(main())
+    task = loop.create_task(main())
+    loop._plv_server_task = task
+    if getattr(loop, "_plv_stop_requested", False):
+        task.cancel()
+    try:
+        loop.run_until_complete(task)
+    except asyncio.CancelledError:
+        pass  # An explicit stop cancels the owner and exits websockets.serve.
+    finally:
+        webinterface.websocket_midi_send.detach_wakeup()
+        pending = asyncio.all_tasks(loop)
+        for pending_task in pending:
+            pending_task.cancel()
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
 
 
 # Stop the WebSocket server and cancel pending tasks on shutdown
 def stop_server(loop):
-    detach = getattr(webinterface.websocket_midi_send, "detach_wakeup", None)
-    if detach is not None:
-        detach()
-    for task in asyncio.all_tasks(loop=loop):
-        task.cancel()
-    loop.stop()
+    if loop.is_closed():
+        return True
+    if not getattr(loop, "_plv_stop_requested", False):
+        loop._plv_stop_requested = True
+
+        def cancel_owner():
+            task = getattr(loop, "_plv_server_task", None)
+            if task is not None:
+                task.cancel()
+
+        try:
+            loop.call_soon_threadsafe(cancel_owner)
+        except RuntimeError:
+            if not loop.is_closed():
+                raise
+    owner = getattr(loop, "_plv_server_thread", None)
+    if owner is not None and owner is not threading.current_thread():
+        owner.join(timeout=5)
+        return not owner.is_alive()
+    return loop.is_closed()
 
 
 # Import views after app is defined to avoid circular imports
