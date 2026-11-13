@@ -17,3 +17,7 @@ Docs/audit_pass_4.md
 # Tooling caches
 .ruff_cache/
 .coverage
+/.codex
+/.agents
+.codexignore
+AGENTS.md
