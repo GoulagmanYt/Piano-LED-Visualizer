@@ -40,7 +40,7 @@ def test_extract_midi_note_velocity_reads_mido_attributes_without_string_parsing
 
 
 def test_learn_midi_note_drain_uses_attribute_helper_instead_of_string_parsing():
-    source = inspect.getsource(learnmidi.LearnMIDI.learn_midi)
+    source = inspect.getsource(learnmidi.LearnMIDI._run_learning)
 
     assert "find_between(str(msg_in)" not in source
     assert "_extract_midi_note_velocity(msg_in)" in source

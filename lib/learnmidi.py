@@ -131,6 +131,7 @@ class LearnMIDI:
         self.is_started_midi = False
         self.learning_state = "stopped"
         self._state_lock = threading.RLock()
+        self._learning_thread = None
         self.stop_event = threading.Event()
         self.t = None
 
@@ -169,8 +170,12 @@ class LearnMIDI:
     def restart_learning(self):
         if self.is_started_midi:
             self.stop_learning()
-            if self.t and self.t is not threading.current_thread():
-                self.t.join(timeout=2)
+            worker = getattr(self, "_learning_thread", None) or self.t
+            if worker and worker is not threading.current_thread():
+                worker.join(timeout=2)
+                if worker.is_alive():
+                    logger.warning("Learning restart deferred: previous worker is still stopping")
+                    return
             self.t = threading.Thread(target=self.learn_midi)
             self.t.start()
 
@@ -180,6 +185,7 @@ class LearnMIDI:
             stop_event = threading.Event()
             self.stop_event = stop_event
         with self._state_lock:
+            self._stop_cleanups = getattr(self, "_stop_cleanups", 0) + 1
             self.learning_state = "stopping"
             self.is_started_midi = False
             stop_event.set()
@@ -187,15 +193,21 @@ class LearnMIDI:
                 self.pending_software_notes.clear()
             self.next_note_time = None
             self.next_note_delay = None
-        if hasattr(self.midiports, "clear_scheduled_rtp_messages"):
-            self.midiports.clear_scheduled_rtp_messages(source="learning")
-        elif hasattr(self.midiports, "queues"):
-            self.midiports.queues.clear_scheduled_forward(source="learning")
-        if hasattr(self.midiports, "send_all_notes_off"):
+        try:
             try:
-                self.midiports.send_all_notes_off()
-            except Exception as e:
-                logger.debug(f"Learning MIDI panic send failed: {e}")
+                if hasattr(self.midiports, "clear_scheduled_rtp_messages"):
+                    self.midiports.clear_scheduled_rtp_messages(source="learning")
+                elif hasattr(self.midiports, "queues"):
+                    self.midiports.queues.clear_scheduled_forward(source="learning")
+            finally:
+                if hasattr(self.midiports, "send_all_notes_off"):
+                    try:
+                        self.midiports.send_all_notes_off()
+                    except Exception as e:
+                        logger.debug(f"Learning MIDI panic send failed: {e}")
+        finally:
+            with self._state_lock:
+                self._stop_cleanups -= 1
         logger.info("learning_midi transition=stopping")
 
     def _wait_or_stopped(self, delay):
@@ -472,28 +484,50 @@ class LearnMIDI:
         self.ledstrip.strip.show()
 
     def learn_midi(self):
-        loops_count = 0
-        # Preliminary checks
         with self._state_lock:
-            if self.is_started_midi:
+            owner = getattr(self, "_learning_thread", None)
+            if (self.is_started_midi or getattr(self, "_stop_cleanups", 0)
+                    or (owner is not None and owner.is_alive())):
                 return
             if not hasattr(self, "stop_event"):
                 self.stop_event = threading.Event()
             self.stop_event.clear()
+            # Reserve the session before releasing the lock, including loading.
+            self.is_started_midi = True
+            self.t = threading.current_thread()
+            self._learning_thread = self.t
             self.learning_state = "starting"
             logger.info("learning_midi transition=starting")
+        try:
+            self._run_learning()
+        except Exception:
+            self.learning_state = "error"
+            logger.exception("Learning session failed")
+        finally:
+            final_state = "error" if self.learning_state == "error" else "stopped"
+            try:
+                if self.learning_state != "stopping":
+                    self.stop_learning()
+            finally:
+                with self._state_lock:
+                    self.is_started_midi = False
+                    self.learning_state = final_state
+                    self._learning_thread = None
+                logger.info("learning_midi transition=%s", final_state)
+
+    def _run_learning(self):
+        loops_count = 0
         if self.loading == 0:
             self.menu.render_message("Load song to start", "", 1500)
+            self.is_started_midi = False
             self.learning_state = "stopped"
             return
         elif 0 < self.loading < 4:
-            self.is_started_midi = True  # Prevent restarting the Thread
             while 0 < self.loading < 4:
                 if self._wait_or_stopped(0.1):
                     self.learning_state = "stopped"
                     return
         if self.loading == 4:
-            self.is_started_midi = True  # Prevent restarting the Thread
             self.learning_state = "running"
             logger.info("learning_midi transition=running")
             # Reset the score when starting a new learning session
@@ -548,7 +582,7 @@ class LearnMIDI:
             }))
             try:
                 fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
-                time_prev = time.time()
+                event_due_perf = time.perf_counter()
                 notes_to_press = []
 
                 start_idx = int(self.start_point * len(self.song_tracks) / 100)
@@ -557,7 +591,13 @@ class LearnMIDI:
                 # self.current_idx does not count meta messages (used for sheet music sync in web interface)
                 # absolute_idx counts all messages (used for predicting messages)
 
-                self.current_idx = start_idx
+                self.current_idx = sum(not message.is_meta for message in islice(self.song_tracks, start_idx))
+                # A section inherits the tempo at its start; tempo changes take
+                # effect after their own delta, as required by MIDI files.
+                tempo = 500000
+                for message in islice(self.song_tracks, start_idx):
+                    if message.type == 'set_tempo':
+                        tempo = message.tempo
                 track_range = islice(self.song_tracks, start_idx, end_idx)
                 messages_with_lookahead = pairwise(chain(track_range, (None,)))
 
@@ -569,7 +609,7 @@ class LearnMIDI:
                         break
 
                     # Get time delay
-                    tDelay = mido.tick2second(msg.time, self.ticks_per_beat, self.song_tempo * 100 / self.set_tempo)
+                    tDelay = mido.tick2second(msg.time, self.ticks_per_beat, tempo * 100 / self.set_tempo)
 
                     # Check notes to press
                     if not msg.is_meta:
@@ -692,21 +732,24 @@ class LearnMIDI:
                             fastColorWipe(self.ledstrip.strip, True,
                                           self.ledsettings)  # ideally clear only pressed notes!
                             notes_to_press.clear()
+                            # Melody mode deliberately pauses musical time while
+                            # waiting for the player. Resume from this group.
+                            event_due_perf = max(event_due_perf, time.perf_counter() - tDelay)
 
                     # Realize time delay, consider also the time lost during computation
-                    delay = max(0, tDelay - (
-                            time.time() - time_prev) - 0.003)  # 0.003 sec calibratable to account for extra time loss
-                    event_due_perf = time.perf_counter() + delay
+                    event_due_perf += tDelay
+                    delay = max(0, event_due_perf - time.perf_counter())
                     if self._wait_or_stopped(delay):
                         break
-                    time_prev = time.time()
+                    if msg.type == 'set_tempo':
+                        tempo = msg.tempo
 
                     # Light-up LEDs with the notes to press
                     if not msg.is_meta:
                         # Calculate note position on the strip and display
                         if msg.type == 'note_on' or msg.type == 'note_off':
                             note_position = get_note_position(msg.note, self.ledstrip, self.ledsettings)
-                            if msg.velocity == 0:
+                            if msg.type == 'note_off' or msg.velocity == 0:
                                 brightness = 0
                             else:
                                 brightness = 0.5
@@ -765,7 +808,7 @@ class LearnMIDI:
                             next_delay = mido.tick2second(
                                 next_msg.time,
                                 self.ticks_per_beat,
-                                self.song_tempo * 100 / self.set_tempo,
+                                tempo * 100 / self.set_tempo,
                             )
                         if next_msg is None or next_delay > 0:
                             self.ledstrip.strip.show()
@@ -850,10 +893,6 @@ class LearnMIDI:
                     score_logger.info(f"Sent session summary (length: {len(json.dumps(summary_data))})") # Log length for debugging if needed
                 except Exception as e:
                     score_logger.error(f"Error preparing/sending session summary: {e}")
-        if self.learning_state != "error":
-            self.learning_state = "stopped"
-            logger.info("learning_midi transition=stopped")
-
     def convert_midi_to_abc(self, midi_file):
         if not os.path.isfile('Songs/' + midi_file.replace(".mid", ".abc")):
             # subprocess.call(['midi2abc',  'Songs/' + midi_file, '-o', 'Songs/' + midi_file.replace(".mid", ".abc")])
