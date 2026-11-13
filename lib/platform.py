@@ -1,3 +1,4 @@
+import threading
 import time
 import subprocess
 from subprocess import call
@@ -11,6 +12,11 @@ import sys
 import json
 from pathlib import Path
 from collections import defaultdict
+
+HOSTS_FILE = "/etc/hosts"
+# RFC 1123 label: 1-63 letters, digits or hyphens, never starting or ending with
+# a hyphen (a leading "-" would be parsed as an option by hostnamectl).
+HOSTNAME_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
 
 def _strip_local_suffix(name):
@@ -56,6 +62,9 @@ class PlatformRasp(PlatformBase):
     DEFAULT_HOTSPOT_PASSWORD = "visualizer"
     UPDATE_STATE_DIR = Path("/var/lib/piano-led-visualizer")
     UPDATE_UNIT = "plv-reliable-update"
+    # Serialises "is an update running?" + "mark it as starting" so two quick
+    # requests (double click) cannot both launch an updater.
+    _update_lock = threading.Lock()
 
     @staticmethod
     def check_and_enable_spi():
@@ -132,29 +141,31 @@ class PlatformRasp(PlatformBase):
     @classmethod
     def update_visualizer(cls):
         """Start the updater in an independent systemd transient service."""
-        current_status = cls.get_update_status()
-        if current_status.get("state") not in {"idle", "success", "no_update", "rolled_back", "failed"}:
-            return {"success": False, "error": "Une mise à jour est déjà en cours", **current_status}
-
         project_dir = Path(__file__).resolve().parent.parent
         updater = project_dir / "scripts" / "reliable_update.py"
-        if not updater.is_file():
-            return {"success": False, "error": f"Programme de mise à jour introuvable: {updater}"}
+        status_path = cls.UPDATE_STATE_DIR / "update-status.json"
 
-        try:
-            cls.UPDATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
-            status_path = cls.UPDATE_STATE_DIR / "update-status.json"
-            temporary_status = status_path.with_suffix(".json.tmp")
-            temporary_status.write_text(json.dumps({
-                "state": "starting",
-                "message": "Démarrage de la mise à jour sécurisée",
-                "started_at": int(time.time()),
-                "updated_at": int(time.time()),
-            }), encoding="utf-8")
-            os.replace(temporary_status, status_path)
-        except OSError as error:
-            logger.error(f"Unable to initialize update state: {error}")
-            return {"success": False, "error": f"Impossible d'initialiser la mise à jour: {error}"}
+        with cls._update_lock:
+            current_status = cls.get_update_status()
+            if current_status.get("state") not in {"idle", "success", "no_update", "rolled_back", "failed"}:
+                return {"success": False, "error": "Une mise à jour est déjà en cours", **current_status}
+
+            if not updater.is_file():
+                return {"success": False, "error": f"Programme de mise à jour introuvable: {updater}"}
+
+            try:
+                cls.UPDATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+                temporary_status = status_path.with_suffix(".json.tmp")
+                temporary_status.write_text(json.dumps({
+                    "state": "starting",
+                    "message": "Démarrage de la mise à jour sécurisée",
+                    "started_at": int(time.time()),
+                    "updated_at": int(time.time()),
+                }), encoding="utf-8")
+                os.replace(temporary_status, status_path)
+            except OSError as error:
+                logger.error(f"Unable to initialize update state: {error}")
+                return {"success": False, "error": f"Impossible d'initialiser la mise à jour: {error}"}
 
         geteuid = getattr(os, "geteuid", lambda: 1)
         unit_name = f"{cls.UPDATE_UNIT}-{int(time.time())}"
@@ -412,6 +423,12 @@ class PlatformRasp(PlatformBase):
         hotspot.last_wifi_check_time = current_time
 
     def connect_to_wifi(self, ssid, password, hotspot, usersettings):
+        # A request without an SSID must not take the hotspot down: it could be
+        # the only way to reach the device.
+        if not isinstance(ssid, str) or not ssid:
+            logger.warning("Wi-Fi connection refused: no SSID given")
+            return False
+
         # Disable the hotspot first
         self.disable_hotspot()
 
@@ -419,9 +436,9 @@ class PlatformRasp(PlatformBase):
         # profiles (including Hotspot) cannot overwrite one another.
         import hashlib
         password = password or ""
-        digest = hashlib.sha256(ssid.encode("utf-8")).hexdigest()[:24]
-        con_name = "PLV-" + digest + ("-wpa" if password else "-open")
         try:
+            digest = hashlib.sha256(ssid.encode("utf-8")).hexdigest()[:24]
+            con_name = "PLV-" + digest + ("-wpa" if password else "-open")
             existing = subprocess.run(
                 ['sudo', 'nmcli', 'connection', 'show', con_name],
                 capture_output=True, text=True, check=False,
@@ -551,18 +568,19 @@ class PlatformRasp(PlatformBase):
         new_name = _strip_local_suffix(new_name)
         logger.info("Changing local address to " + new_name)
         # Validate the new name
-        if not re.match(r'^[a-zA-Z0-9-]+$', new_name):
-            raise ValueError("Invalid name. Use only letters, numbers, and hyphens.")
+        if not HOSTNAME_LABEL.fullmatch(new_name):
+            raise ValueError("Invalid name. Use only letters, numbers, and hyphens "
+                             "(1-63 characters, not starting or ending with a hyphen).")
 
         try:
             # Change the hostname
             subprocess.run(['sudo', 'hostnamectl', 'set-hostname', new_name], check=True)
 
             # Update /etc/hosts file
-            with open('/etc/hosts', 'r') as file:
+            with open(HOSTS_FILE, 'r') as file:
                 hosts_content = file.readlines()
 
-            with open('/etc/hosts', 'w') as file:
+            with open(HOSTS_FILE, 'w') as file:
                 for line in hosts_content:
                     if "127.0.1.1" in line:
                         file.write(f"127.0.1.1\t{new_name}\n")
