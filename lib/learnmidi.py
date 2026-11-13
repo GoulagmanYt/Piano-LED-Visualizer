@@ -12,10 +12,11 @@ from lib.functions import clamp, fastColorWipe, find_between, get_note_position
 from lib.rpi_drivers import Color
 
 import numpy as np
-import pickle
 from lib.log_setup import logger
 from lib.learning_input_adapter import LearningInputAdapter
+from lib.learning_cache import load_learning_cache, save_learning_cache
 from lib.score_manager import ScoreManager
+from lib.song_file_security import resolve_song_path
 from webinterface import app_state
 
 import logging
@@ -23,10 +24,6 @@ from logging.handlers import RotatingFileHandler
 from itertools import chain, islice, pairwise
 
 from lib.broadcast_outbox import BroadcastOutbox
-
-# Incrémenter quand le calcul de notes_time change (invalide les caches .p existants)
-NOTES_TIME_CACHE_VERSION = 2
-
 
 def compute_notes_time(mid):
     """Temps absolu (secondes) de chaque message non-meta d'un MidiFile.
@@ -131,6 +128,8 @@ class LearnMIDI:
         self.is_started_midi = False
         self.learning_state = "stopped"
         self._state_lock = threading.RLock()
+        self._load_lock = threading.Lock()
+        self._load_initializing = False
         self._learning_thread = None
         self.stop_event = threading.Event()
         self.t = None
@@ -267,34 +266,51 @@ class LearnMIDI:
             self.usersettings.change_setting_value("hand_colorL", self.hand_colorL)
 
     def load_song_from_cache(self, song_path):
-        # Load song from cache
         try:
-            if os.path.isfile('Songs/cache/' + song_path + '.p'):
-                logger.info("Loading song from cache")
-                with open('Songs/cache/' + song_path + '.p', 'rb') as handle:
-                    cache = pickle.load(handle)
-                    # Caches générés avant la correction de notes_time : à régénérer
-                    if cache.get('notes_time_version') != NOTES_TIME_CACHE_VERSION:
-                        logger.info("Cache obsolète (notes_time), régénération")
-                        return False
-                    self.song_tempo = cache['song_tempo']
-                    self.ticks_per_beat = cache['ticks_per_beat']
-                    self.song_tracks = cache['song_tracks']
-                    self.notes_time = cache['notes_time']
-                    self.loading = 4
-                    return True
-            else:
-                return False
-        except Exception as e:
-            logger.warning(e)
+            source = resolve_song_path(song_path, must_exist=True, allowed_extensions={"mid"})
+        except (ValueError, OSError):
+            return False
+        cache = load_learning_cache(song_path, source)
+        if cache is None:
+            return False
+        self.song_tempo = cache['song_tempo']
+        self.ticks_per_beat = cache['ticks_per_beat']
+        self.song_tracks = cache['song_tracks']
+        self.notes_time = cache['notes_time']
+        self.loading = 4
+        return True
 
     def load_midi(self, song_path):
-        while 4 > self.loading > 0:
-            time.sleep(1)
-
-        if song_path in self.is_loaded_midi.keys():
+        try:
+            source = resolve_song_path(song_path, must_exist=True, allowed_extensions={"mid"})
+        except (ValueError, OSError) as error:
+            logger.warning("Cannot load learning song: %s", error)
+            self.loading = 5
             return
+        with self._load_lock:
+            with self._state_lock:
+                self._load_initializing = True
+            try:
+                self.stop_learning()
+                owner = self._learning_thread
+                if owner is threading.current_thread():
+                    raise RuntimeError("Learning worker cannot replace its own song")
+                if owner is not None:
+                    owner.join(timeout=2)
+                    if owner.is_alive():
+                        raise RuntimeError("Previous learning worker is still stopping")
+                with self._state_lock:
+                    self.loading = 1
+                    self._load_initializing = False
+                self._load_midi(song_path, source)
+            except (OSError, RuntimeError) as error:
+                logger.warning("Cannot replace learning song: %s", error)
+                self.loading = 5
+            finally:
+                with self._state_lock:
+                    self._load_initializing = False
 
+    def _load_midi(self, song_path, source):
         self.is_loaded_midi.clear()
         self.is_loaded_midi[song_path] = True
         # Remember currently loaded song for highscore tracking
@@ -330,11 +346,6 @@ class LearnMIDI:
                     app_state.learning.is_led_activeR = section_list["rh_active"]
         except Exception as e:
             logger.warning(f"Failed to fetch learning section: {e}")
-        self.is_started_midi = False  # Stop current learning song
-        if hasattr(self, "stop_event"):
-            self.stop_event.set()
-        self.t = threading.current_thread()
-
         # Load song from cache
         if self.load_song_from_cache(song_path):
             return
@@ -342,7 +353,8 @@ class LearnMIDI:
 
         try:
             # Load the midi file
-            mid = mido.MidiFile('Songs/' + song_path, clip=True)  # clip=True fixes some midi files
+            source_stat = source.stat()
+            mid = mido.MidiFile(source, clip=True)  # clip=True fixes some midi files
 
             # Get tempo and Ticks per beat
             self.song_tempo = get_tempo(mid)
@@ -370,11 +382,16 @@ class LearnMIDI:
             fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
 
             # Save to cache
-            with open('Songs/cache/' + song_path + '.p', 'wb') as handle:
-                cache = {'song_tempo': self.song_tempo, 'ticks_per_beat': self.ticks_per_beat,
-                         'notes_time': self.notes_time, 'song_tracks': self.song_tracks,
-                         'notes_time_version': NOTES_TIME_CACHE_VERSION, }
-                pickle.dump(cache, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            try:
+                current_stat = source.stat()
+                if ((source_stat.st_mtime_ns, source_stat.st_size)
+                        == (current_stat.st_mtime_ns, current_stat.st_size)):
+                    save_learning_cache(song_path, source, {
+                        'song_tempo': self.song_tempo, 'ticks_per_beat': self.ticks_per_beat,
+                        'notes_time': self.notes_time, 'song_tracks': self.song_tracks,
+                    })
+            except (OSError, ValueError) as error:
+                logger.warning("Learning cache unavailable; song remains playable: %s", error)
 
             self.loading = 4  # 4 = Done
         except Exception as e:
@@ -486,7 +503,7 @@ class LearnMIDI:
     def learn_midi(self):
         with self._state_lock:
             owner = getattr(self, "_learning_thread", None)
-            if (self.is_started_midi or getattr(self, "_stop_cleanups", 0)
+            if (self.is_started_midi or self._load_initializing or getattr(self, "_stop_cleanups", 0)
                     or (owner is not None and owner.is_alive())):
                 return
             if not hasattr(self, "stop_event"):

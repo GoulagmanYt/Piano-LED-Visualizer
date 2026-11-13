@@ -1,6 +1,10 @@
 """Exercise the legacy learning player with a deterministic clock and MIDI output."""
 
+import json
+import os
+import pickle
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -195,3 +199,102 @@ def test_start_is_refused_until_external_stop_cleanup_finishes(player, monkeypat
         release.set()
         worker.join(2)
     assert not worker.is_alive()
+
+
+def save_song(path, note):
+    song = mido.MidiFile(ticks_per_beat=480)
+    song.tracks.append(mido.MidiTrack([
+        mido.Message("note_on", note=note, velocity=90),
+        mido.Message("note_off", note=note, time=480),
+    ]))
+    song.save(path)
+
+
+@pytest.fixture
+def song_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "Songs").mkdir()
+    path = tmp_path / "Songs" / "study.mid"
+    save_song(path, 60)
+    return path
+
+
+def test_loader_ignores_executable_legacy_cache(player, song_path):
+    marker = song_path.parent / "executed"
+
+    class LegacyPayload:
+        def __reduce__(self):
+            return Path.write_text, (marker, "unsafe cache executed")
+
+    cache_dir = song_path.parent / "cache"
+    cache_dir.mkdir()
+    cache = cache_dir / "study.mid.p"
+    cache.write_bytes(pickle.dumps(LegacyPayload()))
+    player.load_midi("study.mid")
+    assert player.loading == 4
+    assert not marker.exists()
+    assert json.loads(cache.read_text())["version"] == 1
+
+
+def test_loader_reloads_a_replaced_song_and_reuses_valid_json_cache(player, song_path, monkeypatch):
+    player.load_midi("study.mid")
+    save_song(song_path, 62)
+    stat = song_path.stat()
+    # Explicitly change the identity even on filesystems with coarse mtimes.
+    os.utime(song_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    player.load_midi("study.mid")
+    assert player.loading == 4
+    assert next(msg.note for msg in player.song_tracks if msg.type == "note_on") == 62
+    monkeypatch.setattr(learnmidi.mido, "MidiFile", Mock(side_effect=AssertionError("cache should be used")))
+    player.load_midi("study.mid")
+    assert player.loading == 4
+
+
+@pytest.mark.parametrize("error", [PermissionError("read-only cache"), ValueError("oversized cache")])
+def test_cache_write_failure_does_not_reject_a_valid_song(player, song_path, monkeypatch, error):
+    monkeypatch.setattr(learnmidi, "save_learning_cache", Mock(side_effect=error))
+    player.load_midi("study.mid")
+    assert player.loading == 4
+    assert any(msg.type == "note_on" for msg in player.song_tracks)
+
+
+@pytest.mark.parametrize("name", ["../study.mid", "..\\study.mid", "/outside.mid"])
+def test_loader_rejects_paths_before_parsing(player, song_path, monkeypatch, name):
+    parser = Mock(side_effect=AssertionError("unsafe path parsed"))
+    monkeypatch.setattr(learnmidi.mido, "MidiFile", parser)
+    player.load_midi(name)
+    parser.assert_not_called()
+    assert player.loading == 5
+
+
+def test_loading_cannot_replace_a_song_still_owned_by_a_worker(player, song_path):
+    owner = Mock()
+    owner.is_alive.return_value = True
+    player._learning_thread = owner
+    player.t = owner
+    player.is_started_midi = True
+    previous = [mido.Message("note_on", note=70)]
+    player.song_tracks = previous
+    player.load_midi("study.mid")
+    assert player.loading == 5
+    assert player.song_tracks is previous
+    owner.join.assert_called_once_with(timeout=2)
+
+
+def test_source_replaced_during_parsing_does_not_poison_cache(player, song_path, monkeypatch):
+    parser = mido.MidiFile
+    replacement = song_path.parent / "replacement.mid"
+    save_song(replacement, 62)
+    replacement_bytes = replacement.read_bytes()
+
+    def replace_after_parse(*args, **kwargs):
+        parsed = parser(*args, **kwargs)
+        song_path.write_bytes(replacement_bytes)
+        stat = song_path.stat()
+        os.utime(song_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        return parsed
+
+    monkeypatch.setattr(learnmidi.mido, "MidiFile", replace_after_parse)
+    player.load_midi("study.mid")
+    assert player.loading == 4
+    assert not (song_path.parent / "cache" / "study.mid.p").exists()
