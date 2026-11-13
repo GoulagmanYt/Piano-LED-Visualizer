@@ -706,22 +706,46 @@ class MidiPorts:
         self.websocket_publish_thread.start()
 
     def close(self):
-        self.stop_midi_monitor()
-        bridge = getattr(self, "learning_bridge", None)
-        if bridge is not None and not bridge.close():
-            logger.error("Learning bridge cleanup incomplete; ports remain owned by their workers")
         self.worker_running = False
         self._notify_forward_worker()
         self._wake_websocket_publish_worker()
+        monitor_stopped = self.stop_midi_monitor()
         for worker in (self.live_forward_thread, self.websocket_publish_thread):
             if worker is not None and worker is not threading.current_thread():
                 worker.join(timeout=2)
-        for name in ("inport", "playport"):
-            if name == "playport":
-                self.queues.set_forwarding_enabled(False)
-                self._silence_output(getattr(self, name, None))
-            self._safe_close_port(getattr(self, name, None))
-            setattr(self, name, None)
+        # A timed-out monitor may still replace the handles; a timed-out
+        # forwarder may still be inside native send(). Preserve ownership so
+        # a later close() can finish once those workers have actually exited.
+        forwarder = self.live_forward_thread
+        if not monitor_stopped or (forwarder is not None and forwarder.is_alive()):
+            logger.error("MIDI shutdown incomplete; active workers retain their ports")
+            return False
+        bridge = getattr(self, "learning_bridge", None)
+        bridge_stopped = bridge is None or bridge.close()
+        if not bridge_stopped:
+            logger.error("Learning bridge cleanup incomplete; ports remain owned by their workers")
+        output_lock = self._get_output_lock()
+        if not output_lock.acquire(blocking=False):
+            logger.error("MIDI shutdown incomplete; an output operation still owns the port")
+            return False
+        try:
+            for name in ("inport", "playport"):
+                port = getattr(self, name, None)
+                if name == "playport":
+                    self.queues.set_forwarding_enabled(False)
+                    self._silence_output(port)
+                try:
+                    if port is not None:
+                        port.close()
+                except Exception as error:
+                    # Buffered inputs also refuse native cleanup while their
+                    # callback/drain thread is alive. Keep that handle for retry.
+                    logger.error("MIDI shutdown could not close %s: %s", name, error, exc_info=True)
+                    return False
+                setattr(self, name, None)
+        finally:
+            output_lock.release()
+        return bridge_stopped
 
     def _safe_close_port(self, port_handle):
         if port_handle is None:
@@ -1490,9 +1514,14 @@ class MidiPorts:
         """Stop monitoring for MIDI device changes."""
         self.monitor_running = False
         self.monitor_stop.set()
-        if self.midi_monitor_thread and self.midi_monitor_thread.is_alive():
-            self.midi_monitor_thread.join(timeout=1)
+        monitor = self.midi_monitor_thread
+        if monitor is not None and monitor is not threading.current_thread() and monitor.is_alive():
+            monitor.join(timeout=1)
+        if monitor is not None and monitor.is_alive():
+            logger.warning("MIDI device monitor did not stop before the shutdown deadline")
+            return False
         logger.info("MIDI device monitor stopped")
+        return True
 
     def _auto_reconnect_once(self, last_input_present, last_secondary_present, last_play_present):
         _refresh_port_cache()
