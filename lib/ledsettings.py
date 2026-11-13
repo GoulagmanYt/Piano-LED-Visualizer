@@ -2,7 +2,7 @@ import ast
 import time
 from xml.dom import minidom
 
-from lib.functions import fastColorWipe, find_between, clamp
+from lib.functions import fastColorWipe, find_between, clamp, get_note_position
 from lib.rpi_drivers import Color
 
 
@@ -224,38 +224,16 @@ class LedSettings:
             self.multicolor[int(number)][2])
 
     def light_keys_in_range(self, location):
-        fastColorWipe(self.ledstrip.strip, True, self)
-
-        color_counter = 0
-        for i in self.multicolor:
-
-            start = self.multicolor_range[int(color_counter)][0]
-            end = self.multicolor_range[int(color_counter)][1]
-
-            if start > 92:
-                note_offset_start = 2
-            elif start > 55:
-                note_offset_start = 1
-            else:
-                note_offset_start = 0
-
-            if end > 92:
-                note_offset_end = 2
-            elif end > 55:
-                note_offset_end = 1
-            else:
-                note_offset_end = 0
-
-            red = self.multicolor[int(color_counter)][0]
-            green = self.multicolor[int(color_counter)][1]
-            blue = self.multicolor[int(color_counter)][2]
-
-            self.ledstrip.strip.setPixelColor(int(((start - 20) * 2 - note_offset_start)),
-                                              Color(int(red), int(green), int(blue)))
-            self.ledstrip.strip.setPixelColor(int(((end - 20) * 2 - note_offset_end)),
-                                              Color(int(red), int(green), int(blue)))
-
-            color_counter += 1
+        strip = self.ledstrip.strip
+        fastColorWipe(strip, False, self)
+        if strip.numPixels() > 0:
+            for rgb, (start, end) in zip(self.multicolor, self.multicolor_range):
+                color = Color(*(int(channel) for channel in rgb))
+                for note in (start, end):
+                    position = get_note_position(note, self.ledstrip, self)
+                    if 0 <= position < strip.numPixels():
+                        strip.setPixelColor(position, color)
+        strip.show()
 
     def change_color(self, color, value):
         self.sequence_active = False
