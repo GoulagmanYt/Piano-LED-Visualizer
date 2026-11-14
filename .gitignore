@@ -12,7 +12,6 @@ Piano-LED-Visualizersafe.code-workspace
 /Docs/superpowers/
 /.tmp
 /.serena
-Docs/audit_pass_4.md
 
 # Tooling caches
 .ruff_cache/
@@ -21,5 +20,3 @@ Docs/audit_pass_4.md
 /.agents
 .codexignore
 AGENTS.md
-Docs/audit_2026-11-13.md
-Docs/audit_2026-11-13.md

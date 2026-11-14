@@ -1,4 +1,4 @@
-// Run with jsdom available in NODE_PATH (see Docs/audit_pass_4.md).
+// Run with jsdom available in NODE_PATH (see README.md#development).
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

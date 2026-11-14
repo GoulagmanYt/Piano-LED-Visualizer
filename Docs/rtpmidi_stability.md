@@ -22,10 +22,10 @@ On the tested Pi Zero 2 W Wi-Fi connection, forcing DSCP EF or packet priority
 6 for RTP caused packet loss and Wi-Fi transmission failures. Avoid applying
 these markings as an unconditional latency optimization. The stability script
 above does not remove external nftables QoS rules; inspect existing rules
-separately. See the [controlled RTP loss investigation](rtp_loss_origin_2026-10-18.md)
+separately. See the [controlled RTP delivery measurements](measurements/rtp_delivery_2026-10-18.md)
 for measurements and the configuration corrected on the tested Pi.
 
-The subsequent [Wi-Fi latency and jitter investigation](rtp_latency_2026-10-18.md)
+The [Wi-Fi latency measurements](measurements/rtp_latency_2026-10-18.md)
 measures exceptional late notes separately from delivery. Its Pi-to-router
 controls reproduce stalls even with the visualizer stopped. None of the tested
 additional PC, firmware or router settings demonstrated a reliable improvement;

@@ -6,7 +6,7 @@ Les pointes de retard restent reproductibles sur le lien Wi-Fi. Aucun réglage
 supplémentaire testé pendant cette investigation n'apporte de gain suffisamment
 fiable pour être conservé. Les réglages initiaux du PC, du firmware du Pi et de
 la box ont été rétablis. La suppression des marquages QoS précédemment démontrés
-comme nuisibles reste en place : voir [l'investigation des pertes RTP](rtp_loss_origin_2026-10-18.md).
+comme nuisibles reste en place : voir les [mesures de livraison RTP](rtp_delivery_2026-10-18.md).
 
 Sur la dernière série longue après restauration, les **6 250 messages sont
 arrivés dans l'ordre**, mais une note atteint **97,34 ms**. Une autre série longue,
@@ -68,10 +68,10 @@ atteint 90,85 ms. Les accords ont une dispersion d'arrivée médiane de 0,022 ms
 un p99 de 7,61 ms et un maximum de 8,24 ms. Ces pointes justifient de regarder
 la distribution et les écarts plutôt que la seule moyenne.
 
-Les [résultats structurés et les séries du graphique](measurements/rtp_latency_2026-10-18.json)
+Les [résultats structurés et les séries du graphique](rtp_latency_2026-10-18.json)
 conservent aussi les essais rejetés. Ils ne contiennent aucun mot de passe.
 
-![Latence dans le temps et selon la phase du cycle de quatre secondes](assets/rtp_latency_2026-10-18.png)
+![Latence dans le temps et selon la phase du cycle de quatre secondes](../assets/rtp_latency_2026-10-18.png)
 
 Les deux séries du graphique précèdent les essais de canaux. Plusieurs pointes
 se concentrent autour de la même phase de l'horloge du Pi modulo quatre secondes,

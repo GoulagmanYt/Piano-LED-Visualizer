@@ -11,8 +11,9 @@ Back up an existing installation before running the installer again.
    with the Pi. Do not power the LED strip from the GPIO header.
 3. Review the installer before running it. It upgrades OS packages, configures
    SPI, hostname and the `plv` account, installs services and applies Pi tuning.
-   It sets the account password to `visualizer` and schedules a reboot. Change
-   that password and review sudo access after installation.
+   A newly created account gets the password `visualizer`; an existing account's
+   password is preserved. The installer schedules a reboot. Change the initial
+   password and review sudo access after installation.
 
    ```bash
    curl -fsSLo autoinstall.sh https://raw.githubusercontent.com/GoulagmanYt/Piano-LED-Visualizer/master/autoinstall.sh
@@ -54,3 +55,19 @@ card and user data. See [RTP-MIDI stability](rtpmidi_stability.md) and
 **Hardware validation:** package installation, SPI and RTP-MIDI behavior should
 be verified on the target Pi and OS image. The automated tests simulate installer
 commands; they do not install packages or exercise real GPIO/network hardware.
+
+## Read-only SD card protection
+
+The optional OverlayFS setup makes changes to settings and uploaded songs
+temporary until the writable filesystem is restored. Check its state with:
+
+```bash
+sudo bash scripts/status_safe_poweroff.sh
+```
+
+Before an update or permanent configuration change, run
+`sudo bash scripts/disable_safe_poweroff.sh --reboot`. After reboot, run the
+script again to restore boot writes if needed. Make the changes, then run
+`sudo bash scripts/enable_safe_poweroff.sh --reboot` to restore protection.
+Check the status again. Keep backups outside the Pi; OverlayFS does not protect
+against every hardware or power failure.

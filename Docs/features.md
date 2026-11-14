@@ -199,8 +199,12 @@ currently web-only and cannot be switched from the LCD.
 Local song playback and practice own the LED display while active; guide events
 received during them are discarded rather than replayed afterwards. Avoid using
 local playback simultaneously with an external Synthesia session because both
-can send notes to the piano. See [integration notes](upstream_learning_integration.md)
-for testing and limitations.
+can send notes to the piano. Before using the bridge for a performance, check
+Wait and Watch/Listen, partial chords, sustain and device reconnection with your
+actual piano and computer. A connected bridge reports local port ownership;
+check RTP peer health separately. Software cleanup cannot silence a disconnected
+instrument. The [architecture guide](architecture.md#apprentissage) explains the
+two learning paths and their resource ownership.
 
 
 ## Managing songs <a name="managing_songs"></a>

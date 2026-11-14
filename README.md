@@ -85,7 +85,7 @@ See [RTP-MIDI setup and stability](Docs/rtpmidi_stability.md) for service config
 
 MIDI reception, LED rendering and network forwarding use separate queues and workers. The web diagnostics report queue depths, message counters, connection state and timing measurements.
 
-Network latency depends on the full route. Tests on the documented Wi-Fi setup still show occasional delays and packet loss. The [latency report](Docs/rtp_latency_2026-10-18.md) includes the test method and results; the [RTP loss investigation](Docs/rtp_loss_origin_2026-10-18.md) records a QoS configuration that made delivery worse.
+The [performance guide](Docs/performance.md) explains what each measurement covers and how to reproduce it. It links the measured MIDI pipeline, WebSocket and RTP/Wi-Fi results, including their limits. The documented Wi-Fi setup still shows occasional delays and packet loss; software timing is not physical key-to-light latency.
 
 Treat clock, voltage and governor settings as specific to the board and workload. Check temperature and throttling on your own Pi before keeping a change.
 
@@ -105,13 +105,14 @@ On legacy installations using system Python instead of `.venv`, use `sudo python
 | Guide | Contents |
 | --- | --- |
 | [Installation](Docs/manual_installation.md) | OS setup, dependencies, SPI and service configuration |
+| [Preinstalled image](Docs/image_build.md) | Build and validate a Raspberry Pi image |
 | [Features](Docs/features.md) | LED modes, songs, learning and sequences |
-| [Wi-Fi setup](Docs/wifi_setup.md) | Headless network configuration |
-| [Automatic hotspot](Docs/autohotspot.md) | Access point configuration |
+| [Wi-Fi setup](Docs/wifi_setup.md) | Headless networking, hotspot and recovery |
 | [RTP-MIDI](Docs/rtpmidi_stability.md) | Network MIDI services and reconnection |
 | [External devices](Docs/external_devices.md) | Buttons, sensors and other controls |
 | [Cover detection](Docs/cover_detection.md) | Piano cover sensor setup |
-| [MIDI diagnostics](Docs/midi_debug_2026-10-18.md) | Delivery checks and pipeline investigation |
+| [Architecture](Docs/architecture.md) | Runtime components, MIDI routing and resource ownership |
+| [Performance and measurements](Docs/performance.md) | Benchmark methods, latency, delivery and recorded results |
 
 ## Development
 

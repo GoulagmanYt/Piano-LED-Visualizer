@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "measured_at_utc": "2026-11-13T19:40:40.741545+00:00",
+  "revision": "9f40b05a5978cbfd1c931db7eb5cafe13b2ea360",
+  "hardware": {
+    "board": "Raspberry Pi Zero 2 W Rev 1.0",
+    "architecture": "armv7l",
+    "os": "Raspberry Pi OS Bookworm 12",
+    "kernel": "6.12.109+rpt-rpi-v7",
+    "python": "3.11.2"
+  },
+  "method": {
+    "command": "python3 tools/latency_bench.py --json",
+    "scope": "isolated software mocks; production service remains running",
+    "timings": "software boundaries only; simulated MIDI ports and WebSocket client; no GPIO or network timing",
+    "messages_per_scenario": 120,
+    "independent_processes": 3
+  },
+  "runs": [
+    {
+      "publish_worker": {
+        "count": 120,
+        "mean_ms": 0.21975855731094876,
+        "p95_ms": 0.2715609734877944,
+        "max_ms": 0.42713305447250605,
+        "sent": 120,
+        "published": 120
+      },
+      "ws_broadcast_wakeup": {
+        "count": 120,
+        "mean_ms": 1.3112391092969726,
+        "p95_ms": 0.9755159262567759,
+        "max_ms": 72.08091404754668,
+        "sent": 120,
+        "delivered": 120
+      },
+      "ws_broadcast_poll_10ms": {
+        "count": 120,
+        "mean_ms": 5.679077170983267,
+        "p95_ms": 10.500784032046795,
+        "max_ms": 10.591877973638475,
+        "sent": 120,
+        "delivered": 120
+      },
+      "change_port_async": {
+        "blocked_ms": 12.421556049957871,
+        "notice_ms": 150.0
+      },
+      "change_port_sync": {
+        "blocked_ms": 161.3841950893402,
+        "notice_ms": 150.0
+      },
+      "stop_during_notice": {
+        "blocked_ms": 0.46432099770754576,
+        "notice_ms": 400.0
+      }
+    },
+    {
+      "publish_worker": {
+        "count": 120,
+        "mean_ms": 0.2818372304318473,
+        "p95_ms": 0.6847359472885728,
+        "max_ms": 0.8936930680647492,
+        "sent": 120,
+        "published": 120
+      },
+      "ws_broadcast_wakeup": {
+        "count": 120,
+        "mean_ms": 1.3269568628553923,
+        "p95_ms": 0.8872880134731531,
+        "max_ms": 72.60658801533282,
+        "sent": 120,
+        "delivered": 120
+      },
+      "ws_broadcast_poll_10ms": {
+        "count": 120,
+        "mean_ms": 5.7194237859221175,
+        "p95_ms": 10.557189933024347,
+        "max_ms": 10.650314972735941,
+        "sent": 120,
+        "delivered": 120
+      },
+      "change_port_async": {
+        "blocked_ms": 12.430255068466067,
+        "notice_ms": 150.0
+      },
+      "change_port_sync": {
+        "blocked_ms": 161.40117298346013,
+        "notice_ms": 150.0
+      },
+      "stop_during_notice": {
+        "blocked_ms": 0.45426900032907724,
+        "notice_ms": 400.0
+      }
+    },
+    {
+      "publish_worker": {
+        "count": 120,
+        "mean_ms": 0.21839042601641268,
+        "p95_ms": 0.26520690880715847,
+        "max_ms": 0.37067499943077564,
+        "sent": 120,
+        "published": 120
+      },
+      "ws_broadcast_wakeup": {
+        "count": 120,
+        "mean_ms": 1.3210546603659168,
+        "p95_ms": 0.9128600358963013,
+        "max_ms": 72.34799605794251,
+        "sent": 120,
+        "delivered": 120
+      },
+      "ws_broadcast_poll_10ms": {
+        "count": 120,
+        "mean_ms": 5.842520879620376,
+        "p95_ms": 10.578596033155918,
+        "max_ms": 10.777084971778095,
+        "sent": 120,
+        "delivered": 120
+      },
+      "change_port_async": {
+        "blocked_ms": 12.047600001096725,
+        "notice_ms": 150.0
+      },
+      "change_port_sync": {
+        "blocked_ms": 161.33992397226393,
+        "notice_ms": 150.0
+      },
+      "stop_during_notice": {
+        "blocked_ms": 0.46150898560881615,
+        "notice_ms": 400.0
+      }
+    }
+  ],
+  "gc_control": {
+    "normal": {
+      "publish": {
+        "count": 120,
+        "mean_ms": 0.21620340606508157,
+        "p95_ms": 0.2684879582375288,
+        "max_ms": 0.3704150440171361,
+        "sent": 120,
+        "published": 120
+      },
+      "ws": {
+        "count": 120,
+        "mean_ms": 1.3448604460184772,
+        "p95_ms": 0.8697869488969445,
+        "max_ms": 74.16694203857332,
+        "sent": 120,
+        "delivered": 120
+      },
+      "gc": [
+        {
+          "generation": 1,
+          "duration_ms": 6.047368049621582
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.850800942629576
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.725957966409624
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.19153305888176
+        },
+        {
+          "generation": 1,
+          "duration_ms": 8.190065971575677
+        },
+        {
+          "generation": 1,
+          "duration_ms": 5.312839988619089
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.853925995528698
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.960278959013522
+        },
+        {
+          "generation": 2,
+          "duration_ms": 72.91871902998537
+        }
+      ]
+    },
+    "disabled_after_publish": {
+      "publish": {
+        "count": 120,
+        "mean_ms": 0.22302803796871254,
+        "p95_ms": 0.28578005731105804,
+        "max_ms": 0.385414925403893,
+        "sent": 120,
+        "published": 120
+      },
+      "ws": {
+        "count": 120,
+        "mean_ms": 0.7239288398219893,
+        "p95_ms": 0.9028080385178328,
+        "max_ms": 1.0893179569393396,
+        "sent": 120,
+        "delivered": 120
+      },
+      "gc": [
+        {
+          "generation": 1,
+          "duration_ms": 6.164866965264082
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.762780947610736
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.555490079335868
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.2718449626117945
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.878040032461286
+        },
+        {
+          "generation": 1,
+          "duration_ms": 4.764507990330458
+        },
+        {
+          "generation": 1,
+          "duration_ms": 6.704760016873479
+        },
+        {
+          "generation": 1,
+          "duration_ms": 7.005227031186223
+        }
+      ]
+    }
+  },
+  "post_run_health": {
+    "service": "active",
+    "temperature_c": 45.084,
+    "throttled": "0x0",
+    "load_average": [
+      0.35,
+      0.31,
+      0.26
+    ]
+  }
+}
