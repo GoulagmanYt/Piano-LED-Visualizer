@@ -16,6 +16,9 @@ mesurée. Ne pas additionner les percentiles de frontières différentes.
 
 ## Résultats du pipeline MIDI et du réseau
 
+- [Pipeline MIDI et rendu LED — 14 novembre 2026](measurements/pipeline_2026-11-14.md) :
+  comparaison avant/après, essai de 390 052 événements, mémoire et transmission
+  DMA sur le Pi ; [données JSON](measurements/pipeline_2026-11-14.json).
 - [Pipeline MIDI — 18 octobre 2026](measurements/midi_pipeline_2026-10-18.md) :
   protocole à 52 052 événements, latences, ordre et empreintes des messages.
 - [Livraison RTP et QoS — 18 octobre 2026](measurements/rtp_delivery_2026-10-18.md) :
@@ -114,3 +117,39 @@ Pour analyser une capture réseau avec `scripts/analyze_midi_latency.py`, il fau
 les horodatages source et récepteur et la validation de l'identité et de l'ordre
 des messages. Les JSON publiés sont des résumés ; ils ne remplacent pas ces
 captures brutes. Voir le [protocole réseau](measurements/rtp_latency_2026-10-18.md#mesure).
+
+## Préparer une mesure physique
+
+La mesure physique nécessite un capteur ; aucun n'est branché sur le matériel
+utilisé pour les essais ci-dessus. Le temps logiciel ou la fin du DMA ne doit
+pas être présenté comme un temps touche → lumière ou son.
+
+Utiliser un seul appareil d'acquisition pour le déclenchement et la réponse :
+contact de touche ou entrée MIDI d'une part, photodiode ou signal audio d'autre
+part. Une entrée MIDI comme déclenchement exclut le temps de scan du clavier.
+Établir le seuil de détection, la fréquence d'échantillonnage et l'appariement
+des fronts avant de calculer des percentiles.
+
+L'export CSV doit avoir les colonnes suivantes, en nanosecondes sur cette même
+horloge, avec des identifiants consécutifs de zéro au nombre d'événements attendu :
+
+```csv
+event_id,clock_id,trigger_ns,response_ns
+```
+
+```bash
+python3 scripts/analyze_physical_latency.py capture.csv --expected-events 100 --stimulus midi-input --response photodiode
+```
+
+Adapter le nombre attendu au protocole réellement émis. Choisir `key-contact`
+pour un contact de touche et `audio` pour une réponse audio. L'outil refuse une
+capture incomplète, désordonnée, avec plusieurs identifiants d'horloge ou des
+horodatages invalides. Il calcule moyenne, médiane, p95, p99 et maximum sans
+réalignement silencieux. Il ne certifie ni le capteur ni l'appariement des fronts.
+
+Pour un essai MIDI prolongé, augmenter `PLV_BENCHMARK_CHORDS`. Le rapport conserve
+le RSS et le CPU échantillonnés avec le temps écoulé. Les compteurs et empreintes
+couvrent toute la séquence ; les latences du probe portent sur les 100 000
+derniers événements au maximum. Ces durées n'incluent pas les messages de
+nettoyage envoyés après le relevé final. Le moniteur de reconnexion est neutralisé
+pendant la préparation du benchmark, sans modifier le pair RTP enregistré.

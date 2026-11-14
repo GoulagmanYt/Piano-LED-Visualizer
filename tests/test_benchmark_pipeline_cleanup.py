@@ -113,6 +113,28 @@ def test_monitor_timeout_does_not_reassign_live_ports(benchmark, monkeypatch):
     app.shutdown.assert_called_once()
 
 
+def test_benchmark_does_not_persistently_disable_the_configured_rtp_peer(benchmark, monkeypatch):
+    app, _output, _worker, _events = configure_benchmark(benchmark, monkeypatch, None)
+    benchmark.main()
+    app.ci.usersettings.change_setting_value.assert_not_called()
+
+
+def test_benchmark_construction_does_not_start_network_discovery(benchmark, monkeypatch):
+    app, _output, _worker, _events = configure_benchmark(benchmark, monkeypatch, None)
+    discoveries = []
+    monkeypatch.setattr(benchmark.MidiPorts, 'start_midi_monitor', lambda _ports: discoveries.append('network'))
+
+    def construct():
+        benchmark.MidiPorts.start_midi_monitor(object())
+        return app
+
+    monkeypatch.setattr(benchmark, 'VisualizerApp', construct)
+    benchmark.main()
+    assert discoveries == []
+    benchmark.MidiPorts.start_midi_monitor(object())
+    assert discoveries == ['network']
+
+
 def test_renderer_failure_interrupts_real_source_worker_before_closing_output(benchmark, monkeypatch):
     real_thread = threading.Thread
     app, output, _worker, events = configure_benchmark(benchmark, monkeypatch, 'run')

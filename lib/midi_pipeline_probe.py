@@ -74,6 +74,8 @@ class MidiPipelineProbe:
         # Call after the source and both consumers have quiesced.
         hashes = {key: value.hexdigest() for key, value in self._hashes.items()}
         return dict(self._counts, hashes=hashes,
+                    latency_sample_limit=self._input_latency.maxlen,
+                    latency_sample_scope='latest events; counts and hashes cover the complete run',
                     lossless=(len(set(hashes.values())) == 1
                               and len(set(self._counts.values())) == 1
                               and not self._pending_input and not self._pending_output

@@ -12,6 +12,7 @@ import threading
 import time
 from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 import mido
 import psutil
@@ -21,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 sys.argv = [str(ROOT / 'visualizer.py'), '-s', '-w', 'false', '-a', 'app']
 from lib.buffered_midi_input import open_midi_input
 from lib.midi_pipeline_probe import MidiPipelineProbe
+from lib.midiports import MidiPorts
 from visualizer import VisualizerApp
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,10 @@ def main():
         raise ValueError('Benchmark requires positive chord count and interval')
     probe = MidiPipelineProbe()
     with ExitStack() as cleanup:
-        app = VisualizerApp()
+        # The benchmark owns its virtual input and instrumented output. Don't
+        # start peer discovery/reconnection while constructing those resources.
+        with patch.object(MidiPorts, 'start_midi_monitor'):
+            app = VisualizerApp()
         cleanup.callback(app.shutdown)
         report = run_benchmark(app, probe, chord_count, chord_interval, cleanup)
     report['black_buffer_after_shutdown'] = not any(app.ci.ledstrip.strip.getPixels())
@@ -85,7 +90,8 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
 
     app.color_mode.MidiEvent = trace_processed
     process = psutil.Process()
-    app.ci.usersettings.change_setting_value('rtp_autoconnect', 'None')
+    # Stopping the monitor prevents reconnection without persisting changes to
+    # the user's configured RTP peer when app.shutdown() saves settings.
     if not app.ci.midiports.stop_midi_monitor():
         raise RuntimeError('MIDI monitor did not stop; benchmark cannot take ownership of its ports')
     app.ci.midiports._safe_close_port(app.ci.midiports.inport)
@@ -146,6 +152,7 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
             app.runtime_diagnostics.reset()
             app.ci.midiports.reset_runtime_diagnostics()
             process.cpu_percent()
+            measurement_started = time.monotonic()
             # Verify real sustain state, not just transmission of CC64.
             app.ci.ledsettings.mode = 'Pedal'
             send(mido.Message('control_change', control=64, value=127))
@@ -188,7 +195,8 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
                     deadline += chord_interval
                 wait(max(0.0, deadline - time.monotonic()))
                 if chord % 100 == 0:
-                    samples.append({'chord': chord, 'rss_bytes': process.memory_info().rss,
+                    samples.append({'chord': chord, 'elapsed_s': time.monotonic() - measurement_started,
+                                    'rss_bytes': process.memory_info().rss,
                                     'cpu_percent': process.cpu_percent()})
             wait(2)
             # A fixed sleep alone can hide a stranded final note or miss a
@@ -220,6 +228,7 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
     return {'sent': sent, 'received': received, 'recv_by_type': recv_by_type, 'recv_pedals': len(recv_pedal_channels), 'missing_pedals': chord_count + 1 - len(recv_pedal_channels), 'errors': errors, 'samples': samples,
             'pipeline': probe.snapshot(),
             'chord_interval_ms': chord_interval * 1000,
+            'led_count': len(app.ci.ledstrip.keylist),
             'cpu_affinity': sorted(os.sched_getaffinity(0)),
             'alsa_clients': Path('/proc/asound/seq/clients').read_text(),
             'diagnostics': app.ci.midiports.get_runtime_diagnostics(),

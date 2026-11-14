@@ -55,6 +55,21 @@ Deux chemins sont disponibles :
   leur propre file de rendu. La lecture et la pratique locales ont priorité sur
   ce guide. Voir la [configuration Synthesia](features.md#learning_with_synthesia).
 
+Pour les morceaux locaux, les deux premières pistes contenant des notes sont
+les rôles droite et gauche ; les pistes de conducteur ne comptent pas. Avec une
+seule piste jouable, les deux premiers canaux de notes portent ces rôles. Les
+parties supplémentaires accompagnent le joueur. Ces rôles sont des métadonnées :
+les canaux MIDI d'origine sont conservés à la sortie. Le score utilise
+l'horodatage monotone de l'entrée, compte chaque hauteur une fois par accord et
+attribue les résultats aux rôles du morceau. Une faute est rapprochée de la note
+attendue la plus proche ; le logiciel ne mesure pas la main physique du joueur.
+
+Le pilote LED compose des frames publiées atomiquement : notes, sustain et
+effets actifs ont priorité sur les vues d'apprentissage et d'aperçu, puis sur
+les animations. Chaque vue possède ses pixels et libère sa couche à la sortie.
+Changer le fond ne supprime pas les notes actives. `Disabled` efface l'état
+musical, impose le noir et invalide les anciennes frames et vues.
+
 ## Ressources et arrêt
 
 Les callbacks d'entrée passent les messages aux files ; les sorties natives et
@@ -66,6 +81,22 @@ Un timeout n'autorise pas à fermer un port ou le DMA encore utilisé : leur
 propriétaire conserve la ressource jusqu'à son arrêt effectif. Le serveur
 WebSocket annule sa tâche propriétaire dans sa boucle, ferme ses connexions
 et attend ses tâches avant de fermer cette boucle.
+
+La fermeture MIDI attend au plus le budget demandé puis signale un nettoyage
+incomplet. Un worker propriétaire conserve les handles et effectue les appels
+natifs ; aucune réouverture ne les remplace avant sa fin. Un thread bloqué dans
+un pilote natif ne peut pas être tué proprement depuis Python. La panique MIDI
+peut être demandée sans bloquer ; une nouvelle session d'apprentissage attend
+sa fin pour ne pas recevoir une ancienne panique après ses premières notes.
+
+Ce budget suppose que le backend permet aux autres threads Python de progresser.
+Il n'est pas une garantie absolue si un pilote bloque en conservant le GIL :
+les wrappers de fermeture et d'envoi de
+[python-rtmidi 1.5.8](https://github.com/SpotlightKid/python-rtmidi/blob/1.5.8/src/_rtmidi.pyx)
+ne garantissent pas sa libération. Isoler les ports dans un autre processus
+serait nécessaire pour couvrir aussi ce cas. L'application conserve les GPIO
+si le pilote LED refuse de confirmer son arrêt et signale les nettoyages
+incomplets au lieu d'annoncer que les ressources sont déjà libérées.
 
 Les morceaux et partitions sont dans `Songs/`, les réglages dans
 `config/settings.xml`. Le programme de mise à jour indépendant sauvegarde les
