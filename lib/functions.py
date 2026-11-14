@@ -1,4 +1,5 @@
 import threading
+from functools import wraps
 from collections import deque
 from lib.rpi_drivers import Color
 import lib.colormaps as cmap
@@ -602,6 +603,10 @@ def fastColorWipe(strip, update, ledsettings):
         green = int(ledsettings.get_backlight_color("Green") * brightness)
         blue = int(ledsettings.get_backlight_color("Blue") * brightness)
         color = Color(red, green, blue)
+    fill_background = getattr(type(strip), "fill_background", None)
+    if fill_background is not None:
+        strip.fill_background(color, show=update)
+        return
     for i in range(strip.numPixels()):
         strip.setPixelColor(i, color)
     if update:
@@ -612,18 +617,23 @@ def clear_ledstrip_state(ledstrip, *, show=True):
     """Force-clear LED pixels and reset key state tracking."""
     strip = ledstrip.strip
     total = strip.numPixels()
-    for i in range(total):
-        strip.setPixelColor(i, Color(0, 0, 0))
-    if show:
-        strip.show()
+    if getattr(type(strip), "blackout", None) is not None:
+        strip.blackout(show=show)
+    else:
+        for i in range(total):
+            strip.setPixelColor(i, Color(0, 0, 0))
+        if show:
+            strip.show()
 
     # Reset internal note tracking so fade logic cannot relight pixels.
     from lib.ledstrip import ActiveIndexList
     ledstrip.keylist = ActiveIndexList(0 for _ in range(ledstrip.led_number))
-    ledstrip.keylist_status = [0] * ledstrip.led_number
+    ledstrip.keylist_status = ActiveIndexList(0 for _ in range(ledstrip.led_number))
     ledstrip.keylist_sustained = ActiveIndexList(0 for _ in range(ledstrip.led_number))
-    ledstrip.keylist_external_software = [0] * ledstrip.led_number
-    ledstrip.keylist_guide = [0] * ledstrip.led_number
+    ledstrip.keylist_external_software = ActiveIndexList(0 for _ in range(ledstrip.led_number))
+    ledstrip.keylist_guide = ActiveIndexList(0 for _ in range(ledstrip.led_number))
+    ledstrip._pulse_leds = set()
+    ledstrip.active_pulses = []
     ledstrip.keylist_color = [(0, 0, 0)] * ledstrip.led_number
 
 
@@ -644,6 +654,36 @@ def stop_animations(menu):
     if thread is not None and thread.is_alive() and current is not thread:
         thread.join(timeout=0.5)
 
+
+class _AnimationLedStrip:
+    def __init__(self, original, output):
+        self._original = original
+        self.strip = output
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+
+def _animation_output(position=0):
+    """Keep every animation's frame private, including direct startup callers."""
+    def decorate(function):
+        @wraps(function)
+        def run(*args, **kwargs):
+            ledstrip = args[position] if len(args) > position else kwargs["ledstrip"]
+            factory = getattr(type(ledstrip.strip), "animation", None)
+            if factory is None:
+                return function(*args, **kwargs)
+            with ledstrip.strip.animation() as output:
+                proxy = _AnimationLedStrip(ledstrip, output)
+                if len(args) > position:
+                    args = (*args[:position], proxy, *args[position + 1:])
+                else:
+                    kwargs["ledstrip"] = proxy
+                return function(*args, **kwargs)
+        return run
+    return decorate
+
+@_animation_output()
 def theaterChase(ledstrip, ledsettings, menu, speed_ms=None):
     """Movie theater light style chaser animation."""
     from lib.animation_speed import get_global_speed_ms
@@ -715,6 +755,7 @@ def wheel(pos, ledsettings):
     return Color(int(clamp(r, 0, 255)), int(clamp(g, 0, 255)), int(clamp(b, 0, 255)))
 
 
+@_animation_output()
 def rainbow(ledstrip, ledsettings, menu, speed_ms=None):
     """Draw rainbow that fades across all pixels at once."""
     from lib.animation_speed import get_global_speed_ms
@@ -760,6 +801,7 @@ def rainbow(ledstrip, ledsettings, menu, speed_ms=None):
     menu.is_idle_animation_running = False
     fastColorWipe(strip, True, ledsettings)
 
+@_animation_output()
 def fireplace(ledstrip, ledsettings, menu, speed_ms=None):
     """Fireplace flickering animation."""
     from lib.animation_speed import get_global_speed_ms
@@ -802,6 +844,7 @@ def fireplace(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def rainbowCycle(ledstrip, ledsettings, menu, speed_ms=None):
     """Draw rainbow that uniformly distributes itself across all pixels."""
     from lib.animation_speed import get_global_speed_ms
@@ -848,6 +891,7 @@ def rainbowCycle(ledstrip, ledsettings, menu, speed_ms=None):
 
 
 
+@_animation_output()
 def startup_animation(ledstrip, ledsettings, duration_ms=3000, midiports=None):
     """
     Rainbow sweep startup animation using the project's native wheel() RGB palette.
@@ -940,6 +984,7 @@ def startup_animation(ledstrip, ledsettings, duration_ms=3000, midiports=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms=1700):
     """
     Dual converging meteor animation for piano connection feedback.
@@ -1117,6 +1162,7 @@ def piano_connected_animation(ledstrip, ledsettings, midiports=None, duration_ms
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def theaterChaseRainbow(ledstrip, ledsettings, menu, speed_ms=None):
     """Rainbow movie theater light style chaser animation."""
     from lib.animation_speed import get_global_speed_ms
@@ -1163,6 +1209,7 @@ def theaterChaseRainbow(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def breathing(ledstrip, ledsettings, menu, speed_ms=None):
     """Breathing/pulsing animation."""
     from lib.animation_speed import get_global_speed_ms
@@ -1219,6 +1266,7 @@ def breathing(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def sound_of_da_police(ledstrip, ledsettings, menu, speed_ms=None):
     """Police-style alternating red/blue animation."""
     from lib.animation_speed import get_global_speed_ms
@@ -1276,6 +1324,7 @@ def sound_of_da_police(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def scanner(ledstrip, ledsettings, menu, speed_ms=None):
     """Scanner beam animation."""
     from lib.animation_speed import get_global_speed_ms
@@ -1346,6 +1395,7 @@ def scanner(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output(1)
 def chords(scale, ledstrip, ledsettings, menu):
     stop_animations(menu)
 
@@ -1395,6 +1445,7 @@ def chords(scale, ledstrip, ledsettings, menu):
     menu.is_idle_animation_running = False
     fastColorWipe(strip, True, ledsettings)
 
+@_animation_output(1)
 def colormap_animation(colormap, ledstrip, ledsettings, menu):
     stop_animations(menu)
 
@@ -1441,6 +1492,7 @@ def colormap_animation(colormap, ledstrip, ledsettings, menu):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def wave(ledstrip, ledsettings, menu, speed_ms=None):
     """Smooth traveling wave with gradient trail effect."""
     from lib.animation_speed import get_global_speed_ms
@@ -1543,6 +1595,7 @@ def wave(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def lava_lamp(ledstrip, ledsettings, menu, speed_ms=None):
     """Lava lamp animation with slow-moving organic blobs."""
     from lib.animation_speed import get_global_speed_ms
@@ -1658,6 +1711,7 @@ def lava_lamp(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def aurora(ledstrip, ledsettings, menu, speed_ms=None):
     """Aurora (Northern Lights) animation with flowing, undulating colors."""
     from lib.animation_speed import get_global_speed_ms
@@ -1797,6 +1851,7 @@ def aurora(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def stardust(ledstrip, ledsettings, menu, speed_ms=None):
     """Stardust/Sparkle animation - random LEDs twinkle and fade like stars."""
     from lib.animation_speed import get_global_speed_ms
@@ -1921,6 +1976,7 @@ def stardust(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def kaleidoscope(ledstrip, ledsettings, menu, speed_ms=None):
     """Kaleidoscope animation - symmetric rotating patterns with colorful reflections."""
     from lib.animation_speed import get_global_speed_ms
@@ -2047,6 +2103,7 @@ def kaleidoscope(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def color_ripple(ledstrip, ledsettings, menu, speed_ms=None):
     """Color Ripple animation - expanding ripples of color from random points, like dropping stones in water."""
     from lib.animation_speed import get_global_speed_ms
@@ -2225,6 +2282,7 @@ def color_ripple(ledstrip, ledsettings, menu, speed_ms=None):
     fastColorWipe(strip, True, ledsettings)
 
 
+@_animation_output()
 def fireworks(ledstrip, ledsettings, menu, speed_ms=None):
     """Fireworks animation - colorful particle bursts that explode and fade away."""
     from lib.animation_speed import get_global_speed_ms

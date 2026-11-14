@@ -572,6 +572,7 @@ class MenuLCD:
         return int(round(size * self.LCD.font_scale))
 
     def disable_screen(self):
+        self._close_range_preview()
         try:
             GPIO.output(24, 0)
         except Exception as e:
@@ -1015,8 +1016,16 @@ class MenuLCD:
         return None
 
     def show(self, position="default", back_pointer_location=None):
+        destination = (self.current_location or "menu") if position == "default" else position.replace(" ", "_")
+        if not destination.startswith("Key_range"):
+            self._close_range_preview()
         with self._lcd_lock:
             return self._show_locked(position, back_pointer_location)
+
+    def _close_range_preview(self):
+        settings = getattr(self, "ledsettings", None)
+        if callable(getattr(type(settings), "close_range_preview", None)):
+            settings.close_range_preview()
 
     def _show_locked(self, position="default", back_pointer_location=None):
         selected_sid = None
@@ -1477,6 +1486,7 @@ class MenuLCD:
             self.show(self.current_choice)
 
     def go_back(self):
+        self._close_range_preview()
         self.last_activity = time.time()
         self.is_idle_animation_running = False
         if self.parent_menu != "data":
@@ -1496,6 +1506,7 @@ class MenuLCD:
 
     def render_screensaver(self, hour, date, cpu, cpu_average, ram, temp, cpu_history=None, upload=0, download=0,
                            card_space=None, local_ip="0.0.0.0"):
+        self._close_range_preview()
         if cpu_history is None:
             cpu_history = []
 

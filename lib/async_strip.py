@@ -32,6 +32,16 @@ class AsyncPixelStrip:
         self._wait_for_dma = wait_for_dma
         self._count = backend.numPixels()
         self._pixels = [0] * self._count
+        self._note_pixels = [0] * self._count
+        self._local = threading.local()
+        self._epoch = 0
+        self._note_mask_provider = None
+        self._protected = set()
+        self._background_color = 0
+        self._output_enabled = True
+        self._animation = None
+        self._animation_owner = None
+        self._overlays = {}
         self._pending = [0] * self._count
         self._transmit = [0] * self._count
         self._condition = threading.Condition()
@@ -48,15 +58,136 @@ class AsyncPixelStrip:
         return self._count
 
     def setPixelColor(self, index, color):
-        if 0 <= index < self._count and not self._closed:
-            self._pixels[index] = color
+        if 0 <= index < self._count and not self._closed and self._output_enabled:
+            self._updates()[index] = color
+
+    def _updates(self):
+        local = self._local
+        if getattr(local, "epoch", None) != self._epoch:
+            local.epoch = self._epoch
+            local.updates = {}
+        return local.updates
 
     def getPixelColor(self, index):
-        return self._pixels[index]
+        if not self._closed:
+            updates = self._updates()
+            if index in updates:
+                return updates[index]
+        with self._condition:
+            return self._pixels[index]
 
     def getPixels(self):
-        # UI-only snapshot; rendering never allocates a frame buffer.
-        return self._pixels.copy()
+        with self._condition:
+            pixels = self._pixels.copy()
+            if not self._closed:
+                for index, color in self._updates().items():
+                    pixels[index] = color
+            return pixels
+
+    def set_note_mask_provider(self, provider):
+        """Bind note ownership; called only when a note frame is committed.
+
+        The provider must return indices and must not acquire other locks.
+        Animation frames use the last committed mask, never partially edited
+        live state from another producer.
+        """
+        with self._condition:
+            self._note_mask_provider = provider
+
+    def animation(self):
+        """Return an independent animation framebuffer; close it after use."""
+        with self._condition:
+            view = _OutputView(self, priority=False)
+            self._animation_owner = view
+        return view
+
+    def priority_view(self):
+        """Return a guide/preview layer above animations and below live notes."""
+        with self._condition:
+            return _OutputView(self, priority=True)
+
+    def fill_background(self, color, show=True):
+        """Change the idle background without erasing committed note ownership."""
+        with self._condition:
+            if self._closed or not self._output_enabled:
+                return
+            self._background_color = color
+            for index in range(self._count):
+                if index not in self._protected:
+                    self._note_pixels[index] = color
+            if show:
+                self._submit()
+
+    def blackout(self, show=True):
+        """Explicit force-clear, invalidating all staged frames and old views."""
+        with self._condition:
+            if self._closed:
+                return
+            self._blackout_locked(show)
+
+    def _blackout_locked(self, show):
+        self._epoch += 1
+        self._background_color = 0
+        self._note_pixels[:] = [0] * self._count
+        self._protected.clear()
+        self._overlays.clear()
+        self._animation = self._animation_owner = None
+        self._pixels[:] = self._note_pixels
+        if show:
+            self._submit()
+
+    def set_output_enabled(self, enabled):
+        """Latch Disabled to black, rejecting producers until explicitly enabled."""
+        enabled = bool(enabled)
+        with self._condition:
+            if self._closed or self._output_enabled == enabled:
+                return
+            self._output_enabled = enabled
+            # Views created while disabled must also be stale after reenable.
+            self._blackout_locked(show=not enabled)
+
+    def _submit(self):
+        # Caller owns _condition. Nothing here waits for the hardware worker.
+        if self._error is not None:
+            raise RuntimeError("LED transmission worker failed") from self._error
+        animation = self._animation
+        self._pixels[:] = animation._published if animation is not None else self._note_pixels
+        for overlay in self._overlays.values():
+            for index in overlay._published_owned:
+                self._pixels[index] = overlay._published[index]
+        for index in self._protected:
+            self._pixels[index] = self._note_pixels[index]
+        self._pending[:] = self._pixels
+        self._submitted = time.perf_counter()
+        self._dirty = True
+        self._condition.notify()
+
+    def _publish_view(self, view):
+        with self._condition:
+            if (self._closed or not self._output_enabled or view._closed
+                    or view._epoch != self._epoch):
+                return
+            if not view._priority and self._animation_owner is not view:
+                return
+            view._published[:] = view._frame
+            if view._priority:
+                view._published_owned = view._owned.copy()
+                self._overlays[view] = view
+            else:
+                self._animation = view
+            self._submit()
+
+    def _close_view(self, view):
+        with self._condition:
+            if view._closed:
+                return
+            view._closed = True
+            changed = self._overlays.pop(view, None) is not None
+            if self._animation_owner is view:
+                self._animation = self._animation_owner = None
+                changed = True
+            if changed and not self._closed and self._output_enabled:
+                self._submit()
 
     def setBrightness(self, brightness):
         self._brightness = max(0, min(255, int(brightness)))
@@ -75,10 +206,25 @@ class AsyncPixelStrip:
                 raise RuntimeError("LED transmission worker failed") from self._error
             if self._closed:
                 return
-            self._pending[:] = self._pixels
-            self._submitted = time.perf_counter()
-            self._dirty = True
-            self._condition.notify()
+            updates = self._updates()
+            if not self._output_enabled:
+                updates.clear()
+                return
+            provider = self._note_mask_provider
+            if provider is not None:
+                protected = provider()
+                for index in self._protected:
+                    if index not in protected and index not in updates:
+                        self._note_pixels[index] = self._background_color
+                self._protected = protected
+            else:
+                # Standalone adapters have no musical state provider: explicit
+                # writes own their pixels, including intentional black.
+                self._protected.update(updates)
+            for index, color in updates.items():
+                self._note_pixels[index] = color
+            updates.clear()
+            self._submit()
 
     def _run(self):
         fps_started = time.perf_counter()
@@ -136,6 +282,7 @@ class AsyncPixelStrip:
             try:
                 for i in range(self._count):
                     self._pixels[i] = 0
+                    self._note_pixels[i] = 0
                     self.backend.setPixelColor(i, 0)
                 self.backend.show()
                 # render() can return before the DMA transfer has latched.
@@ -145,3 +292,57 @@ class AsyncPixelStrip:
                     time.sleep(self._count * 24 / 800000 + 0.003)
             finally:
                 self.backend._cleanup()
+
+
+class _OutputView:
+    """One producer's private frame. A view belongs to a single writer thread."""
+
+    def __init__(self, strip, priority):
+        self._strip = strip
+        self._priority = priority
+        self._epoch = strip._epoch
+        self._closed = False
+        self._frame = [strip._background_color] * strip.numPixels()
+        self._published = self._frame.copy()
+        self._owned = set()
+        self._published_owned = set()
+
+    def numPixels(self):
+        return len(self._frame)
+
+    def setPixelColor(self, index, color):
+        if 0 <= index < len(self._frame) and not self._closed:
+            self._frame[index] = color
+            if self._priority:
+                self._owned.add(index)
+
+    def clearPixel(self, index):
+        """Make a guide pixel transparent, including previously explicit black."""
+        self._owned.discard(index)
+
+    def getPixelColor(self, index):
+        return self._frame[index]
+
+    def getPixels(self):
+        return self._frame.copy()
+
+    def fill_background(self, color, show=True):
+        self._frame[:] = [color] * len(self._frame)
+        self._owned.clear()
+        if show:
+            self.show()
+
+    def show(self):
+        self._strip._publish_view(self)
+
+    def close(self):
+        self._strip._close_view(self)
+
+    def __getattr__(self, name):
+        return getattr(self._strip, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()

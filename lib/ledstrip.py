@@ -102,11 +102,12 @@ class LedStrip:
         if isinstance(old_strip, AsyncPixelStrip):
             old_strip.close()
         self.keylist = ActiveIndexList(0 for _ in range(self.led_number))
-        self.keylist_status = [0] * self.led_number
+        self.keylist_status = ActiveIndexList(0 for _ in range(self.led_number))
         self.keylist_color = [(0, 0, 0)] * self.led_number
         self.keylist_sustained = ActiveIndexList(0 for _ in range(self.led_number))  # Track notes sustained by pedal
-        self.keylist_external_software = [0] * self.led_number  # Track LEDs lit by external software (channels 11/12)
-        self.keylist_guide = [0] * self.led_number  # Explicit Learning-mode guide lights
+        self.keylist_external_software = ActiveIndexList(0 for _ in range(self.led_number))
+        self.keylist_guide = ActiveIndexList(0 for _ in range(self.led_number))
+        self._pulse_leds = set()
         self.active_pulses = [] # For Pulse mode
 
 
@@ -121,6 +122,8 @@ class LedStrip:
                     self.strip.releaseGIL()
                 backend = self.strip
                 self.strip = AsyncPixelStrip(backend, wait_for_dma=dma_waiter(ws, backend))
+                self.strip.set_note_mask_provider(self._note_mask)
+                self.strip.set_output_enabled(self.ledsettings.mode != "Disabled")
                 self.change_gamma(self.led_gamma)
             except Exception:
                 failed_strip = getattr(self, "strip", None)
@@ -132,6 +135,26 @@ class LedStrip:
                 raise
         elif self.driver == "emu":
             self.strip = AsyncPixelStrip(PixelStrip_Emu(int(self.led_number)))
+            self.strip.set_note_mask_provider(self._note_mask)
+            self.strip.set_output_enabled(self.ledsettings.mode != "Disabled")
+
+    def _note_mask(self):
+        """Snapshot musical ownership once per committed note frame, in O(K)."""
+        protected = set(self._pulse_leds)
+        for states in (self.keylist, self.keylist_status, self.keylist_sustained,
+                       self.keylist_external_software, self.keylist_guide):
+            indices = getattr(states, "active_indices", None)
+            if indices is None:
+                protected.update(index for index, value in enumerate(states) if value > 0)
+            else:
+                protected.update(indices)
+        if self.ledsettings.adjacent_mode != "Off":
+            for index in tuple(protected):
+                if index > 0:
+                    protected.add(index - 1)
+                if index + 1 < self.led_number:
+                    protected.add(index + 1)
+        return protected
 
     def _note_position_state_key(self, ledsettings):
         note_offsets = tuple(tuple(offset) for offset in ledsettings.note_offsets)

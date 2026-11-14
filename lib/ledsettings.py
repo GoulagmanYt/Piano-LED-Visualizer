@@ -2,7 +2,7 @@ import ast
 import time
 from xml.dom import minidom
 
-from lib.functions import fastColorWipe, find_between, clamp, get_note_position
+from lib.functions import fastColorWipe, find_between, clamp, get_note_position, clear_ledstrip_state
 from lib.rpi_drivers import Color
 
 
@@ -16,8 +16,45 @@ class LedSettings:
         self.sequences_tree = None
         self.ledstrip = None
         self.menu = None
+        self._range_preview = None
+        self._range_preview_source = None
         self.usersettings = usersettings
         self._load_settings()
+
+    @property
+    def mode(self):
+        return getattr(self, "_mode", None)
+
+    @mode.setter
+    def mode(self, value):
+        previous = getattr(self, "_mode", None)
+        self._mode = value
+        ledstrip = getattr(self, "ledstrip", None)
+        if ledstrip is None:
+            return
+        strip = ledstrip.strip
+        enabled_api = callable(getattr(type(strip), "set_output_enabled", None))
+        if value == "Disabled":
+            if enabled_api:
+                strip.set_output_enabled(False)
+            clear_ledstrip_state(ledstrip, show=not enabled_api)
+            self.close_range_preview()
+            menu = getattr(self, "menu", None)
+            if menu is not None:
+                menu.is_animation_running = False
+                menu.is_idle_animation_running = False
+        elif previous == "Disabled":
+            if enabled_api:
+                strip.set_output_enabled(True)
+            fastColorWipe(strip, True, self)
+
+    def close_range_preview(self):
+        """Release the LCD guide layer when leaving its editor."""
+        view = getattr(self, "_range_preview", None)
+        self._range_preview = None
+        self._range_preview_source = None
+        if view is not None:
+            view.close()
 
     def _clean_colormap_value(self, value, default):
         """Trim whitespace and return a safe colormap name with fallback."""
@@ -134,12 +171,15 @@ class LedSettings:
 
     def reload_settings(self):
         """Reload all settings from usersettings. Useful when settings have been updated externally."""
+        self.close_range_preview()
         self._load_settings()
 
     def add_instance(self, menu, ledstrip):
         self.menu = menu
         self.ledstrip = ledstrip
         menu.update_multicolor(self.multicolor)
+        if self.mode == "Disabled":
+            self.mode = "Disabled"
 
     def add_note_offset(self):
         self.note_offsets.insert(0, [100, 1])
@@ -225,15 +265,27 @@ class LedSettings:
 
     def light_keys_in_range(self, location):
         strip = self.ledstrip.strip
-        fastColorWipe(strip, False, self)
+        if self.mode == "Disabled":
+            self.close_range_preview()
+            return
+        if callable(getattr(type(strip), "priority_view", None)):
+            if (getattr(self, "_range_preview", None) is None
+                    or self._range_preview_source is not strip):
+                self.close_range_preview()
+                self._range_preview = strip.priority_view()
+                self._range_preview_source = strip
+            output = self._range_preview
+        else:
+            output = strip
+        fastColorWipe(output, False, self)
         if strip.numPixels() > 0:
             for rgb, (start, end) in zip(self.multicolor, self.multicolor_range):
                 color = Color(*(int(channel) for channel in rgb))
                 for note in (start, end):
                     position = get_note_position(note, self.ledstrip, self)
                     if 0 <= position < strip.numPixels():
-                        strip.setPixelColor(position, color)
-        strip.show()
+                        output.setPixelColor(position, color)
+        output.show()
 
     def change_color(self, color, value):
         self.sequence_active = False

@@ -29,6 +29,9 @@ class LEDEffectsProcessor:
         guide_lights = getattr(ledstrip, "keylist_guide", None)
         use_hand_colors = getattr(ledsettings, "skipped_notes", "Normal") != "Finger-based"
         mode = ledsettings.mode
+        pulse_leds = getattr(ledstrip, "_pulse_leds", None)
+        if mode != "Pulse" and pulse_leds:
+            pulse_leds.clear()
         color_update = self.color_mode.ColorUpdate
         set_pixel_color = ledstrip.strip.setPixelColor
         set_adjacent_colors = ledstrip.set_adjacent_colors
@@ -137,6 +140,7 @@ class LEDEffectsProcessor:
 
     def process_pulse_effects(self):
         if not self.ledstrip.active_pulses:
+            self.ledstrip._pulse_leds = set()
             return False
 
         if len(self._pulse_rgb) != self.ledstrip.led_number:
@@ -258,8 +262,11 @@ class LEDEffectsProcessor:
              for i in range(start_led, end_led):
                  touch_led(i)
 
+        protected_pulse_leds = set()
         for i in touched_leds:
             color = pulse_rgb[i]
+            if color[0] > 0 or color[1] > 0 or color[2] > 0:
+                protected_pulse_leds.add(i)
             final_r = min(255, int(color[0] + br))
             final_g = min(255, int(color[1] + bg))
             final_b = min(255, int(color[2] + bb))
@@ -271,6 +278,7 @@ class LEDEffectsProcessor:
             pulse_seen[i] = False
 
         touched_leds.clear()
+        self.ledstrip._pulse_leds = protected_pulse_leds
 
         if pulses_to_remove:
             self.ledstrip.active_pulses = surviving_pulses
