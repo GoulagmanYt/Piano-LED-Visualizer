@@ -10,6 +10,9 @@ Restart=always
 Type=simple
 User=root
 Group=root
+UMask=0077
+# The runtime never needs first-login secrets. GPIO/DMA still require root.
+InaccessiblePaths=-/var/lib/plv-bootstrap
 
 [Install]
 WantedBy=multi-user.target

@@ -16,6 +16,7 @@ jobs:
     env:
       BASE_IMAGE: 2026-10-06-raspios-bookworm-armhf-lite.img
       BASE_URL: https://downloads.raspberrypi.com/raspios_oldstable_lite_armhf/images/raspios_oldstable_lite_armhf-2026-10-06
+      BASE_SHA256: 6332f7a232acd7d05f9499273e9a28783bbf1d23e3b1053784167793159044dd
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,7 +31,7 @@ jobs:
       - name: Download and verify Raspberry Pi OS Lite
         run: |
           curl --fail --location --retry 3 -O "$BASE_URL/$BASE_IMAGE.xz"
-          curl --fail --location --retry 3 -o base.sha256 "$BASE_URL/$BASE_IMAGE.xz.sha256"
+          printf '%s  %s\n' "$BASE_SHA256" "$BASE_IMAGE.xz" > base.sha256
           sha256sum --check base.sha256
           xz --decompress "$BASE_IMAGE.xz"
           mv "$BASE_IMAGE" raspi.img
@@ -116,6 +117,7 @@ jobs:
         run: |
           curl --fail --location --retry 3 -o pishrink.sh \
             https://raw.githubusercontent.com/Drewsif/PiShrink/5f358d03eed4b7334657ee93867826a2b42f112a/pishrink.sh
+          echo '71026f0c02ac099e588a3eb8f70760c1b680aa8ea3acde61a0141fbaeb68c777  pishrink.sh' | sha256sum --check --strict
           sudo bash pishrink.sh -z raspi.img plv.img
           test -s plv.img.gz
           gzip --test plv.img.gz

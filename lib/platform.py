@@ -59,7 +59,7 @@ class PlatformRasp(PlatformBase):
     HOTSPOT_CONNECTION_NAME = "Hotspot"
     HOTSPOT_SSID = "PianoLEDVisualizer"
     HOTSPOT_IFACE = "wlan0"
-    DEFAULT_HOTSPOT_PASSWORD = "visualizer"
+    DEFAULT_HOTSPOT_PASSWORD = None
     UPDATE_STATE_DIR = Path("/var/lib/piano-led-visualizer")
     UPDATE_UNIT = "plv-reliable-update"
     # Serialises "is an update running?" + "mark it as starting" so two quick
@@ -247,7 +247,9 @@ class PlatformRasp(PlatformBase):
                 password = usersettings.get("hotspot_password")
             except Exception:
                 password = None
-        if not password or len(str(password)) < 8:
+        if (not password or any(char in str(password) for char in '\r\n\0')
+                or not (8 <= len(str(password).encode('utf-8')) <= 63
+                        or (len(str(password)) == 64 and all(char in '0123456789abcdefABCDEF' for char in str(password))))):
             return cls.DEFAULT_HOTSPOT_PASSWORD
         return str(password)
 
@@ -257,7 +259,10 @@ class PlatformRasp(PlatformBase):
         hotspot_name = cls.HOTSPOT_CONNECTION_NAME
         hotspot_ssid = cls.HOTSPOT_SSID
         hotspot_iface = cls.HOTSPOT_IFACE
-        password = password or cls.DEFAULT_HOTSPOT_PASSWORD
+        password = cls._get_hotspot_password({'hotspot_password': password})
+        if password is None:
+            logger.warning('No valid hotspot password is configured; hotspot startup is disabled')
+            return False
 
         check_profile = subprocess.run(['sudo', 'nmcli', 'connection', 'show', hotspot_name],
                                        capture_output=True, text=True)
@@ -288,11 +293,11 @@ class PlatformRasp(PlatformBase):
                 'wifi-sec.key-mgmt', 'wpa-psk',
                 '802-11-wireless-security.pmf', '1',
                 'wifi-sec.psk', password
-            ], check=True)
+            ], check=True, capture_output=True, text=True)
             logger.info("Hotspot profile is configured.")
             return True
         except subprocess.CalledProcessError as e:
-            logger.warning(f"An error occurred while configuring the Hotspot profile: {e}")
+            logger.warning('An error occurred while configuring the Hotspot profile (exit %s)', e.returncode)
             return False
 
     @staticmethod

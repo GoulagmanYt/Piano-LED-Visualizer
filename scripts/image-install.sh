@@ -18,33 +18,26 @@ apt-get install -y git curl ca-certificates python3-pip python3-venv python3-dev
 
 echo pianoledvisualizer > /etc/hostname
 sed -i -E 's/^(127\.0\.1\.1\s+).*/\1pianoledvisualizer/' /etc/hosts
-groups=sudo
+groups=""
 for group in audio video input render plugdev dialout netdev spi i2c gpio; do
-  if getent group "$group" >/dev/null; then groups="$groups,$group"; fi
+  if getent group "$group" >/dev/null; then groups="${groups:+${groups},}$group"; fi
 done
 if ! id -u plv >/dev/null 2>&1; then
   useradd -m -G "$groups" -s /bin/bash plv
+  INITIALIZE_ACCOUNT=--defer-account
 fi
-echo 'plv:visualizer' | chpasswd
-echo 'plv ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/010_pi-nopasswd
-chmod 0440 /etc/sudoers.d/010_pi-nopasswd
-if id -u pi >/dev/null 2>&1; then userdel -r pi; fi
-# A preconfigured account replaces the stock interactive user setup.
-systemctl disable userconfig.service 2>/dev/null || true
+# Preserve Imager's existing administrator and its first-boot setup path.
 systemctl set-default multi-user.target
 
-curl --fail --location --retry 3 -o /tmp/rtpmidid.deb \
-  https://github.com/davidmoreno/rtpmidid/releases/download/v24.12/rtpmidid_24.12.2_armhf.deb
-apt-get install -y /tmp/rtpmidid.deb
-rm /tmp/rtpmidid.deb
+python3 "$APP/scripts/install_rtpmidid.py" --os bookworm --arch armhf
 
 python3 -m venv "$APP/.venv"
 "$PYTHON" -m pip install --upgrade pip
 "$PYTHON" -m pip install -r "$APP/requirements.txt"
 "$PYTHON" -m pip freeze > /etc/plv-python-packages.txt
 git -C "$APP" rev-parse HEAD > /etc/plv-image-revision
-cp "$APP/config/default_settings.xml" "$APP/config/settings.xml"
-chown -R plv:plv "$APP"
+# Per-device settings and hotspot password are generated on first boot.
+bash "$APP/scripts/secure_installation.sh" --defer-settings ${INITIALIZE_ACCOUNT:-}
 
 BOOT=/boot/firmware/config.txt
 sed -i 's/^dtparam=audio=on/#dtparam=audio=on/' "$BOOT"
@@ -107,14 +100,22 @@ WantedBy=multi-user.target
 EOF
 
 # Each flashed card gets its own SSH host keys; none are shipped in the image.
+# Keep explicit Imager userconf input and console setup. With an SSH key seed or
+# a configured account, skip userconfig's otherwise interactive TTY dialog.
+mkdir -p /etc/systemd/system/userconfig.service.d
+cat > /etc/systemd/system/userconfig.service.d/20-plv-headless.conf <<'EOF'
+[Service]
+ExecCondition=/usr/bin/python3 /home/Piano-LED-Visualizer/scripts/configure_installation_security.py --needs-userconfig
+EOF
 cat > /etc/systemd/system/plv-first-boot.service <<'EOF'
 [Unit]
-Description=Generate unique SSH host keys
-Before=ssh.service
-After=local-fs.target
+Description=Generate unique SSH host keys and per-device login credentials
+Before=ssh.service visualizer.service
+After=local-fs.target userconfig.service
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/ssh-keygen -A
+ExecStart=/usr/bin/python3 /home/Piano-LED-Visualizer/scripts/configure_installation_security.py --first-boot
 RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target

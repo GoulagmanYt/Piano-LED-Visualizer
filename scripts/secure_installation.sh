@@ -9,5 +9,6 @@ PLV_DIR="${PLV_DIR:-$PROJECT_ROOT}"
 # Do not traverse symlinks or other mounted filesystems.
 find "$PLV_DIR" -xdev -type d -exec chown root:root {} + -exec chmod 0755 {} +
 find "$PLV_DIR" -xdev -type f -exec chown root:root {} + -exec chmod go-w {} +
-chmod 0600 "$PLV_DIR/config/settings.xml"
+[ ! -f "$PLV_DIR/config/settings.xml" ] || chmod 0600 "$PLV_DIR/config/settings.xml"
 chmod 0755 "$PLV_DIR"/scripts/*.sh
+python3 "$PLV_DIR/scripts/configure_installation_security.py" "$@"

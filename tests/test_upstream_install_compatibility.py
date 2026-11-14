@@ -21,6 +21,7 @@ def run_installer_function(name, os_name, arch):
     harness = f'''set -euo pipefail
 PLV_OS={os_name}
 PLV_ARCH={arch}
+APP_DIR=/home/Piano-LED-Visualizer
 execute_command() {{ echo "COMMAND:$1"; }}
 id() {{ return 0; }}
 {installer_function(name)}
@@ -41,17 +42,15 @@ def test_package_selection_for_bookworm_and_trixie():
 def test_rtpmidi_selection_for_trixie_architectures():
     arm64 = run_installer_function('install_rtpmidi_server', 'trixie', 'arm64')
     armhf = run_installer_function('install_rtpmidi_server', 'trixie', 'armhf')
-    assert 'rtpmidid-debian-trixie-arm64-26.01.deb' in arm64
-    assert 'git clone --depth 1 --branch v26.01' in armhf
-    assert 'cmake --build' in armhf
-    assert 'rtpmidid-debian-trixie-arm64' not in armhf
+    assert 'scripts/install_rtpmidid.py --os trixie --arch arm64' in arm64
+    assert 'scripts/install_rtpmidid.py --os trixie --arch armhf' in armhf
 
 
 def test_rtpmidi_bookworm_uses_native_architecture():
     commands = run_installer_function('install_rtpmidi_server', 'bookworm', 'arm64')
     assert 'dpkg --add-architecture' not in commands
-    assert 'rtpmidid_24.12.2_arm64.deb' in commands
-    assert 'rtpmidid_24.12.2_armhf.deb' in run_installer_function('install_rtpmidi_server', 'bookworm', 'armhf')
+    assert 'scripts/install_rtpmidid.py --os bookworm --arch arm64' in commands
+    assert 'scripts/install_rtpmidid.py --os bookworm --arch armhf' in run_installer_function('install_rtpmidi_server', 'bookworm', 'armhf')
 
 
 def test_service_and_tuning_use_venv_interpreter():
@@ -76,7 +75,6 @@ def test_identity_preserves_existing_password(existing_user):
     harness = f'''set -euo pipefail
 PLV_HOSTNAME=pianoledvisualizer
 PLV_USER=plv
-PLV_PASSWORD=visualizer
 execute_command() {{ echo "COMMAND:$1"; }}
 getent() {{ return 0; }}
 id() {{ return {0 if existing_user else 1}; }}
@@ -95,7 +93,8 @@ systemctl() {{ return 0; }}
 configure_pi_identity
 '''
     result = subprocess.run([BASH, '-c', harness], check=True, text=True, capture_output=True)
-    assert ('PASSWORD_CHANGED' in result.stdout) is not existing_user
+    # Account creation leaves it locked until private provisioning after clone.
+    assert 'PASSWORD_CHANGED' not in result.stdout
     assert ('useradd' in result.stdout) is not existing_user
 
 

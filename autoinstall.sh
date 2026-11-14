@@ -5,7 +5,7 @@ REPO_URL="https://github.com/GoulagmanYt/Piano-LED-Visualizer.git"
 REPO_BRANCH="master"
 APP_DIR="/home/Piano-LED-Visualizer"
 PLV_USER="plv"
-PLV_PASSWORD="visualizer"
+PLV_CREATED_ACCOUNT=0
 PLV_HOSTNAME="pianoledvisualizer"
 
 # Restrict OS/architecture before making any changes to the machine.
@@ -73,10 +73,10 @@ update_os() {
 }
 
 configure_pi_identity() {
-  local user_groups="sudo"
+  local user_groups=""
   for group in audio video input render plugdev dialout netdev spi i2c gpio; do
     if getent group "$group" >/dev/null 2>&1; then
-      user_groups="${user_groups},${group}"
+      user_groups="${user_groups:+${user_groups},}${group}"
     fi
   done
 
@@ -88,13 +88,11 @@ configure_pi_identity() {
 
   if ! id -u "${PLV_USER}" >/dev/null 2>&1; then
     execute_command "sudo useradd -m -s /bin/bash -G ${user_groups} ${PLV_USER}"
-    # Reinstallation must preserve an existing account's chosen password.
-    echo "${PLV_USER}:${PLV_PASSWORD}" | sudo chpasswd
+    # Keep the account locked until private credentials are provisioned later.
+    PLV_CREATED_ACCOUNT=1
   fi
 
   execute_command "sudo usermod -aG ${user_groups} ${PLV_USER}"
-  echo "${PLV_USER} ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/010_pi-nopasswd >/dev/null
-  execute_command "sudo chmod 0440 /etc/sudoers.d/010_pi-nopasswd"
 
   if systemctl list-unit-files ssh.service --no-legend 2>/dev/null | grep -q '^ssh\.service'; then
     execute_command "sudo systemctl enable ssh.service"
@@ -116,7 +114,7 @@ install_packages() {
   else
     os_packages="libasound2 libfmt9 libatlas-base-dev"
   fi
-  execute_command "sudo apt-get install -y ruby git wget iw python3-pip python3-venv autotools-dev libtool autoconf libavahi-client3 libavahi-common3 libc6 libgcc-s1 libstdc++6 python3 libopenblas-dev libavahi-client-dev libasound2-dev libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev libopenjp2-7 libtiff6 libjack0 libjack-dev fonts-freefont-ttf libfreetype6 gcc make build-essential scons swig abcmidi overlayroot ${os_packages}" "check_internet"
+  execute_command "sudo apt-get install -y ca-certificates openssh-client ruby git wget iw python3-pip python3-venv autotools-dev libtool autoconf libavahi-client3 libavahi-common3 libc6 libgcc-s1 libstdc++6 python3 libopenblas-dev libavahi-client-dev libasound2-dev libusb-dev libdbus-1-dev libglib2.0-dev libudev-dev libical-dev libreadline-dev libopenjp2-7 libtiff6 libjack0 libjack-dev fonts-freefont-ttf libfreetype6 gcc make build-essential scons swig abcmidi overlayroot ${os_packages}" "check_internet"
 }
 
 # Function to disable audio output and configure fast boot
@@ -137,50 +135,18 @@ disable_audio_output() {
 
 # Function to install RTP-midi server
 install_rtpmidi_server() {
-  if [ "$PLV_OS" = "trixie" ] && [ "$PLV_ARCH" = "armhf" ]; then
-    # Upstream supplies no Trixie armhf package. Build in an isolated directory.
-    local source_dir
-    source_dir="$(mktemp -d /tmp/plv-rtpmidid-XXXXXX)"
-    echo "Building rtpmidid for Trixie armhf; this may take a long time."
-    execute_command "git clone --depth 1 --branch v26.01 https://github.com/davidmoreno/rtpmidid.git ${source_dir}/src" "check_internet"
-    execute_command "cmake -S ${source_dir}/src -B ${source_dir}/src/build -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=OFF -DENABLE_PCH=OFF -DUSE_FMT=ON -DCPP_VERSION=17 -GNinja"
-    execute_command "cmake --build ${source_dir}/src/build"
-    execute_command "sudo install -m 755 ${source_dir}/src/build/src/rtpmidid /usr/bin/rtpmidid"
-    execute_command "sudo mkdir -p /etc/rtpmidid"
-    if [ ! -e /etc/rtpmidid/default.ini ]; then
-      execute_command "sudo cp ${source_dir}/src/default.ini /etc/rtpmidid/default.ini"
-    fi
-    execute_command "sudo cp ${source_dir}/src/debian/rtpmidid.service /lib/systemd/system/rtpmidid.service"
-    if ! id -u rtpmidid >/dev/null 2>&1; then
-      execute_command "sudo useradd -r -s /usr/sbin/nologin -G audio rtpmidid"
-    fi
-    execute_command "sudo systemctl daemon-reload"
-    rm -rf "$source_dir"
-  else
-    local url package temp_dir
-    if [ "$PLV_OS" = "trixie" ]; then
-      package="rtpmidid-debian-trixie-arm64-26.01.deb"
-      url="https://github.com/davidmoreno/rtpmidid/releases/download/v26.01/${package}"
-    else
-      package="rtpmidid_24.12.2_${PLV_ARCH}.deb"
-      url="https://github.com/davidmoreno/rtpmidid/releases/download/v24.12/${package}"
-    fi
-    temp_dir="$(mktemp -d /tmp/plv-rtpmidid-XXXXXX)"
-    execute_command "wget -O ${temp_dir}/${package} ${url}" "check_internet"
-    execute_command "sudo apt-get install -y ${temp_dir}/${package}" "check_internet"
-    rm -rf "$temp_dir"
-  fi
+  execute_command "sudo python3 ${APP_DIR}/scripts/install_rtpmidid.py --os ${PLV_OS} --arch ${PLV_ARCH}" "check_internet"
 }
 
 
 # Function to install Piano-LED-Visualizer
 install_piano_led_visualizer() {
   if [ -d "${APP_DIR}/.git" ]; then
-    execute_command "sudo chown -R ${PLV_USER}:${PLV_USER} ${APP_DIR}"
-    execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} remote set-url origin ${REPO_URL}"
-    execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} fetch origin ${REPO_BRANCH}" "check_internet"
-    execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} checkout ${REPO_BRANCH}"
-    execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} pull --ff-only origin ${REPO_BRANCH}" "check_internet"
+    execute_command "sudo chown -R root:root ${APP_DIR}"
+    execute_command "sudo git -C ${APP_DIR} remote set-url origin ${REPO_URL}"
+    execute_command "sudo git -C ${APP_DIR} fetch origin ${REPO_BRANCH}" "check_internet"
+    execute_command "sudo git -C ${APP_DIR} checkout ${REPO_BRANCH}"
+    execute_command "sudo git -C ${APP_DIR} pull --ff-only origin ${REPO_BRANCH}" "check_internet"
   else
     if [ -e "${APP_DIR}" ]; then
       execute_command "sudo mv ${APP_DIR} ${APP_DIR}.pre-autoinstall-$(date +%Y%m%d-%H%M%S)"
@@ -188,11 +154,15 @@ install_piano_led_visualizer() {
     execute_command "cd /home/ && sudo git clone --branch ${REPO_BRANCH} ${REPO_URL} ${APP_DIR}" "check_internet"
   fi
 
-  execute_command "sudo chown -R ${PLV_USER}:${PLV_USER} ${APP_DIR}"
-  execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} config --local pull.ff only"
-  execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} config --local core.filemode false"
-  execute_command "sudo -u ${PLV_USER} python3 -m venv ${APP_DIR}/.venv"
-  execute_command "sudo -u ${PLV_USER} ${APP_DIR}/.venv/bin/python -m pip install -r ${APP_DIR}/requirements.txt" "check_internet"
+  execute_command "sudo git -C ${APP_DIR} config --local pull.ff only"
+  execute_command "sudo git -C ${APP_DIR} config --local core.filemode false"
+  execute_command "sudo python3 -m venv ${APP_DIR}/.venv"
+  execute_command "sudo ${APP_DIR}/.venv/bin/python -m pip install -r ${APP_DIR}/requirements.txt" "check_internet"
+  if [ "${PLV_CREATED_ACCOUNT:-0}" = 1 ]; then
+    execute_command "sudo bash ${APP_DIR}/scripts/secure_installation.sh --initialize-account"
+  else
+    execute_command "sudo bash ${APP_DIR}/scripts/secure_installation.sh"
+  fi
   execute_command "sudo raspi-config nonint do_boot_behaviour B2"
   execute_command "sudo install -m 0644 ${APP_DIR}/systemd/visualizer.service /lib/systemd/system/visualizer.service"
   execute_command "sudo systemctl daemon-reload"
@@ -210,7 +180,7 @@ apply_default_runtime_tuning() {
   execute_command "systemctl is-active visualizer.service"
   execute_command "systemctl is-active rtpmidid.service"
   execute_command "systemctl is-active plv-lowlatency.service"
-  execute_command "sudo -u ${PLV_USER} git -C ${APP_DIR} status --short --branch"
+  execute_command "sudo git -C ${APP_DIR} status --short --branch"
   echo ""
   echo "======================================================================"
   echo "PLV TUNING : Fast Boot activé (~12s)."
@@ -260,7 +230,7 @@ update_os
 enable_spi_interface
 install_packages
 disable_audio_output
-install_rtpmidi_server
 install_piano_led_visualizer
+install_rtpmidi_server
 apply_default_runtime_tuning
 finish_installation

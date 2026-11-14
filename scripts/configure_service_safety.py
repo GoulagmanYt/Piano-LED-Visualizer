@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Install the LED fail-safe and remove obsolete network boot dependencies."""
-from pathlib import Path
 import shutil
 import time
+from pathlib import Path
 
 
 def remove_network_dependencies(text):
@@ -38,7 +38,8 @@ if __name__ == '__main__':
     override = Path('/etc/systemd/system/visualizer.service.d/zz-safety.conf')
     write_backup(override, '[Service]\nExecStopPost=\n'
                  f'ExecStopPost={python} {project}/scripts/clear_leds.py\n'
-                 'TimeoutStopSec=15\nUMask=0022\n'
+                 'TimeoutStopSec=15\nUMask=0077\n'
+                 'InaccessiblePaths=-/var/lib/plv-bootstrap\n'
                  'CPUSchedulingPolicy=other\nCPUSchedulingPriority=0\n')
     tuning = Path('/etc/systemd/system/plv-lowlatency.service')
     if tuning.exists():

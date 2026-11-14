@@ -132,7 +132,7 @@ def test_hotspot_disables_pmf(monkeypatch):
         calls.append(args)
         return subprocess.CompletedProcess(args, 0, 'Hotspot', '')
     monkeypatch.setattr('lib.platform.subprocess.run', run)
-    assert PlatformRasp.create_hotspot_profile('secret')
+    assert PlatformRasp.create_hotspot_profile('secret12')
     modify = next(args for args in calls if 'modify' in args)
     assert modify[modify.index('802-11-wireless-security.pmf') + 1] == '1'
 
