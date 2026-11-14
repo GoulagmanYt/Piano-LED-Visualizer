@@ -8,6 +8,7 @@ from lib import connectall
 from lib.buffered_midi_input import open_midi_input
 from lib.midi_connection_manager import MidiConnectionManager
 from lib.midi_queues import MidiQueues
+from lib.midi_teardown import MidiTeardown
 from lib.log_setup import logger
 from lib.midiport_resolver import (
     PortResolutionStatus,
@@ -92,6 +93,10 @@ WEBSOCKET_PUBLISH_IDLE_TIMEOUT_S = 0.05  # safety net only; producers wake the w
 
 class MidiPorts:
     def __init__(self, usersettings):
+        self._closing = False
+        self._lifecycle_lock = threading.Lock()
+        self._input_lock = threading.RLock()
+        self._teardown = MidiTeardown(self._cleanup_ports, name='midi-ports-cleanup')
         self.usersettings = usersettings
         self.runtime_diagnostics = RuntimeDiagnostics()
 
@@ -354,6 +359,8 @@ class MidiPorts:
         return self._classify_message(msg) in {"note_on", "note_off", "control_change"}
 
     def enqueue_rtp_message(self, msg, msg_timestamp=None, source="forward"):
+        if getattr(self, '_closing', False):
+            return False
         if self._should_ignore_live_message(msg):
             ignored_type = getattr(msg, "type", "unknown")
             self._increment_ignored(ignored_type)
@@ -380,6 +387,8 @@ class MidiPorts:
         return queued
 
     def schedule_rtp_message(self, msg, due_time, source="scheduled_forward", enqueued_at=None):
+        if getattr(self, '_closing', False):
+            return False
         if self._should_ignore_live_message(msg):
             ignored_type = getattr(msg, "type", "unknown")
             self._increment_ignored(ignored_type)
@@ -444,6 +453,13 @@ class MidiPorts:
         if not hasattr(self, "_output_lock"):
             self._output_lock = threading.RLock()
         return self._output_lock
+
+    def _get_input_lock(self):
+        return self.__dict__.setdefault('_input_lock', threading.RLock())
+
+    def _get_lifecycle_lock(self):
+        # This state lock never protects a native MIDI operation or a join.
+        return self.__dict__.setdefault('_lifecycle_lock', threading.Lock())
 
     def _flush_output_locked(self):
         port = self.playport
@@ -525,10 +541,14 @@ class MidiPorts:
         return sent
 
     def _send_rtp_message(self, msg, send_started=None, scheduled_due_time=None):
+        if getattr(self, '_closing', False):
+            return False
         with self._get_output_lock():
             return self._send_output_locked(msg, send_started, scheduled_due_time)
 
     def _send_output_locked(self, msg, send_started=None, scheduled_due_time=None):
+        if getattr(self, '_closing', False) or getattr(self, '_output_retiring', False):
+            return False
         port = self.playport
         if port is None:
             return False
@@ -571,9 +591,15 @@ class MidiPorts:
                 if hasattr(self, "queues"):
                     self.queues.set_forwarding_enabled(False)
                 self._silence_output(port)
-                self._safe_close_port(port)
-                self.playport = None
-                self.actual_play_port = None
+                self._output_retiring = True
+                try:
+                    if port.close() is False:
+                        raise RuntimeError('MIDI output cleanup pending')
+                except Exception:
+                    logger.error('Disconnected MIDI output cleanup failed; retaining ownership', exc_info=True)
+                else:
+                    self.playport = None
+                    self.actual_play_port = None
             return False
 
     def _flush_websocket_publish_queue_once(self):
@@ -694,6 +720,12 @@ class MidiPorts:
             wakeup.set()
 
     def start_background_workers(self):
+        with self._get_lifecycle_lock():
+            return self._start_background_workers_locked()
+
+    def _start_background_workers_locked(self):
+        if getattr(self, '_closing', False):
+            raise RuntimeError('Cannot restart MIDI workers while shutdown is requested')
         if self.worker_running:
             return
 
@@ -705,47 +737,67 @@ class MidiPorts:
         self.live_forward_thread.start()
         self.websocket_publish_thread.start()
 
-    def close(self):
-        self.worker_running = False
+    def _get_teardown(self):
+        return self.__dict__.setdefault(
+            '_teardown', MidiTeardown(self._cleanup_ports, name='midi-ports-cleanup'),
+        )
+
+    @property
+    def shutdown_status(self):
+        return self._get_teardown().status
+
+    def close(self, timeout=2):
+        """Bound the caller's wait while a daemon retains unfinished handles.
+
+        Python cannot cancel a native send/panic/close. Repeated calls share
+        the same cleanup owner until it finishes; failed cleanup can be retried.
+        """
+        deadline = None if timeout is None else time.monotonic() + max(0.0, timeout)
+        with self._get_lifecycle_lock():
+            self._closing = True
+            self.worker_running = False
+            self.monitor_running = False
+        self.monitor_stop.set()
         self._notify_forward_worker()
         self._wake_websocket_publish_worker()
-        monitor_stopped = self.stop_midi_monitor()
-        for worker in (self.live_forward_thread, self.websocket_publish_thread):
-            if worker is not None and worker is not threading.current_thread():
-                worker.join(timeout=2)
-        # A timed-out monitor may still replace the handles; a timed-out
-        # forwarder may still be inside native send(). Preserve ownership so
-        # a later close() can finish once those workers have actually exited.
-        forwarder = self.live_forward_thread
-        if not monitor_stopped or (forwarder is not None and forwarder.is_alive()):
-            logger.error("MIDI shutdown incomplete; active workers retain their ports")
+        caller = threading.current_thread()
+        owned_threads = (
+            self.midi_monitor_thread, self.live_forward_thread, self.websocket_publish_thread,
+            getattr(self.inport, '_thread', None),
+        )
+        remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+        panic = getattr(self, '_panic_owner', None)
+        owns_panic = panic is not None and panic.is_owner_thread
+        complete = self._get_teardown().close(0 if caller in owned_threads or owns_panic else remaining)
+        diagnostics = getattr(self, 'runtime_diagnostics', None)
+        if diagnostics is not None:
+            diagnostics.set_gauge('midi_shutdown_incomplete', int(not complete))
+        return complete
+
+    def _cleanup_ports(self):
+        # Waiting for a native owner is allowed here, never on close()'s caller.
+        for worker in (self.midi_monitor_thread, self.live_forward_thread, self.websocket_publish_thread):
+            if worker is not None and worker.ident is not None:
+                worker.join()
+                if worker.is_alive():
+                    return False
+        panic = getattr(self, '_panic_owner', None)
+        if panic is not None and not panic.wait_done():
             return False
-        bridge = getattr(self, "learning_bridge", None)
-        bridge_stopped = bridge is None or bridge.close()
-        if not bridge_stopped:
-            logger.error("Learning bridge cleanup incomplete; ports remain owned by their workers")
-        output_lock = self._get_output_lock()
-        if not output_lock.acquire(blocking=False):
-            logger.error("MIDI shutdown incomplete; an output operation still owns the port")
+        bridge = getattr(self, 'learning_bridge', None)
+        if bridge is not None and not bridge.close(timeout=None):
             return False
-        try:
-            for name in ("inport", "playport"):
+        # Reconnects and cleanup take input then output, never the reverse.
+        with self._get_input_lock(), self._get_output_lock():
+            for name in ('inport', 'playport'):
                 port = getattr(self, name, None)
-                if name == "playport":
+                if name == 'playport':
                     self.queues.set_forwarding_enabled(False)
                     self._silence_output(port)
-                try:
-                    if port is not None:
-                        port.close()
-                except Exception as error:
-                    # Buffered inputs also refuse native cleanup while their
-                    # callback/drain thread is alive. Keep that handle for retry.
-                    logger.error("MIDI shutdown could not close %s: %s", name, error, exc_info=True)
+                if port is not None and port.close() is False:
                     return False
                 setattr(self, name, None)
-        finally:
-            output_lock.release()
-        return bridge_stopped
+        return True
 
     def _safe_close_port(self, port_handle):
         if port_handle is None:
@@ -915,6 +967,14 @@ class MidiPorts:
             logger.warning("MIDI input connected callback failed: %s", e)
 
     def _reconnect_input(self, force=False):
+        if getattr(self, '_closing', False):
+            return False
+        with self._get_input_lock():
+            if getattr(self, '_closing', False):
+                return False
+            return self._reconnect_input_locked(force)
+
+    def _reconnect_input_locked(self, force=False):
         available_inputs = _get_cached_input_names()
         runtime_label_changes = self._refresh_runtime_port_labels(
             available_inputs=available_inputs,
@@ -941,15 +1001,18 @@ class MidiPorts:
 
         previous_input_port = self.actual_input_port
         old_port = self.inport
+        if old_port is not None and old_port.close() is False:
+            raise RuntimeError('MIDI input cleanup pending; refusing to reopen')
         self.inport = None
         self.actual_input_port = None
 
-        if selected_port is None:
-            self._safe_close_port(old_port)
+        if selected_port is None or getattr(self, '_closing', False):
             return old_port is not None
 
         try:
             self.inport = open_midi_input(selected_port, callback=self.msg_callback)
+            if getattr(self, '_closing', False):
+                return True
             self._configure_input_backend_filters(self.inport)
             self.actual_input_port = selected_port
             logger.info("Input port active: %s", selected_port)
@@ -957,28 +1020,36 @@ class MidiPorts:
                 self._notify_input_connected(selected_port)
         except Exception as e:
             logger.info("Can't load input port '%s': %s", selected_port, e)
-            self.inport = None
+            # A backend-filter failure still leaves a live acquired handle.
+            # Keep it if cleanup fails, so the next attempt can retire it.
+            if self.inport is not None and self.inport.close() is not False:
+                self.inport = None
             self.actual_input_port = None
 
-        self._safe_close_port(old_port)
         return True
 
     def _reconnect_output(self, force=False):
+        if getattr(self, '_closing', False):
+            return False
         with self._get_output_lock():
             return self._reconnect_output_locked(force)
 
     @staticmethod
     def _silence_output(port):
         if port is None:
-            return
+            return True
         try:
             for channel in range(16):
                 for control in (64, 123, 120):
                     port.send(mido.Message('control_change', channel=channel, control=control, value=0))
+            return True
         except Exception:
             logger.warning("Unable to silence disconnected MIDI output")
+            return False
 
     def _reconnect_output_locked(self, force=False):
+        if getattr(self, '_closing', False):
+            return False
         available_inputs = _get_cached_input_names()
         available_outputs = _get_cached_output_names()
         runtime_label_changes = self._refresh_runtime_port_labels(
@@ -1001,7 +1072,8 @@ class MidiPorts:
             selected_port,
             force,
         )
-        if can_keep_current_port and not runtime_label_changes["play_changed"]:
+        if (can_keep_current_port and not runtime_label_changes["play_changed"]
+                and not getattr(self, '_output_retiring', False)):
             return False
         if runtime_label_changes["play_changed"]:
             self.port_runtime_reconnects = getattr(self, "port_runtime_reconnects", 0) + 1
@@ -1011,11 +1083,16 @@ class MidiPorts:
         had_old_port = old_port is not None
         if hasattr(self, "queues"):
             self.queues.set_forwarding_enabled(False)
+        self._output_retiring = old_port is not None
+        self._silence_output(old_port)
+        if old_port is not None and old_port.close() is False:
+            raise RuntimeError('MIDI output cleanup pending; refusing to reopen')
         self.playport = None
         self.actual_play_port = None
-        self._silence_output(old_port)
-        self._safe_close_port(old_port)
         old_port = None
+
+        if getattr(self, '_closing', False):
+            return had_old_port
 
         if selected_port is None and requested_port and requested_port != "default":
             _refresh_port_cache()
@@ -1033,7 +1110,10 @@ class MidiPorts:
 
         try:
             self.playport = mido.open_output(selected_port)
+            if getattr(self, '_closing', False):
+                return True
             self._silence_output(self.playport)
+            self._output_retiring = False
             if hasattr(self, "queues"):
                 self.queues.set_forwarding_enabled(True)
             self.forward_backoff_until = 0.0
@@ -1058,24 +1138,27 @@ class MidiPorts:
         return False
 
     def _close_standard_ports_for_bridge(self):
+        if getattr(self, '_closing', False):
+            return False
+        with self._get_input_lock(), self._get_output_lock():
+            if getattr(self, '_closing', False):
+                return False
+            return self._close_standard_ports_for_bridge_locked()
+
+    def _close_standard_ports_for_bridge_locked(self):
         """Ensure standard inport and playport are closed when LearningBridge owns MIDI routing."""
-        if getattr(self, "inport", None) is not None:
-            try:
-                self.inport.close()
-            except Exception as error:
-                logger.debug("Error closing inport for learning bridge: %s", error)
-            self.inport = None
-        if getattr(self, "playport", None) is not None:
-            try:
-                self.playport.close()
-            except Exception as error:
-                logger.debug("Error closing playport for learning bridge: %s", error)
-            self.playport = None
+        for name in ('inport', 'playport'):
+            port = getattr(self, name, None)
+            if port is not None and port.close() is False:
+                raise RuntimeError('MIDI cleanup pending; refusing to switch routing mode')
+            setattr(self, name, None)
         self.actual_input_port = None
         self.actual_play_port = None
 
     def setup_ports(self, clean_direct_links=False):
         """Initialize or reconcile MIDI ports according to current mode."""
+        if getattr(self, '_closing', False):
+            return False
         if getattr(self, "learning_bridge_enabled", False) and self.learning_bridge is not None:
             self._close_standard_ports_for_bridge()
             try:
@@ -1107,10 +1190,20 @@ class MidiPorts:
             self.setup_ports()
 
     def set_learning_bridge_mode(self, enabled):
-        """Dynamically switch between Standard MIDI mode and Synthesia Learning Bridge mode."""
+        """Dynamically switch Standard MIDI and Synthesia Learning Bridge modes."""
+        if getattr(self, '_closing', False):
+            raise RuntimeError('Cannot change MIDI mode while shutdown is requested')
         target_enabled = bool(enabled) and str(enabled).strip().lower() not in (
             "0", "false", "off", "normal", "light_show"
         )
+        bridge = getattr(self, 'learning_bridge', None)
+        if bridge is not None:
+            if not target_enabled and not bridge.close():
+                raise RuntimeError('Learning MIDI cleanup incomplete; refusing to reopen ports')
+            if target_enabled and bridge._closed:
+                with self._get_lifecycle_lock():
+                    if getattr(self, '_closing', False) or not bridge.reopen():
+                        raise RuntimeError('Learning MIDI cleanup incomplete; refusing to reopen ports')
         self.usersettings.change_setting_value(
             "midi_bridge_mode", "learning" if target_enabled else "normal"
         )
@@ -1126,7 +1219,7 @@ class MidiPorts:
             from lib.learning_bridge import LearningBridge
             self._close_standard_ports_for_bridge()
             if self.learning_bridge is None:
-                self.learning_bridge = LearningBridge(
+                bridge = LearningBridge(
                     self.queues,
                     self.usersettings,
                     practice_active=lambda: bool(
@@ -1135,8 +1228,14 @@ class MidiPorts:
                     ),
                     activity=lambda: (setattr(self, "last_activity", time.time()), self.queues.activity.set()),
                 )
+                with self._get_lifecycle_lock():
+                    if getattr(self, '_closing', False):
+                        raise RuntimeError('Cannot change MIDI mode while shutdown is requested')
+                    self.learning_bridge = bridge
             else:
-                self.learning_bridge._closed = False
+                with self._get_lifecycle_lock():
+                    if getattr(self, '_closing', False) or not self.learning_bridge.reopen():
+                        raise RuntimeError('Learning MIDI cleanup incomplete; refusing to reopen ports')
                 self.learning_bridge.refresh_settings(self.usersettings)
             self.setup_ports(clean_direct_links=True)
         else:
@@ -1184,6 +1283,8 @@ class MidiPorts:
             logger.debug(f"LCD notice failed: {e}")
 
     def change_port(self, port, portname, async_notice=False):
+        if getattr(self, '_closing', False):
+            raise RuntimeError('Cannot change MIDI ports while shutdown is requested')
         """Switch an input/play port.
 
         MenuLCD.render_message() sleeps for the whole notice delay, so web
@@ -1343,6 +1444,8 @@ class MidiPorts:
         self._ensure_runtime_diagnostics().reset()
 
     def msg_callback(self, msg):
+        if getattr(self, '_closing', False):
+            return
         # In Learning mode only the bridge's explicitly tagged inputs are used.
         # Fail closed even while the bridge is waiting for missing ports.
         if getattr(self, "learning_bridge_enabled", False):
@@ -1501,8 +1604,36 @@ class MidiPorts:
                 sent_any = self._send_rtp_message(msg) or sent_any
         return sent_any
 
+    def _silence_current_output(self):
+        with self._get_output_lock():
+            if getattr(self, '_closing', False):
+                return False
+            return self._silence_output(self.playport)
+
+    def request_all_notes_off(self):
+        """Coalesce asynchronous panics; never wait for a native send here."""
+        with self._get_lifecycle_lock():
+            if getattr(self, '_closing', False):
+                return False
+            panic = getattr(self, '_panic_owner', None)
+            if panic is None or not panic.status['pending']:
+                panic = MidiTeardown(self._silence_current_output, name='midi-panic-owner')
+                self._panic_owner = panic
+                panic.start()
+            return panic.status['error'] is None
+
+    def is_silencing_output(self):
+        panic = getattr(self, '_panic_owner', None)
+        return panic is not None and panic.status['pending']
+
     def start_midi_monitor(self):
         """Start monitoring for MIDI device changes and auto-connect."""
+        with self._get_lifecycle_lock():
+            return self._start_midi_monitor_locked()
+
+    def _start_midi_monitor_locked(self):
+        if getattr(self, '_closing', False):
+            raise RuntimeError('Cannot restart MIDI monitor while shutdown is requested')
         if self.midi_monitor_thread is None or not self.midi_monitor_thread.is_alive():
             self.monitor_running = True
             self.monitor_stop.clear()

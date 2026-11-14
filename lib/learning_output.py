@@ -10,6 +10,8 @@ import threading
 
 import mido
 
+from lib.midi_teardown import MidiTeardown
+
 _STOP = object()
 
 
@@ -20,13 +22,17 @@ class LearningOutput:
         self._lock = threading.Lock()
         self._accepting = True
         self._failure = None
-        self._done = threading.Event()
         self._thread = threading.Thread(target=self._run, name='learning-midi-output', daemon=True)
+        self._teardown = MidiTeardown(self._cleanup_native, name='learning-output-cleanup')
         self._thread.start()
 
     @property
     def finished(self):
-        return self._done.is_set()
+        return self._teardown.status['complete']
+
+    @property
+    def shutdown_status(self):
+        return self._teardown.status
 
     @property
     def failure(self):
@@ -52,10 +58,19 @@ class LearningOutput:
                 self._accepting = False
                 self._queue.put(_STOP)
         if threading.current_thread() is self._thread:
+            self._teardown.start()
             return False
-        if not self._done.wait(timeout):
+        if not self._teardown.close(timeout):
             return False
         return self.failure is None
+
+    def _cleanup_native(self):
+        self._thread.join()
+        try:
+            self._port.close()
+        except Exception as error:
+            self._mark_failure(error)
+            raise
 
     def _mark_failure(self, error):
         with self._lock:
@@ -89,8 +104,4 @@ class LearningOutput:
                             break
                     break
         finally:
-            try:
-                self._port.close()
-            except Exception as error:
-                self._mark_failure(error)
-            self._done.set()
+            self._teardown.start()

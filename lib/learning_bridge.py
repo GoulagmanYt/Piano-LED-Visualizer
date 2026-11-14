@@ -10,6 +10,7 @@ from lib.buffered_midi_input import open_midi_input
 from lib.learning_output import LearningOutput
 from lib.learning_session import LearningSession
 from lib.log_setup import logger
+from lib.midi_teardown import MidiTeardown
 from lib.midiport_resolver import descriptive_port_name
 
 _ID = re.compile(r'\s(\d+:\d+)$')
@@ -303,6 +304,8 @@ class LearningBridge:
         self._fault = threading.Event()
         self.status = 'waiting for ports'
         self._closed = False
+        self._close_request_lock = threading.Lock()
+        self._teardown = MidiTeardown(self._cleanup_generation, name='learning-bridge-cleanup')
 
     @classmethod
     def _read_settings_snapshot(cls, settings):
@@ -339,6 +342,8 @@ class LearningBridge:
 
     def _callback(self, session, source):
         def receive(msg):
+            if self._closed:
+                return
             try:
                 timestamp = time.perf_counter()
                 if source == 'piano':
@@ -388,10 +393,8 @@ class LearningBridge:
                 return
             try:
                 self._verify_links(*names)
-                piano_output = LearningOutput(self._open_output(names[1]))
-                self._outputs.append(piano_output)
-                computer_output = LearningOutput(self._open_output(names[3]))
-                self._outputs.append(computer_output)
+                piano_output = self._open_generation_output(names[1])
+                computer_output = self._open_generation_output(names[3])
                 session = LearningSession(
                     guide_sink=self.queues.enqueue_guide,
                     piano_sink=piano_output.enqueue,
@@ -399,8 +402,8 @@ class LearningBridge:
                     block_control=str(self._settings['learning_block_control']) != '0',
                 )
                 self._session = session
-                self._inputs.append(self._open_input(names[0], callback=self._callback(session, 'piano')))
-                self._inputs.append(self._open_input(names[2], callback=self._callback(session, 'computer')))
+                self._open_generation_input(names[0], session, 'piano')
+                self._open_generation_input(names[2], session, 'computer')
                 self._names = names
                 self._fault.clear()
                 self.status = 'connected'
@@ -409,11 +412,30 @@ class LearningBridge:
                 self.status = str(error)
                 self._stop_generation()
 
+    def _require_open_generation(self):
+        if self._closed:
+            raise RuntimeError('Learning MIDI shutdown requested; refusing to open ports')
+
+    def _open_generation_output(self, name):
+        self._require_open_generation()
+        worker = LearningOutput(self._open_output(name))
+        self._outputs.append(worker)
+        self._require_open_generation()
+        return worker
+
+    def _open_generation_input(self, name, session, source):
+        self._require_open_generation()
+        port = self._open_input(name, callback=self._callback(session, source))
+        self._inputs.append(port)
+        self._require_open_generation()
+
     def _stop_generation(self):
         # Stop input callbacks first; never reuse outputs until their worker exits.
         for port in list(self._inputs):
             try:
-                port.close()
+                if port.close() is False:
+                    self.status = 'input cleanup pending; refusing to reopen'
+                    return False
                 self._inputs.remove(port)
             except Exception as error:
                 self.status = f'input cleanup failed: {error}'
@@ -433,7 +455,32 @@ class LearningBridge:
         self._names = None
         return True
 
-    def close(self):
+    @property
+    def shutdown_status(self):
+        return self._teardown.status
+
+    def _cleanup_generation(self):
         with self._lock:
-            self._closed = True
             return self._stop_generation()
+
+    def close(self, timeout=2):
+        # reconcile may be inside a native open() while holding _lock. Never
+        # acquire it on the caller; the cleanup owner waits for that generation.
+        with self._close_request_lock:
+            self._closed = True
+            teardown = self._teardown
+        caller = threading.current_thread()
+        owned_threads = [getattr(port, '_thread', None) for port in self._inputs]
+        owned_threads.extend(worker._thread for worker in self._outputs)
+        return teardown.close(0 if caller in owned_threads else timeout)
+
+    def reopen(self):
+        with self._close_request_lock:
+            if not self._closed:
+                return True
+            if not self._teardown.status['complete']:
+                return False
+            with self._lock:
+                self._teardown = MidiTeardown(self._cleanup_generation, name='learning-bridge-cleanup')
+                self._closed = False
+            return True

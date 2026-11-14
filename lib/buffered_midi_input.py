@@ -6,6 +6,7 @@ import mido
 
 from lib.alsa_input_buffer import enlarge_input_pools
 from lib.log_setup import logger
+from lib.midi_teardown import MidiTeardown
 
 
 NATIVE_QUEUE_EVENTS = 32768
@@ -23,8 +24,10 @@ class BufferedMidiInput:
         self.error = None
         self._closed = False
         self._stop = threading.Event()
-        self._close_lock = threading.Lock()
+        self._native_port_closed = False
+        self._native_deleted = False
         self._thread = threading.Thread(target=self._receive, name='midi-input-drain', daemon=True)
+        self._teardown = MidiTeardown(self._cleanup_native, name='midi-input-cleanup')
         try:
             self._rt.ignore_types(sysex=False, timing=True, active_sense=True)
             # Resizing ALSA's FIFO clears it. Do this before subscribing to
@@ -44,14 +47,13 @@ class BufferedMidiInput:
             # empty the 2,000-event kernel FIFO into C++ storage without GIL.
             self._thread.start()
         except Exception:
-            self._rt.close_port()
-            self._rt.delete()
-            self._closed = True
+            self._stop.set()
+            self._teardown.close()
             raise
 
     @property
     def closed(self):
-        return self._closed or self.error is not None
+        return self._stop.is_set() or self._closed or self.error is not None
 
     def _receive(self):
         stop_is_set = self._stop.is_set
@@ -61,6 +63,8 @@ class BufferedMidiInput:
         try:
             while not stop_is_set():
                 event = get_message()
+                if stop_is_set():
+                    break
                 if event is None:
                     stop_wait(.0005)
                     continue
@@ -72,19 +76,32 @@ class BufferedMidiInput:
         except Exception as error:
             self.error = error
             logger.exception('MIDI input drain failed: %s', self.name)
+        finally:
+            self._teardown.start()
 
-    def close(self):
-        with self._close_lock:
-            if self._closed:
-                return
-            self._stop.set()
-            if self._thread is not threading.current_thread():
-                self._thread.join(timeout=2)
-                if self._thread.is_alive():
-                    raise RuntimeError('MIDI input drain did not stop; refusing concurrent native cleanup')
+    @property
+    def shutdown_status(self):
+        return self._teardown.status
+
+    def _cleanup_native(self):
+        if self._thread.ident is not None:
+            self._thread.join()
+        if not self._native_port_closed:
             self._rt.close_port()
+            self._native_port_closed = True
+        if not self._native_deleted:
             self._rt.delete()
-            self._closed = True
+            self._native_deleted = True
+        self._closed = True
+
+    def close(self, timeout=2):
+        self._stop.set()
+        if threading.current_thread() is self._thread:
+            self._teardown.start()
+            return False
+        if not self._teardown.close(timeout):
+            raise RuntimeError('MIDI input cleanup incomplete; refusing concurrent native cleanup')
+        return True
 
 
 def open_midi_input(name, *, callback, virtual=False):

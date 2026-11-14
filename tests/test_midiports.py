@@ -25,6 +25,9 @@ class FakePlayPort:
             raise RuntimeError("temporary RTP send failure")
         self.sent.append(msg)
 
+    def close(self):
+        self.closed = True
+
 
 class FakeInputBackend:
     def __init__(self):
@@ -43,6 +46,9 @@ class FakeInputBackend:
 class FakeInputPort:
     def __init__(self):
         self._rt = FakeInputBackend()
+
+    def close(self):
+        self.closed = True
 
 
 class FakeMidiMessage:
