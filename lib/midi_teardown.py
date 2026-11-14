@@ -3,6 +3,10 @@
 Python cannot cancel a blocked native call. A daemon cleanup owner therefore
 keeps the handle alive until that call returns. Repeated requests share the same
 attempt; only a completed, unsuccessful attempt can be retried.
+
+A finite Python wait assumes that the native backend releases the GIL while
+blocked. A backend holding the GIL can suspend all Python threads; isolating that
+backend in another process is required for a stronger caller-deadline guarantee.
 """
 import logging
 import threading

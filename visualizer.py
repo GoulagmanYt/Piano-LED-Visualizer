@@ -199,27 +199,43 @@ class VisualizerApp:
             menu.screensaver_is_running = False
         # Freeze output first; late animation/UI writes become harmless no-ops.
         strip = getattr(getattr(ci, 'ledstrip', None), 'strip', None)
-        cleanups = ((strip, 'close'), (getattr(ci, 'learning', None), 'stop_learning'),
-                    (getattr(ci, 'playback_scheduler', None), 'stop'),
-                    (getattr(ci, 'midiports', None), 'close'),
-                    (getattr(ci, 'usersettings', None), 'save_changes'))
-        for component, method in cleanups:
+        strip_released = strip is None
+        incomplete = []
+        cleanups = ((strip, 'close', 'LED/DMA'),
+                    (getattr(ci, 'learning', None), 'stop_learning', 'learning'),
+                    (getattr(ci, 'playback_scheduler', None), 'stop', 'playback'),
+                    (getattr(ci, 'midiports', None), 'close', 'MIDI'),
+                    (getattr(ci, 'usersettings', None), 'save_changes', 'settings'))
+        for component, method, label in cleanups:
             cleanup = getattr(component, method, None)
             if cleanup is None:
+                if component is strip and strip is not None:
+                    incomplete.append(label)
                 continue
             try:
-                cleanup()
+                released = cleanup() is not False
+                if component is strip:
+                    strip_released = released
+                if not released:
+                    incomplete.append(label)
             except Exception:
+                incomplete.append(label)
                 logger.exception("Shutdown cleanup failed")
         for worker in (self._housekeeping_thread, self._screensaver_thread,
                        getattr(getattr(ci, 'learning', None), 't', None), getattr(menu, 't', None)):
             if worker is not None and worker is not threading.current_thread():
                 worker.join(timeout=2)
         from lib.rpi_drivers import GPIO
-        GPIO.cleanup()
+        if strip_released:
+            GPIO.cleanup()
+        else:
+            logger.warning("GPIO cleanup deferred: LED/DMA owner has not released the output")
         if self.fh is not None:
             self.fh.close()
-        logger.info("Shutdown complete: LEDs black, DMA and MIDI released")
+        if incomplete:
+            logger.warning("Shutdown incomplete; resources retained or cleanup failed: %s", ', '.join(incomplete))
+        else:
+            logger.info("Shutdown complete: LEDs black, DMA and MIDI released")
 
     def _housekeeping_loop(self):
         # Blocking LCD/screensaver, disk and network operations stay off render.

@@ -37,6 +37,7 @@ class MidiPlaybackScheduler:
         self._lock = threading.RLock()
         self.reliable_client_factory = reliable_client_factory or ReliableMidiPlaybackClient.from_settings
         self._reliable_handle = None
+        self._stop_cleanup_pending = 0
         self.playback_mode = None
         self.last_error = None
 
@@ -47,31 +48,42 @@ class MidiPlaybackScheduler:
     def stop(self):
         handle = None
         with self._lock:
+            self._stop_cleanup_pending += 1
             was_active = self.state in (PlaybackState.RUNNING, PlaybackState.STOPPING)
-            if self.state == PlaybackState.RUNNING:
-                self.state = PlaybackState.STOPPING
-            self.stop_event.set()
-            self.saving.is_playing_midi.clear()
-            self._clear_scheduled_forward(source="midifile")
-            self._clear_file_queue()
-            handle = self._reliable_handle
-            self._reliable_handle = None
-            self.current_song = None
+            try:
+                if self.state == PlaybackState.RUNNING:
+                    self.state = PlaybackState.STOPPING
+                self.stop_event.set()
+                self.saving.is_playing_midi.clear()
+                self._clear_scheduled_forward(source="midifile")
+                self._clear_file_queue()
+                handle = self._reliable_handle
+                self._reliable_handle = None
+                self.current_song = None
+            except Exception:
+                self._stop_cleanup_pending -= 1
+                raise
 
-        if handle is not None:
-            handle.stop()
-
-        self._send_playback_panic()
-
-        with self._lock:
-            if not was_active:
-                self.stop_event.clear()
-                self.state = PlaybackState.STOPPED
-            logger.info("midi_playback transition=stopped")
+        try:
+            if handle is not None:
+                handle.stop()
+        finally:
+            try:
+                self._send_playback_panic()
+            finally:
+                with self._lock:
+                    self._stop_cleanup_pending -= 1
+                    if not was_active and not self._stop_cleanup_pending:
+                        self.stop_event.clear()
+                        self.state = PlaybackState.STOPPED
+                    logger.info("midi_playback transition=stopped")
 
     def play(self, song_path):
         with self._lock:
-            already_active = self.state in (PlaybackState.RUNNING, PlaybackState.STOPPING)
+            silencing = getattr(self.midiports, 'is_silencing_output', None)
+            panic_pending = callable(silencing) and silencing() is True
+            already_active = (self.state in (PlaybackState.RUNNING, PlaybackState.STOPPING)
+                              or self._stop_cleanup_pending > 0 or panic_pending)
             if not already_active:
                 self.state = PlaybackState.RUNNING
                 self.current_song = song_path
@@ -310,6 +322,10 @@ class MidiPlaybackScheduler:
             self.midiports.queues.clear_scheduled_forward(source=source)
 
     def _send_playback_panic(self):
+        request = getattr(self.midiports, 'request_all_notes_off', None)
+        if callable(request):
+            request()
+            return
         if hasattr(self.midiports, "send_all_notes_off"):
             try:
                 self.midiports.send_all_notes_off()
