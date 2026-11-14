@@ -1,97 +1,98 @@
-# Performance et mesures
+# Performance and measurements
 
-Les chiffres ci-dessous décrivent des essais datés, pas une garantie pour chaque
-Pi ou chaque réseau. La latence physique touche → lumière ou son n'a pas été
-mesurée. Ne pas additionner les percentiles de frontières différentes.
+The figures below describe dated tests, not a guarantee for every Pi or network.
+Physical key-to-light or key-to-sound latency has not been measured. Do not add
+percentiles measured across different boundaries.
 
-## Quelle frontière est mesurée ?
+## Which boundary is measured?
 
-| Mesure | Comprend | Exclut |
+| Measurement | Includes | Excludes |
 | --- | --- | --- |
-| Réception → traitement | Attente et traitement dans le visualiseur | Temps précédent le callback, réseau, réponse de l'instrument |
-| Source synthétique → sortie instrumentée | Entrée ALSA virtuelle et pipeline MIDI | Clavier et liaison USB électrique, réception réseau distante |
-| Frame en file → transmission terminée | Attente du rendu et transmission du pilote | Émission lumineuse mesurée par capteur |
-| Publication logicielle / WebSocket simulé | Files, réveil des workers et appel du client simulé | Transport WebSocket réel, réseau et GPIO |
-| ALSA du Pi → OSC sur le PC | Visualiseur, rtpmidid, réseau et pont RTP → OSC | Clavier, USB électrique, rendu audio/ASIO/VST |
+| Reception → processing | Queuing and processing within the visualizer | Time before the callback, network, instrument response |
+| Synthetic source → instrumented output | Virtual ALSA input and MIDI pipeline | Keyboard and electrical USB link, remote network reception |
+| Queued frame → completed transmission | Rendering wait and driver transmission | Light output measured by a sensor |
+| Software publishing / simulated WebSocket | Queues, worker wake-up and simulated client call | Real WebSocket transport, network and GPIO |
+| Pi ALSA → PC OSC | Visualizer, rtpmidid, network and RTP → OSC bridge | Keyboard, electrical USB link, audio/ASIO/VST rendering |
 
-## Résultats du pipeline MIDI et du réseau
+## MIDI pipeline and network results
 
-- [Pipeline MIDI et rendu LED — 14 novembre 2026](measurements/pipeline_2026-11-14.md) :
-  comparaison avant/après, essai de 390 052 événements, mémoire et transmission
-  DMA sur le Pi ; [données JSON](measurements/pipeline_2026-11-14.json).
-- [Pipeline MIDI — 18 octobre 2026](measurements/midi_pipeline_2026-10-18.md) :
-  protocole à 52 052 événements, latences, ordre et empreintes des messages.
-- [Livraison RTP et QoS — 18 octobre 2026](measurements/rtp_delivery_2026-10-18.md) :
-  comparaisons contrôlées du marquage réseau et essais de livraison longs.
-- [Latence et jitter Wi-Fi — 18 octobre 2026](measurements/rtp_latency_2026-10-18.md) :
-  médianes, p95/p99, pointes et incertitude de synchronisation des horloges.
-  Le [JSON](measurements/rtp_latency_2026-10-18.json) et le
-  [graphique](assets/rtp_latency_2026-10-18.png) sont conservés.
+- [MIDI pipeline and LED rendering — November 14, 2026](measurements/pipeline_2026-11-14.md):
+  before/after comparison, a 390,052-event test, memory usage and DMA transmission
+  on the Pi; [JSON data](measurements/pipeline_2026-11-14.json).
+- [MIDI pipeline — October 18, 2026](measurements/midi_pipeline_2026-10-18.md):
+  a 52,052-event protocol, latencies, message order and hashes.
+- [RTP delivery and QoS — October 18, 2026](measurements/rtp_delivery_2026-10-18.md):
+  controlled comparisons of network marking and long delivery tests.
+- [Wi-Fi latency and jitter — October 18, 2026](measurements/rtp_latency_2026-10-18.md):
+  medians, p95/p99, spikes and clock synchronization uncertainty. The
+  [JSON data](measurements/rtp_latency_2026-10-18.json) and
+  [chart](assets/rtp_latency_2026-10-18.png) are retained.
 
-Dans le test MIDI local du 18 octobre, la source synthétique → sortie instrumentée
-atteint une moyenne de 7,5080 ms et un p99 de 13,2153 ms à 20 ms par accord.
-Le dernier essai Wi-Fi long livre 6 250/6 250 messages dans l'ordre mais atteint
-97,34 ms. Un essai plus court sans perte ne prouve donc pas une latence bornée.
+In the October 18 local MIDI test, synthetic source → instrumented output
+averages 7.5080 ms with a p99 of 13.2153 ms at 20 ms per chord. The final long
+Wi-Fi test delivers 6,250/6,250 messages in order but reaches 97.34 ms. A shorter
+lossless test therefore does not prove bounded latency.
 
-## Transmission LED — 23 septembre 2026
+## LED transmission — September 23, 2026
 
-Essai avec entrée ALSA virtuelle, rendu GPIO/DMA réel et sortie MIDI simulée,
-via `scripts/benchmark_pipeline.py`. Pédale, notes avec fades et accords rapides.
+Test with virtual ALSA input, real GPIO/DMA rendering and simulated MIDI output,
+using `scripts/benchmark_pipeline.py`. The workload includes pedal events,
+fading notes and fast chords.
 
-| Mesure | Résultat |
+| Measurement | Result |
 | --- | ---: |
-| Événements envoyés / reçus / traités | 52 052 / 52 052 / 52 052 |
-| Notes / états sustain restants | 0 / 0 |
-| Buffer noir après arrêt | oui |
-| RSS après échauffement | 48 123 904 octets, stable sur les échantillons |
-| Réception MIDI → traitement moyen / maximum | 6,56 / 13,89 ms |
-| Transmission LED moyenne / maximum | 10,42 / 18,46 ms |
-| Frame en file → transmission terminée moyenne / maximum | 14,08 / 24,71 ms |
+| Events sent / received / processed | 52,052 / 52,052 / 52,052 |
+| Remaining notes / sustain states | 0 / 0 |
+| Black buffer after shutdown | yes |
+| RSS after warm-up | 48,123,904 bytes, stable across samples |
+| MIDI reception → processing, mean / maximum | 6.56 / 13.89 ms |
+| LED transmission, mean / maximum | 10.42 / 18.46 ms |
+| Queued frame → completed transmission, mean / maximum | 14.08 / 24.71 ms |
 
-Ces durées ne sont pas une mesure photométrique. Pour 195 LED RGB à 800 kHz,
-la transmission série seule représente 5,85 ms ; un affichage complet garanti
-sous 5 ms est impossible avec ce câblage. La stabilité RSS observée ne démontre
-pas une stabilité mémoire sur plusieurs jours.
+These timings are not photometric measurements. For 195 RGB LEDs at 800 kHz,
+serial transmission alone takes 5.85 ms; this wiring cannot guarantee a complete
+display update in under 5 ms. The observed RSS stability does not demonstrate
+memory stability over several days.
 
-## Publication logicielle — 13 novembre 2026
+## Software publishing — November 13, 2026
 
 Pi Zero 2 W Rev 1.0, armv7l, Raspberry Pi OS Bookworm 12,
-noyau `6.12.109+rpt-rpi-v7`, Python 3.11.2, révision `9f40b05`.
-Trois processus indépendants exécutent `tools/latency_bench.py --json`, avec
-120 messages par scénario, pendant que le service de production reste actif.
-Tous les messages sont publiés et livrés dans chaque essai.
+kernel `6.12.109+rpt-rpi-v7`, Python 3.11.2, revision `9f40b05`.
+Three independent processes run `tools/latency_bench.py --json`, with
+120 messages per scenario, while the production service remains active.
+All messages are published and delivered in every test.
 
-| Mesure | Moyenne, plage des 3 essais | p95, plage | Maximum, plage |
+| Measurement | Mean, range across 3 tests | p95, range | Maximum, range |
 | --- | ---: | ---: | ---: |
-| Admission MIDI → file WebSocket simulée | 0,218–0,282 ms | 0,265–0,685 ms | 0,371–0,894 ms |
-| `WakeableDeque.append` → `send` async simulé | 1,311–1,327 ms | 0,887–0,976 ms | 72,081–72,607 ms |
-| Même publication avec polling de 10 ms | 5,679–5,843 ms | 10,501–10,579 ms | 10,592–10,777 ms |
+| MIDI admission → simulated WebSocket queue | 0.218–0.282 ms | 0.265–0.685 ms | 0.371–0.894 ms |
+| `WakeableDeque.append` → simulated async `send` | 1.311–1.327 ms | 0.887–0.976 ms | 72.081–72.607 ms |
+| Same publishing path with 10 ms polling | 5.679–5.843 ms | 10.501–10.579 ms | 10.592–10.777 ms |
 
-Le changement de port asynchrone bloque l'appelant pendant 12,048–12,430 ms,
-contre 161,340–161,401 ms avec une notice synchrone simulée de 150 ms.
-L'arrêt pendant une notice simulée de 400 ms bloque 0,454–0,464 ms.
+Asynchronous port switching blocks the caller for 12.048–12.430 ms, compared with
+161.340–161.401 ms for a simulated synchronous 150 ms notice. Shutdown during a
+simulated 400 ms notice blocks for 0.454–0.464 ms.
 
-Un contrôle séparé associe une pointe WebSocket de 74,167 ms à une collection
-Python de génération 2 de 72,919 ms. Dans un autre processus avec le GC désactivé
-uniquement après le scénario de publication, le maximum est de 1,089 ms et le
-p95 de 0,903 ms. Ce contrôle appuie l'attribution de la pointe au GC du benchmark ;
-il ne valide pas sa désactivation en production. Après les trois essais :
-45,084 °C, `throttled=0x0`, charge 0,35 / 0,31 / 0,26.
+A separate control associates a 74.167 ms WebSocket spike with a 72.919 ms
+Python generation 2 collection. In another process, with GC disabled only after
+the publishing scenario, the maximum is 1.089 ms and the p95 is 0.903 ms. This
+control supports attributing the spike to the benchmark's GC; it does not
+validate disabling GC in production. After the three tests: 45.084 °C,
+`throttled=0x0`, load 0.35 / 0.31 / 0.26.
 
-Les [résultats JSON](measurements/software_latency_2026-11-13.json) contiennent
-les trois essais et le contrôle GC. Ce benchmark n'ouvre ni sortie GPIO ni
-port MIDI matériel et ne mesure pas le transport WebSocket ou RTP réel.
+The [JSON results](measurements/software_latency_2026-11-13.json) contain the
+three tests and the GC control. This benchmark opens neither GPIO outputs nor
+hardware MIDI ports and does not measure real WebSocket or RTP transport.
 
-## Reproduire les mesures
+## Reproducing the measurements
 
-Depuis la racine du dépôt, le benchmark logiciel fonctionne sans matériel :
+From the repository root, the software benchmark runs without hardware:
 
 ```bash
 python3 tools/latency_bench.py --json
 ```
 
-Le benchmark complet ouvre le vrai GPIO/DMA et exige l'arrêt du service.
-Sur le Pi, pendant une fenêtre de maintenance :
+The full benchmark opens real GPIO/DMA resources and requires the service to
+be stopped. On the Pi, during a maintenance window:
 
 ```bash
 cd /home/Piano-LED-Visualizer
@@ -107,31 +108,32 @@ fi
 SH
 ```
 
-Le benchmark utilise une sortie MIDI instrumentée pour ne pas jouer sur le
-piano. Les réglages d'essai restent en mémoire. `PLV_BENCHMARK_CHORDS` et
-`PLV_BENCHMARK_INTERVAL_MS` permettent de régler la charge ;
-`PLV_BENCHMARK_PROFILE` active cProfile. Ne pas comparer directement des latences
-collectées avec et sans profilage.
+The benchmark uses an instrumented MIDI output to avoid playing the piano.
+Test settings remain in memory. `PLV_BENCHMARK_CHORDS` and
+`PLV_BENCHMARK_INTERVAL_MS` adjust the workload; `PLV_BENCHMARK_PROFILE` enables
+cProfile. Do not directly compare latencies collected with and without
+profiling.
 
-Pour analyser une capture réseau avec `scripts/analyze_midi_latency.py`, il faut
-les horodatages source et récepteur et la validation de l'identité et de l'ordre
-des messages. Les JSON publiés sont des résumés ; ils ne remplacent pas ces
-captures brutes. Voir le [protocole réseau](measurements/rtp_latency_2026-10-18.md#mesure).
+Analyzing a network capture with `scripts/analyze_midi_latency.py` requires
+source and receiver timestamps and validation of message identity and order.
+Published JSON files are summaries; they do not replace these raw captures.
+See the [network protocol](measurements/rtp_latency_2026-10-18.md#measurement).
 
-## Préparer une mesure physique
+## Preparing a physical measurement
 
-La mesure physique nécessite un capteur ; aucun n'est branché sur le matériel
-utilisé pour les essais ci-dessus. Le temps logiciel ou la fin du DMA ne doit
-pas être présenté comme un temps touche → lumière ou son.
+Physical measurement requires a sensor; none is connected to the hardware used
+for the tests above. Software timings or DMA completion must not be presented
+as key-to-light or key-to-sound latency.
 
-Utiliser un seul appareil d'acquisition pour le déclenchement et la réponse :
-contact de touche ou entrée MIDI d'une part, photodiode ou signal audio d'autre
-part. Une entrée MIDI comme déclenchement exclut le temps de scan du clavier.
-Établir le seuil de détection, la fréquence d'échantillonnage et l'appariement
-des fronts avant de calculer des percentiles.
+Use a single capture device for both the trigger and response: a key contact
+or MIDI input for the trigger, and a photodiode or audio signal for the response.
+Using MIDI input as the trigger excludes keyboard scanning time. Establish the
+detection threshold, sampling rate and edge pairing before calculating
+percentiles.
 
-L'export CSV doit avoir les colonnes suivantes, en nanosecondes sur cette même
-horloge, avec des identifiants consécutifs de zéro au nombre d'événements attendu :
+The CSV export must contain the following columns, with timestamps in
+nanoseconds on that same clock and consecutive event IDs from zero to one less
+than the expected event count:
 
 ```csv
 event_id,clock_id,trigger_ns,response_ns
@@ -141,15 +143,15 @@ event_id,clock_id,trigger_ns,response_ns
 python3 scripts/analyze_physical_latency.py capture.csv --expected-events 100 --stimulus midi-input --response photodiode
 ```
 
-Adapter le nombre attendu au protocole réellement émis. Choisir `key-contact`
-pour un contact de touche et `audio` pour une réponse audio. L'outil refuse une
-capture incomplète, désordonnée, avec plusieurs identifiants d'horloge ou des
-horodatages invalides. Il calcule moyenne, médiane, p95, p99 et maximum sans
-réalignement silencieux. Il ne certifie ni le capteur ni l'appariement des fronts.
+Set the expected count to match the protocol actually sent. Choose `key-contact`
+for a key contact and `audio` for an audio response. The tool rejects incomplete
+or out-of-order captures, multiple clock IDs and invalid timestamps. It
+calculates the mean, median, p95, p99 and maximum without silent realignment.
+It does not certify the sensor or edge pairing.
 
-Pour un essai MIDI prolongé, augmenter `PLV_BENCHMARK_CHORDS`. Le rapport conserve
-le RSS et le CPU échantillonnés avec le temps écoulé. Les compteurs et empreintes
-couvrent toute la séquence ; les latences du probe portent sur les 100 000
-derniers événements au maximum. Ces durées n'incluent pas les messages de
-nettoyage envoyés après le relevé final. Le moniteur de reconnexion est neutralisé
-pendant la préparation du benchmark, sans modifier le pair RTP enregistré.
+For a longer MIDI test, increase `PLV_BENCHMARK_CHORDS`. The report retains RSS
+and CPU samples with elapsed time. Counters and hashes cover the entire
+sequence; probe latencies cover at most the latest 100,000 events. These timings
+exclude cleanup messages sent after the final snapshot. The reconnection
+monitor is disabled during benchmark preparation without changing the saved
+RTP peer.

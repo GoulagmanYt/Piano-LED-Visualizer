@@ -203,7 +203,7 @@ can send notes to the piano. Before using the bridge for a performance, check
 Wait and Watch/Listen, partial chords, sustain and device reconnection with your
 actual piano and computer. A connected bridge reports local port ownership;
 check RTP peer health separately. Software cleanup cannot silence a disconnected
-instrument. The [architecture guide](architecture.md#apprentissage) explains the
+instrument. The [architecture guide](architecture.md#learning) explains the
 two learning paths and their resource ownership.
 
 

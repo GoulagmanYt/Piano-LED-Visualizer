@@ -1,165 +1,163 @@
-# Latence et écarts entre messages Pi → OSCMidi — 18 octobre 2026
+# Pi → OSCMidi latency and message interval errors — October 18, 2026
 
-## Résultat
+## Result
 
-Les pointes de retard restent reproductibles sur le lien Wi-Fi. Aucun réglage
-supplémentaire testé pendant cette investigation n'apporte de gain suffisamment
-fiable pour être conservé. Les réglages initiaux du PC, du firmware du Pi et de
-la box ont été rétablis. La suppression des marquages QoS précédemment démontrés
-comme nuisibles reste en place : voir les [mesures de livraison RTP](rtp_delivery_2026-10-18.md).
+Delay spikes remain reproducible on the Wi-Fi link. None of the additional
+settings tested during this investigation provides a sufficiently reliable
+improvement to retain. The original PC, Pi firmware and router settings have
+been restored. The removal of QoS markings previously shown to be harmful
+remains in place: see the [RTP delivery measurements](rtp_delivery_2026-10-18.md).
 
-Sur la dernière série longue après restauration, les **6 250 messages sont
-arrivés dans l'ordre**, mais une note atteint **97,34 ms**. Une autre série longue,
-avant les essais de canaux, a livré **6 248/6 250 messages**, malgré 6 250 événements
-reçus, traités et remis à la sortie MIDI par le visualizer. Les objectifs
-« aucune perte » et « aucune note occasionnellement tardive » ne sont donc
-**pas atteints sur cette connexion Wi-Fi**.
+In the final long run after restoration, **all 6 250 messages arrived in order**,
+but one note reaches **97.34 ms**. Another long run, before the channel tests,
+delivered **6 248/6 250 messages**, despite 6 250 events being received,
+processed and handed to the MIDI output by the visualizer. The goals of
+“no loss” and “no occasionally late notes” are therefore **not met on this
+Wi-Fi connection**.
 
-## Mesure
+## Measurement
 
-Le générateur injecte une séquence déterministe dans l'entrée ALSA du visualizer.
-OSCMidi reçoit le RTP sur ses ports habituels, puis son émission OSC existante
-est horodatée sur le PC, à la réception UDP locale. Cette mesure comprend le
-visualizer, rtpmidid, le réseau et le pont RTP → OSC. Elle exclut le clavier,
-le transport USB physique et le rendu audio/ASIO/VST.
+The generator injects a deterministic sequence into the visualizer's ALSA
+input. OSCMidi receives RTP on its usual ports, then its existing OSC output
+is timestamped on the PC when received over local UDP. This measurement includes
+the visualizer, rtpmidid, the network and the RTP → OSC bridge. It excludes the
+keyboard, physical USB transport and audio/ASIO/VST rendering.
 
-Une série courte contient 750 groupes espacés de 20 ms : une note par groupe,
-un accord de six notes tous les vingt groupes, relâchement après 5 ms, soit
-1 880 messages. Les séries longues utilisent 2 500 groupes et 6 250 messages.
-Les compteurs du Pi et l'identité/l'ordre des messages sont contrôlés avant
-de calculer les statistiques. Une série perdue, dupliquée ou décalée n'est pas
-réalignée silencieusement pour produire de bons percentiles.
+A short run contains 750 groups spaced 20 ms apart: one note per group, a
+six-note chord every twenty groups, release after 5 ms, for 1 880 messages.
+Long runs use 2 500 groups and 6 250 messages. The Pi's counts and message
+identity/order are checked before computing statistics. A sequence with lost,
+duplicated or shifted messages is not silently realigned to produce good
+percentiles.
 
-Les horloges monotones du Pi et du PC ne sont pas supposées synchronisées.
-Des échanges UDP horodatés avant et après chaque série bornent leur décalage.
-La latence absolue utilise le milieu de ces bornes et une interpolation linéaire ;
-l'incertitude des ancrages est typiquement **±2,6 à ±2,9 ms**. Une asymétrie réseau
-variable peut apparaître comme une pente du décalage : cette pente n'est pas une
-mesure indépendante de la dérive des horloges. Une différence de médiane de
-quelques dixièmes de milliseconde ne démontre donc pas une optimisation.
+The Pi and PC monotonic clocks are not assumed to be synchronized. Timestamped
+UDP exchanges before and after each run bound their offset. Absolute latency
+uses the midpoint of these bounds and linear interpolation; anchor uncertainty
+is typically **±2.6 to ±2.9 ms**. Variable network asymmetry can appear as an
+offset slope: this slope is not an independent measurement of clock drift.
+A median difference of a few tenths of a millisecond therefore does not
+demonstrate an optimization.
 
-L'erreur d'intervalle compare l'écart entre deux arrivées à l'écart entre leurs
-émissions. Le décalage constant des horloges s'annule ; la petite correction de
-pente conserve l'hypothèse d'interpolation. La dispersion des accords compare
-aussi leur étalement à l'émission et à l'arrivée.
+Interval error compares the gap between two arrivals with the gap between their
+emissions. The constant clock offset cancels out; the small slope correction
+retains the interpolation assumption. Chord spread also compares the spread at
+emission and arrival.
 
-## Résultats comparables
+## Comparable results
 
-Toutes les lignes ci-dessous livrent exactement le nombre attendu dans l'ordre.
-Les latences sont des estimations en millisecondes, avec l'incertitude ci-dessus.
-Le p99 est le seuil sous lequel se trouvent 99 % des observations de la série.
+Every row below delivers exactly the expected count in order. Latencies are
+estimates in milliseconds, with the uncertainty described above. The p99 is the
+threshold below which 99% of the run's observations fall.
 
-| Série | Messages | Médiane | p95 | p99 | Maximum | p99 de l'erreur absolue d'intervalle |
+| Run | Messages | Median | p95 | p99 | Maximum | p99 of absolute interval error |
 |---|---:|---:|---:|---:|---:|---:|
-| Trajet complet initial A | 1 880 | 4,79 | 9,44 | 23,78 | 39,05 | 10,84 |
-| Trajet complet initial B, USB reconnecté | 1 880 | 5,11 | 10,74 | 19,01 | 40,87 | 11,67 |
-| UDP brut avec identifiants uniques | 1 880 | 2,97 | 8,11 | 21,97 | 45,35 | 13,11 |
-| RTP synthétique direct → OSCMidi | 1 880 | 3,11 | 7,71 | 26,59 | 46,41 | 10,79 |
-| Économie d'énergie du pilote PC désactivée A | 1 880 | 4,81 | 9,65 | 16,27 | 46,53 | 13,11 |
-| Économie d'énergie du pilote PC désactivée B | 1 880 | 4,81 | 9,91 | 21,81 | 48,82 | 14,70 |
-| Box manuelle, canal 6, largeur 20 MHz, interface au repos | 1 880 | 4,70 | 9,20 | 19,30 | 48,62 | 10,96 |
-| Box manuelle, canal 11, largeur 20 MHz | 1 880 | 5,24 | 11,62 | 28,36 | 67,70 | 14,70 |
-| Box manuelle, canal 1, largeur 20 MHz | 1 880 | 4,94 | 12,03 | 25,82 | 53,74 | 14,74 |
-| Box automatique rétablie, série longue | 6 250 | 4,81 | 9,36 | 19,00 | 97,34 | 10,82 |
+| Initial full path A | 1 880 | 4.79 | 9.44 | 23.78 | 39.05 | 10.84 |
+| Initial full path B, USB reconnected | 1 880 | 5.11 | 10.74 | 19.01 | 40.87 | 11.67 |
+| Raw UDP with unique identifiers | 1 880 | 2.97 | 8.11 | 21.97 | 45.35 | 13.11 |
+| Direct synthetic RTP → OSCMidi | 1 880 | 3.11 | 7.71 | 26.59 | 46.41 | 10.79 |
+| PC driver power saving disabled A | 1 880 | 4.81 | 9.65 | 16.27 | 46.53 | 13.11 |
+| PC driver power saving disabled B | 1 880 | 4.81 | 9.91 | 21.81 | 48.82 | 14.70 |
+| Manual router, channel 6, 20 MHz width, interface idle | 1 880 | 4.70 | 9.20 | 19.30 | 48.62 | 10.96 |
+| Manual router, channel 11, 20 MHz width | 1 880 | 5.24 | 11.62 | 28.36 | 67.70 | 14.70 |
+| Manual router, channel 1, 20 MHz width | 1 880 | 4.94 | 12.03 | 25.82 | 53.74 | 14.74 |
+| Automatic router settings restored, long run | 6 250 | 4.81 | 9.36 | 19.00 | 97.34 | 10.82 |
 
-Sur cette dernière série, 44 messages dépassent la médiane de plus de 20 ms,
-six dépassent 50 ms en latence absolue, et l'erreur maximale d'intervalle
-atteint 90,85 ms. Les accords ont une dispersion d'arrivée médiane de 0,022 ms,
-un p99 de 7,61 ms et un maximum de 8,24 ms. Ces pointes justifient de regarder
-la distribution et les écarts plutôt que la seule moyenne.
+In this final run, 44 messages exceed the median by more than 20 ms, six exceed
+50 ms in absolute latency, and the maximum interval error reaches 90.85 ms.
+The chords have a median arrival spread of 0.022 ms, a p99 of 7.61 ms and a
+maximum of 8.24 ms. These spikes justify examining the distribution and interval
+errors rather than just the mean.
 
-Les [résultats structurés et les séries du graphique](rtp_latency_2026-10-18.json)
-conservent aussi les essais rejetés. Ils ne contiennent aucun mot de passe.
+The [structured results and plotted series](rtp_latency_2026-10-18.json) also
+retain rejected tests. They contain no passwords.
 
-![Latence dans le temps et selon la phase du cycle de quatre secondes](../assets/rtp_latency_2026-10-18.png)
+![Latency over time and by phase of the four-second cycle](../assets/rtp_latency_2026-10-18.png)
 
-Les deux séries du graphique précèdent les essais de canaux. Plusieurs pointes
-se concentrent autour de la même phase de l'horloge du Pi modulo quatre secondes,
-y compris sur UDP brut. Il existe aussi des pointes non périodiques. La phase
-observée est propre à cette session ; elle ne constitue pas une constante à
-compenser dans le code MIDI.
+The two plotted runs precede the channel tests. Several spikes concentrate
+around the same phase of the Pi clock modulo four seconds, including with raw
+UDP. Non-periodic spikes also occur. The observed phase is specific to this
+session; it is not a constant to compensate for in MIDI code.
 
-## Localisation des retards
+## Locating delays
 
-Les contrôles suivants ne nécessitent ni OSCMidi, ni le Wi-Fi du PC : le Pi
-envoie des pings à la box. Les statistiques sont des **allers-retours ICMP**,
-directement comparables entre ces lignes, et non des latences MIDI aller simple.
+The following checks require neither OSCMidi nor the PC's Wi-Fi: the Pi sends
+pings to the router. These statistics are **ICMP round trips**, directly
+comparable across these rows, rather than one-way MIDI latencies.
 
-| Condition Pi → box | Reçus / émis | Médiane RTT | p99 RTT | Maximum RTT |
+| Pi → router condition | Received / sent | Median RTT | p99 RTT | Maximum RTT |
 |---|---:|---:|---:|---:|
-| Configuration initiale, visualizer actif | 1 399 / 1 400 | 2,72 | 13,22 | 43,20 |
-| Visualizer temporairement arrêté | 1 400 / 1 400 | 1,99 | 14,91 | 46,40 |
-| rtpmidid temporairement arrêté | 1 400 / 1 400 | 2,74 | 19,54 | 98,00 |
-| Firmware `mpc` temporairement désactivé | 1 400 / 1 400 | 2,74 | 15,60 | 49,80 |
-| Firmware `phy_watchdog` temporairement désactivé | 1 400 / 1 401 | 2,73 | 16,31 | 45,60 |
+| Initial configuration, visualizer active | 1 399 / 1 400 | 2.72 | 13.22 | 43.20 |
+| Visualizer temporarily stopped | 1 400 / 1 400 | 1.99 | 14.91 | 46.40 |
+| rtpmidid temporarily stopped | 1 400 / 1 400 | 2.74 | 19.54 | 98.00 |
+| Firmware `mpc` temporarily disabled | 1 400 / 1 400 | 2.74 | 15.60 | 49.80 |
+| Firmware `phy_watchdog` temporarily disabled | 1 400 / 1 401 | 2.73 | 16.31 | 45.60 |
 
-Les pointes au rythme d'environ quatre secondes persistent pendant les arrêts
-du visualizer et de rtpmidid. Leur origine ne nécessite donc pas le traitement
-Python du visualizer ou le décodage RTP d'OSCMidi. La frontière restante comprend
-la transmission SDIO, le firmware/radio du Pi, l'accès au médium et la box.
-Ces tests ne permettent pas de départager définitivement ces composants.
+Spikes at approximately four-second intervals persist while the visualizer and
+rtpmidid are stopped. Their origin therefore does not require the visualizer's
+Python processing or OSCMidi's RTP decoding. The remaining boundary includes
+SDIO transfer, the Pi firmware/radio, medium access and the router. These tests
+cannot conclusively distinguish among those components.
 
-Une trace noyau séparée montre une remise à la file/pilote de l'ordre de
-0,04–0,1 ms pour certains paquets qui arrivent environ 45–47 ms plus tard au PC.
-L'entrée suivante dans un worker SDIO n'est pas une preuve d'achèvement du
-transfert, ni de transmission radio réussie. L'ancienne capture à ce stade a
-par ailleurs échoué au contrôle exact des messages : elle sert à localiser
-une frontière, pas à valider l'absence de pertes ou à calculer les percentiles
-publiés. Le contrôle UDP final emploie des identifiants uniques et passe.
+A separate kernel trace shows a handoff to the queue/driver on the order of
+0.04–0.1 ms for some packets that arrive approximately 45–47 ms later on the PC.
+The next entry into an SDIO worker proves neither transfer completion nor
+successful radio transmission. The earlier capture at this stage also failed
+the exact message check: it helps locate a boundary, not validate lossless
+delivery or compute the published percentiles. The final UDP check uses unique
+identifiers and passes.
 
-NetworkManager interroge les statistiques de station environ toutes les six
-secondes dans la trace ; aucun appel de scan n'y est capturé. Cela n'explique
-pas les pointes régulières à quatre secondes. Le Bluetooth du Pi est inactif,
-Linux annonce déjà `Power save: off`, et le gouverneur CPU est `performance`.
+NetworkManager queries station statistics approximately every six seconds in
+the trace; no scan call is captured. This does not explain the regular
+four-second spikes. The Pi's Bluetooth is inactive, Linux already reports
+`Power save: off`, and the CPU governor is `performance`.
 
-## Essais sans gain retenu et restauration
+## Tests without a retained improvement and restoration
 
-- Les API Windows de mode streaming et de suspension des scans n'ont pas fourni
-  de gain reproductible. L'essai sans scan a livré 1 876/1 880 messages : échec.
-  Leurs demandes temporaires ont été libérées.
-- Le réglage matériel Windows `LowPowerEnable`, initialement `Auto`, a été testé
-  sur `Disabled`, puis rétabli sur `Auto`. Les deux séries ci-dessus conservent
-  des pointes de 47–49 ms.
-- `mpc` et `phy_watchdog` ont chacun été rétablis à leur valeur initiale `1`
-  après leur essai borné. Aucune modification permanente du firmware n'est gardée.
-- La box a retrouvé la sélection automatique 2,4 GHz, canal et largeur configurés
-  en automatique. Elle utilise de nouveau le canal 6 en 20 MHz après restauration.
-  Le 5 GHz reste configuré comme avant : canal `Auto`, largeur 80 MHz,
-  mécanisme de sélection automatique avancé désactivé.
-- Le SSID, la sécurité, les paramètres OSCMidi, le plugin, l'audio et les ports
-  RTP 5004/5005 sont conservés. Le fichier de configuration OSCMidi est identique
-  à la copie initiale. Les services arrêtés pour les contrôles ont redémarré.
+- The Windows streaming-mode and scan-suppression APIs did not provide a
+  reproducible improvement. The no-scan test delivered 1 876/1 880 messages:
+  failure. Their temporary requests were released.
+- The Windows hardware setting `LowPowerEnable`, initially `Auto`, was tested
+  on `Disabled`, then restored to `Auto`. The two runs above retain 47–49 ms
+  spikes.
+- `mpc` and `phy_watchdog` were each restored to their original value `1` after
+  their bounded test. No permanent firmware modification is retained.
+- The router's automatic 2.4 GHz selection was restored, with automatic channel
+  and width settings. It again uses channel 6 at 20 MHz after restoration.
+  The 5 GHz settings remain as before: channel `Auto`, 80 MHz width, advanced
+  automatic selection disabled.
+- The SSID, security, OSCMidi settings, plugin, audio and RTP ports 5004/5005
+  are preserved. The OSCMidi configuration file is identical to the initial
+  copy. Services stopped for the checks have restarted.
 
-Après un changement de canal par la box, `iw dev wlan0 link` a conservé une
-fréquence périmée. Le canal d'essai a été vérifié avec `iw dev wlan0 info` et
-la valeur `chanspec` retournée par le firmware, plutôt qu'avec cette seule ligne.
+After a router channel change, `iw dev wlan0 link` retained a stale frequency.
+The test channel was verified with `iw dev wlan0 info` and the firmware's
+`chanspec` value rather than relying on that line alone.
+One run interrupted by USB disconnection, an invalid clock calibration and
+captures that fail the exact ordering check are excluded from the latency
+tables. The 6 248/6 250 long test remains explicitly a delivery failure.
 
-Une série interrompue par le débranchement USB, une calibration d'horloge
-invalide et les captures dont l'ordre exact échoue sont exclues des tableaux
-de latence. Le test long à 6 248/6 250 reste explicitement un échec de livraison.
+## Local recalculation and next steps
 
-## Recalcul local et suites
+The analysis tool is separate from the production MIDI path. It rejects a
+capture whose recorder has not confirmed exact message identity and order,
+as well as incomplete production counts or reversed timestamps. This check
+relies on the recorder's attestation: the offline tool does not itself repeat
+network payload validation.
 
-L'outil d'analyse est séparé du trajet MIDI de production. Il refuse une capture
-dont l'enregistreur n'a pas confirmé l'identité et l'ordre exacts des messages,
-ainsi que des compteurs de production incomplets ou des horodatages inversés.
-Ce contrôle se fonde sur l'attestation de l'enregistreur : l'outil hors ligne
-ne refait pas lui-même la validation des charges utiles réseau.
-
-Avec les captures de maintenance conservées localement :
+Using the maintenance captures retained locally:
 
 ```powershell
 python scripts/analyze_midi_latency.py .maintenance/rtp-latency-baseline-usb-return-source.json .maintenance/rtp-latency-baseline-usb-return-raw.json
 python -m pytest tests/test_midi_latency_analysis.py -q
 ```
 
-Les captures brutes et les scripts d'injection restent dans `.maintenance/`,
-ignoré par Git. Le fichier JSON publié conserve les résumés de chaque essai et
-les points utilisés pour le graphique ; il ne remplace pas une capture brute.
+Raw captures and injection scripts remain in `.maintenance/`, ignored by Git.
+The published JSON retains each test's summary and the points used for the
+plot; it does not replace a raw capture.
 
-Pour attribuer la cause restante, le prochain essai discriminant est un A/B/A
-avec une autre interface Wi-Fi sur le même point d'accès, ou avec le Pi sur un
-autre point d'accès. Aucun de ces matériels n'était disponible pendant cette
-session. Les canaux alternatifs de la box ont déjà été testés sans gain.
-Un buffer de lissage ajouterait du délai à toutes les notes ; il ne corrigerait
-ni ces pauses de transmission, ni les messages perdus.
+To attribute the remaining cause, the next discriminating test is an A/B/A
+comparison with another Wi-Fi interface on the same access point, or with the
+Pi on another access point. Neither was available during this session. The
+router's alternative channels have already been tested without improvement.
+A smoothing buffer would add delay to every note; it would fix neither these
+transmission pauses nor the lost messages.
