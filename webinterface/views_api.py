@@ -92,7 +92,7 @@ def api_health():
 def api_update_status():
     platform = app_state.platform
     if platform is None or not hasattr(platform, "get_update_status"):
-        return jsonify(state="unsupported", message="Mise à jour non disponible")
+        return jsonify(state="unsupported", message="Updates are unavailable")
     return jsonify(platform.get_update_status())
 
 
@@ -1343,7 +1343,7 @@ def change_setting():
         else:
             if new_path.exists():
                 return jsonify(success=False, reload_songs=True, error=new_name + " already exists")
-            # Partitions associées (même nom, extension différente) : on vérifie les collisions
+            # Check for collisions with associated scores (same name, different extension).
             # avant de renommer quoi que ce soit.
             sidecar_renames = [
                 (old_sidecar, new_path.with_suffix(old_sidecar.suffix))

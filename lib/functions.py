@@ -143,13 +143,13 @@ def is_within_schedule(schedule_list):
         except ValueError:
             continue
 
-        # Les jours désignent le jour de DÉBUT de la plage.
+        # Days identify the day on which the time range starts.
         if start_time <= end_time:
             if current_weekday in days and start_time <= current_time <= end_time:
                 return True
         else:
-            # Plage passant minuit : la partie du soir appartient au jour courant,
-            # la partie après minuit appartient à la plage commencée la veille.
+            # For overnight ranges, the evening belongs to the current day;
+            # the time after midnight belongs to the range started the previous day.
             if current_time >= start_time and current_weekday in days:
                 return True
             if current_time <= end_time and previous_weekday in days:

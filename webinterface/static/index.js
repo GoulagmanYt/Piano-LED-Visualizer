@@ -367,12 +367,12 @@ function poll_reliable_update_status() {
 
 function start_reliable_update(button) {
     button.disabled = true;
-    render_reliable_update_status({state: 'starting', message: 'Démarrage de la mise à jour sécurisée…'});
+    render_reliable_update_status({state: 'starting', message: 'Starting the secure update…'});
     fetch('/api/change_setting?setting_name=update_rpi&value=0', {cache: 'no-store'})
         .then(async response => {
             const result = await response.json();
             if (!response.ok || result.success === false) {
-                throw new Error(result.error || 'Impossible de démarrer la mise à jour');
+                throw new Error(result.error || 'Unable to start the update');
             }
             render_reliable_update_status(result);
             reliableUpdatePoll = setInterval(poll_reliable_update_status, 1500);
@@ -420,7 +420,7 @@ async function start_midi_playback() {
     const midiPlayer = document.getElementById('midi_player');
     const songName = midiPlayer ? midiPlayer.dataset.songName : '';
     if (!songName) {
-        showAlert('Sélectionne d’abord un morceau.', 'warning');
+        showAlert('Select a song first.', 'warning');
         return;
     }
     const startButton = document.getElementById('start_midi_play');
@@ -432,7 +432,7 @@ async function start_midi_playback() {
         );
         const result = await response.json();
         if (!response.ok || result.success === false) {
-            throw new Error(result.error || 'La lecture MIDI n’a pas pu démarrer.');
+            throw new Error(result.error || 'Unable to start MIDI playback.');
         }
         set_midi_playback_buttons(true);
         start_midi_playback_status_poll();

@@ -20,10 +20,10 @@ HOSTNAME_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
 
 def _strip_local_suffix(name):
-    """Retire le suffixe ".local" d'un nom d'hôte.
+    """Remove the ".local" suffix from a hostname.
 
-    str.rstrip('.local') retire des *caractères* (ex. 'piano' -> 'pian') : on retire
-    donc uniquement le suffixe exact.
+    str.rstrip('.local') removes individual *characters* (e.g. 'piano' -> 'pian'),
+    so remove only the exact suffix.
     """
     name = name.strip()
     if name.lower().endswith(".local"):
@@ -131,12 +131,12 @@ class PlatformRasp(PlatformBase):
                     return {
                         **status,
                         "state": "failed",
-                        "message": "La mise à jour précédente a été interrompue",
-                        "error": "État de mise à jour expiré",
+                        "message": "The previous update was interrupted",
+                        "error": "Update status expired",
                     }
                 return status
         except (OSError, ValueError):
-            return {"state": "idle", "message": "Aucune mise à jour en cours"}
+            return {"state": "idle", "message": "No update in progress"}
 
     @classmethod
     def update_visualizer(cls):
@@ -148,24 +148,24 @@ class PlatformRasp(PlatformBase):
         with cls._update_lock:
             current_status = cls.get_update_status()
             if current_status.get("state") not in {"idle", "success", "no_update", "rolled_back", "failed"}:
-                return {"success": False, "error": "Une mise à jour est déjà en cours", **current_status}
+                return {"success": False, "error": "An update is already in progress", **current_status}
 
             if not updater.is_file():
-                return {"success": False, "error": f"Programme de mise à jour introuvable: {updater}"}
+                return {"success": False, "error": f"Updater not found: {updater}"}
 
             try:
                 cls.UPDATE_STATE_DIR.mkdir(parents=True, exist_ok=True)
                 temporary_status = status_path.with_suffix(".json.tmp")
                 temporary_status.write_text(json.dumps({
                     "state": "starting",
-                    "message": "Démarrage de la mise à jour sécurisée",
+                    "message": "Starting the safe update",
                     "started_at": int(time.time()),
                     "updated_at": int(time.time()),
                 }), encoding="utf-8")
                 os.replace(temporary_status, status_path)
             except OSError as error:
                 logger.error(f"Unable to initialize update state: {error}")
-                return {"success": False, "error": f"Impossible d'initialiser la mise à jour: {error}"}
+                return {"success": False, "error": f"Unable to initialize the update: {error}"}
 
         geteuid = getattr(os, "geteuid", lambda: 1)
         unit_name = f"{cls.UPDATE_UNIT}-{int(time.time())}"
@@ -191,15 +191,15 @@ class PlatformRasp(PlatformBase):
             try:
                 status_path.write_text(json.dumps({
                     "state": "failed",
-                    "message": "Impossible de démarrer la mise à jour",
+                    "message": "Unable to start the update",
                     "error": detail,
                     "updated_at": int(time.time()),
                 }), encoding="utf-8")
             except OSError:
                 pass
-            return {"success": False, "error": detail or "Impossible de démarrer la mise à jour"}
+            return {"success": False, "error": detail or "Unable to start the update"}
         logger.info("Reliable update started in %s", unit_name)
-        return {"success": True, "state": "starting", "message": "Mise à jour sécurisée démarrée"}
+        return {"success": True, "state": "starting", "message": "Safe update started"}
 
     @staticmethod
     def shutdown():

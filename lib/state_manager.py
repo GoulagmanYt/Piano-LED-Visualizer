@@ -109,8 +109,8 @@ class StateManager:
         if current_time is None:
             current_time = time.time()
 
-        # Recharger les délais si les réglages ont été sauvegardés depuis le dernier chargement
-        # (ex. changement de "Idle_timeout" depuis le LCD ou le web).
+        # Reload delays if settings have been saved since the last load.
+        # For example, "Idle_timeout" may have changed through the LCD or web interface.
         if getattr(self.usersettings, "last_save", None) != self._config_stamp:
             self.reload_config()
         

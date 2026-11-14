@@ -56,7 +56,7 @@ class SaveMIDI:
         self.messages_to_save["main"].append(["control_change", time_value, status, channel, control, value])
 
     def save(self, filename):
-        # Rien à sauvegarder si aucun enregistrement n'est en cours (double clic, appel tardif)
+        # There is nothing to save without an active recording (double click or late call).
         if not self.messages_to_save:
             return
         for key, multicolor_track in list(self.messages_to_save.items()):

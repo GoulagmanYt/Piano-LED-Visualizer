@@ -80,7 +80,7 @@ class StatusWriter:
         self.path = path
         self.payload: dict = {
             "state": "starting",
-            "message": "Initialisation de la mise à jour",
+            "message": "Initializing the update",
             "started_at": int(time.time()),
             "updated_at": int(time.time()),
         }
@@ -265,7 +265,7 @@ def perform_update(
     staging: Path | None = None
     backup_path: Path | None = None
     previous_revision = git_output(project_dir, "rev-parse", "HEAD")
-    status.update("fetching", "Recherche d'une nouvelle version", previous_revision=previous_revision)
+    status.update("fetching", "Checking for a new version", previous_revision=previous_revision)
 
     dirty_sources = changed_source_files(project_dir)
     if dirty_sources:
@@ -276,28 +276,28 @@ def perform_update(
     run(git_command(project_dir, "remote", "set-url", "origin", remote_url))
     run(git_command(project_dir, "fetch", "--prune", "origin", branch))
     target_revision = git_output(project_dir, "rev-parse", f"origin/{branch}")
-    status.update("fetched", "Version distante récupérée", target_revision=target_revision)
+    status.update("fetched", "Remote version fetched", target_revision=target_revision)
     if target_revision == previous_revision:
-        status.update("no_update", "Le visualiseur est déjà à jour", current_revision=previous_revision)
+        status.update("no_update", "The visualizer is already up to date", current_revision=previous_revision)
         return 0
 
     try:
-        status.update("validating", "Validation de la nouvelle version")
+        status.update("validating", "Validating the new version")
         staging = prepare_staging(project_dir, target_revision)
 
-        status.update("backing_up", "Sauvegarde de la configuration")
+        status.update("backing_up", "Backing up the configuration")
         ensure_backup_space(project_dir, backup_dir)
         run(["systemctl", "stop", "visualizer.service"])
         backup_path = create_backup(project_dir, backup_dir, previous_revision)
         # Installing dependencies mutates the running interpreter environment;
         # do it only after the service is stopped and rollback is possible.
-        status.update("installing_dependencies", "Installation des dépendances")
+        status.update("installing_dependencies", "Installing dependencies")
         install_requirements(staging / "requirements.txt")
-        status.update("activating", "Activation de la nouvelle version", backup=str(backup_path))
+        status.update("activating", "Activating the new version", backup=str(backup_path))
         activate_revision(project_dir, target_revision, backup_path)
         validate_release(project_dir)
 
-        status.update("health_check", "Redémarrage et contrôle de santé")
+        status.update("health_check", "Restarting and checking service health")
         restart_visualizer()
         if not wait_for_health(project_dir):
             raise UpdateError("The updated visualizer did not pass its service and HTTP health checks")
@@ -305,7 +305,7 @@ def perform_update(
         prune_backups(backup_dir)
         status.update(
             "success",
-            "Mise à jour terminée et contrôlée",
+            "Update completed and verified",
             current_revision=target_revision,
             rolled_back=False,
         )
@@ -313,7 +313,7 @@ def perform_update(
     except Exception as update_error:
         if backup_path is None:
             raise
-        status.update("rolling_back", "Échec détecté, restauration de l'ancienne version", error=str(update_error))
+        status.update("rolling_back", "Failure detected; restoring the previous version", error=str(update_error))
         try:
             activate_revision(project_dir, previous_revision, backup_path)
             install_requirements(project_dir / "requirements.txt")
@@ -321,7 +321,7 @@ def perform_update(
             healthy = wait_for_health(project_dir)
             status.update(
                 "rolled_back",
-                "Mise à jour annulée, ancienne version restaurée",
+                "Update rolled back; previous version restored",
                 current_revision=previous_revision,
                 rolled_back=True,
                 rollback_healthy=healthy,
@@ -360,7 +360,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         try:
             return perform_update(project_dir, status, args.backup_dir, args.remote_url, args.branch)
         except Exception as error:
-            status.update("failed", "La mise à jour a échoué", error=str(error), rolled_back=False)
+            status.update("failed", "Update failed", error=str(error), rolled_back=False)
             try:
                 restart_visualizer()
             except Exception:

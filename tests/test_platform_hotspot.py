@@ -123,7 +123,7 @@ def test_update_status_marks_stale_operation_as_failed(monkeypatch, tmp_path):
     status = PlatformRasp.get_update_status()
 
     assert status["state"] == "failed"
-    assert "interrompue" in status["message"]
+    assert "interrupted" in status["message"]
 
 
 def test_hotspot_disables_pmf(monkeypatch):

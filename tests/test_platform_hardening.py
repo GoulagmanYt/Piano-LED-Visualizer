@@ -142,7 +142,7 @@ def test_simultaneous_update_requests_start_a_single_updater(monkeypatch, tmp_pa
 
     assert len(started) == 1, f"{len(started)} updaters were launched"
     assert sum(1 for r in results if r["success"]) == 1
-    assert all("déjà en cours" in r["error"] for r in results if not r["success"])
+    assert all("already in progress" in r["error"] for r in results if not r["success"])
 
 
 def test_a_failed_launch_does_not_block_the_next_attempt(monkeypatch, tmp_path):

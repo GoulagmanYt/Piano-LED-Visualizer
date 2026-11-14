@@ -225,7 +225,7 @@ class SpeedColor(ColorMode):
                 self.notes_in_last_period.remove(note_time)
 
         notes_count = len(self.notes_in_last_period)
-        # Garde-fou : 0 (ou valeur invalide) provoquerait une ZeroDivisionError dans la boucle MIDI
+        # Guard against zero or invalid values causing ZeroDivisionError in the MIDI loop.
         try:
             max_notes = max(1.0, float(self.speed_max_notes))
         except (TypeError, ValueError):

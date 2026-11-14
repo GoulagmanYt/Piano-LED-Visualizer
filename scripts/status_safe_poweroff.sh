@@ -12,7 +12,7 @@ run_cmd() {
   fi
 }
 
-echo "=== Piano-LED-Visualizer : État Safe Power Off ==="
+echo "=== Piano-LED-Visualizer: Safe Power Off Status ==="
 
 is_active=false
 if [ "$(run_cmd raspi-config nonint get_overlay_now 2>/dev/null)" = "0" ]; then
@@ -25,19 +25,19 @@ if [ "$(run_cmd raspi-config nonint get_overlay_conf 2>/dev/null)" = "0" ]; then
 fi
 
 if [ "$is_active" = "true" ]; then
-  echo "État Actuel : [PROTÉGÉ] Le système racine est monté en OverlayFS (Lecture seule)."
-  echo "              Les écritures de la racine sont volatiles ; un arrêt propre reste préférable."
+  echo "Current status: [PROTECTED] The root filesystem uses OverlayFS (read-only)."
+  echo "                Root filesystem writes are volatile; a clean shutdown is still preferable."
 else
-  echo "État Actuel : [LECTURE/ÉCRITURE] Le système est monté en mode écriture standard."
-  echo "              ATTENTION : Éteindre proprement (sudo poweroff) avant de débrancher,"
-  echo "              ou activez le Safe Power Off avec : ./scripts/enable_safe_poweroff.sh"
+  echo "Current status: [READ-WRITE] The filesystem is mounted in standard read-write mode."
+  echo "                WARNING: Shut down cleanly (sudo poweroff) before unplugging,"
+  echo "                or enable Safe Power Off with: ./scripts/enable_safe_poweroff.sh"
 fi
 
-echo "Partition boot :"
+echo "Boot partition:"
 findmnt -no TARGET,OPTIONS /boot/firmware 2>/dev/null || findmnt -no TARGET,OPTIONS /boot
 
 if [ "$is_conf" = "true" ]; then
-  echo "Au Prochain Démarrage : Safe Power Off sera ACTIF."
+  echo "Next boot: Safe Power Off will be ACTIVE."
 else
-  echo "Au Prochain Démarrage : Mode Lecture/Écriture sera ACTIF."
+  echo "Next boot: Read-write mode will be ACTIVE."
 fi

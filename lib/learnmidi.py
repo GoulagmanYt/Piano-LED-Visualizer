@@ -24,10 +24,10 @@ from webinterface import app_state
 
 
 def compute_notes_time(mid):
-    """Temps absolu (secondes) de chaque message non-meta d'un MidiFile.
+    """Return the absolute time in seconds of each non-meta MidiFile message.
 
-    Les messages meta (marqueurs, tempo...) portent aussi un delta : il doit être
-    cumulé, sinon les temps des notes suivantes dérivent.
+    Meta messages such as markers and tempo changes also carry a time delta.
+    Include it in the total to keep subsequent note timestamps accurate.
     """
     time_passed = 0
     notes_time = []

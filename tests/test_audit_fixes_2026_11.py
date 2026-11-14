@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests de régression pour les bugs trouvés lors de l'audit de novembre 2026."""
+"""Regression tests for scheduling, recording, settings and UI fixes."""
 
 import datetime
 import os
@@ -43,7 +43,7 @@ class TestSaveMidiWithoutRecording(unittest.TestCase):
 
         saver = SaveMIDI()
         saver.add_instance(SimpleNamespace(render_message=lambda *a, **k: None))
-        saver.save("never-recorded")  # ne doit pas lever AttributeError
+        saver.save("never-recorded")  # Must not raise AttributeError.
 
 
 class TestScheduleAcrossMidnight(unittest.TestCase):
@@ -210,7 +210,7 @@ class TestSpeedColorZeroMaxNotes(unittest.TestCase):
             speed_max_notes=0,
         )
         color_mode = ColorMode("Speed", ledsettings)
-        color_mode.NoteOn(None, 0, None, 10)  # ne doit pas lever ZeroDivisionError
+        color_mode.NoteOn(None, 0, None, 10)  # Must not raise ZeroDivisionError.
 
 
 class TestLcdColorSettingsArePersisted(unittest.TestCase):
@@ -232,7 +232,7 @@ class TestLcdColorSettingsArePersisted(unittest.TestCase):
             gradient_start={"red": 10, "green": 0, "blue": 0}, gradient_end={"red": 10, "green": 0, "blue": 0},
             key_in_scale={"red": 10, "green": 0, "blue": 0}, key_not_in_scale={"red": 10, "green": 0, "blue": 0},
         )
-        fake_menu = MagicMock()  # show(), learning, etc. sont simulés ; seuls les attributs utiles sont fixés
+        fake_menu = MagicMock()  # Mock menu methods and set only the attributes used by the test.
         fake_menu.current_location = "Color_in_scale"
         fake_menu.current_choice = "Red"
         fake_menu.speed_multiplier = 1

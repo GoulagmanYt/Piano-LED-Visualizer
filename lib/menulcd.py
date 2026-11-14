@@ -53,7 +53,7 @@ class UITheme:
         self.value_gap = 5  # Gap between label and value
 
 
-# Emplacement du menu LCD -> préfixe des réglages sauvegardés (<préfixe>_red/_green/_blue)
+# LCD menu location -> saved setting prefix (<prefix>_red/_green/_blue).
 LED_COLOR_SETTING_PREFIXES = {
     "Color_for_slow_speed": "speed_slowest",
     "Color_for_fast_speed": "speed_fastest",
@@ -2235,7 +2235,7 @@ class MenuLCD:
                 led_setting[self.current_choice.lower()] = 255
             if led_setting[self.current_choice.lower()] < 0:
                 led_setting[self.current_choice.lower()] = 0
-            # Le nom du réglage sauvegardé ne se déduit pas du nom du menu
+            # The saved setting name cannot be inferred from the menu name.
             # ("Color_in_scale" -> "key_in_scale_red", etc.)
             setting_prefix = LED_COLOR_SETTING_PREFIXES[self.current_location]
             self.usersettings.change_setting_value(setting_prefix + "_" + self.current_choice.lower(),
