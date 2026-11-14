@@ -40,7 +40,7 @@ def test_json_roundtrip_preserves_midi_messages_and_timing(song, data):
     assert isinstance(cached["song_tracks"][0], mido.MetaMessage)
     assert isinstance(cached["song_tracks"][1], mido.Message)
     document = json.loads((song.parent / "cache" / (song.name + ".p")).read_bytes())
-    assert document["version"] == 1
+    assert document["version"] == 2
 
 
 def test_source_replacement_invalidates_cache_even_with_same_size(song, data):

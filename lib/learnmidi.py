@@ -1,29 +1,27 @@
 import ast
+import json
+import logging
+import math
+import os
+import subprocess
 import threading
 import time
-import json
+from logging.handlers import RotatingFileHandler
 
 import mido
-import subprocess
-
-import os
-
-from lib.functions import clamp, fastColorWipe, find_between, get_note_position
-from lib.rpi_drivers import Color
-
 import numpy as np
-from lib.log_setup import logger
-from lib.learning_input_adapter import LearningInputAdapter
+
+from lib.broadcast_outbox import BroadcastOutbox
+from lib.functions import clamp, fastColorWipe, get_note_position
 from lib.learning_cache import load_learning_cache, save_learning_cache
+from lib.learning_input_adapter import LearningInputAdapter
+from lib.learning_timeline import merge_learning_tracks
+from lib.log_setup import logger
+from lib.rpi_drivers import Color
 from lib.score_manager import ScoreManager
 from lib.song_file_security import resolve_song_path
 from webinterface import app_state
 
-import logging
-from logging.handlers import RotatingFileHandler
-from itertools import chain, islice, pairwise
-
-from lib.broadcast_outbox import BroadcastOutbox
 
 def compute_notes_time(mid):
     """Temps absolu (secondes) de chaque message non-meta d'un MidiFile.
@@ -80,6 +78,7 @@ class LearnMIDI:
         self.midiports = midiports
         self.input_adapter = LearningInputAdapter(midiports.queues)
         self.ledstrip = ledstrip
+        self._learning_strip = None
         
         # Initialize the score manager
 
@@ -123,6 +122,7 @@ class LearnMIDI:
 
         self.song_tempo = 500000
         self.song_tracks = []
+        self.song_hands = []
         self.ticks_per_beat = 240
         self.is_loaded_midi = {}
         self.is_started_midi = False
@@ -147,6 +147,21 @@ class LearnMIDI:
         self.right_hand_mistakes = []
         self.left_hand_mistakes = []
 
+
+    @property
+    def _output_strip(self):
+        view = getattr(self, "_learning_strip", None)
+        return self.ledstrip.strip if view is None else view
+
+    def _hand_for(self, index, message):
+        if len(self.song_hands) == len(self.song_tracks):
+            return self.song_hands[index]
+        # Compatibility for in-memory callers that provide an already prepared
+        # score. Files loaded by load_midi always carry explicit hand roles.
+        channel = getattr(message, "channel", 0)
+        if channel in (1, 2):
+            return channel
+        return 1 if message.type in ("note_on", "note_off") else 0
 
     def add_instance(self, menu):
         self.menu = menu
@@ -199,7 +214,10 @@ class LearnMIDI:
                 elif hasattr(self.midiports, "queues"):
                     self.midiports.queues.clear_scheduled_forward(source="learning")
             finally:
-                if hasattr(self.midiports, "send_all_notes_off"):
+                request_panic = getattr(self.midiports, "request_all_notes_off", None)
+                if callable(request_panic):
+                    request_panic()
+                elif hasattr(self.midiports, "send_all_notes_off"):
                     try:
                         self.midiports.send_all_notes_off()
                     except Exception as e:
@@ -271,11 +289,12 @@ class LearnMIDI:
         except (ValueError, OSError):
             return False
         cache = load_learning_cache(song_path, source)
-        if cache is None:
+        if cache is None or "song_hands" not in cache:
             return False
         self.song_tempo = cache['song_tempo']
         self.ticks_per_beat = cache['ticks_per_beat']
         self.song_tracks = cache['song_tracks']
+        self.song_hands = cache['song_hands']
         self.notes_time = cache['notes_time']
         self.loading = 4
         return True
@@ -360,22 +379,10 @@ class LearnMIDI:
             self.song_tempo = get_tempo(mid)
             self.ticks_per_beat = mid.ticks_per_beat
 
-            # Assign Tracks to different channels before merging to know the message origin
+            # Musical hand roles must not overwrite MIDI protocol channels.
             self.loading = 2  # 2 = Proces
-            if len(mid.tracks) == 2:  # check if the midi file has only 2 Tracks
-                offset = 1
-            else:
-                offset = 0
-            for k in range(len(mid.tracks)):
-                for msg in mid.tracks[k]:
-                    if not msg.is_meta and msg.type in ['note_on', 'note_off']:
-                        msg.channel = k + offset
-                        if msg.type == 'note_off':
-                            msg.velocity = 0
-
-            # Merge tracks
             self.loading = 3  # 3 = Merge
-            self.song_tracks = mido.merge_tracks(mid.tracks)
+            self.song_tracks, self.song_hands = merge_learning_tracks(mid)
             self.notes_time.clear()
             self.notes_time.extend(compute_notes_time(mid))
 
@@ -389,6 +396,7 @@ class LearnMIDI:
                     save_learning_cache(song_path, source, {
                         'song_tempo': self.song_tempo, 'ticks_per_beat': self.ticks_per_beat,
                         'notes_time': self.notes_time, 'song_tracks': self.song_tracks,
+                        'song_hands': self.song_hands,
                     })
             except (OSError, ValueError) as error:
                 logger.warning("Learning cache unavailable; song remains playable: %s", error)
@@ -411,21 +419,23 @@ class LearnMIDI:
             # Get time delay
             tDelay = mido.tick2second(msg.time, self.ticks_per_beat, self.song_tempo * 100 / self.set_tempo)
 
-            if not msg.is_meta and tDelay > 0 and (
-                    msg.type == 'note_on' or msg.type == 'note_off') and predicted_future_notes and self.practice == 0:
+            if tDelay > 0 and predicted_future_notes and self.practice == 0:
                 self.light_up_predicted_future_notes(predicted_future_notes)
                 return
 
-            if msg.type == 'note_on' and msg.velocity > 0:
+            hand = self._hand_for(current_note, msg)
+            if (msg.type == 'note_on' and msg.velocity > 0 and hand in (1, 2)
+                    and (self.hands == 0 or self.hands == hand)):
                 # make sure msg.note is not in notes_to_press list
                 if msg.note not in notes_to_press:
-                    predicted_future_notes.append(msg)
+                    predicted_future_notes.append((msg, hand))
 
             current_note += 1
+        self.light_up_predicted_future_notes(predicted_future_notes)
 
     def light_up_predicted_future_notes(self, notes):
         dim = 10
-        for msg in notes:
+        for msg, hand in notes:
             # Light-up LEDs with the notes to press
             if not msg.is_meta:
                 # Calculate note position on the strip and display
@@ -435,48 +445,41 @@ class LearnMIDI:
                     brightness = 0.5
                     brightness /= dim
                     red, green, blue = [0, 0, 0]
-                    if msg.channel == 1:
+                    if hand == 1:
                         # red = int(self.hand_colorList[self.hand_colorR][0] * brightness)
                         # green = int(self.hand_colorList[self.hand_colorR][1] * brightness)
                         # blue = int(self.hand_colorList[self.hand_colorR][2] * brightness)
                         red, green, blue = [int(c * brightness) for c in self.hand_colorList[self.hand_colorR]]
-                    if msg.channel == 2:
+                    if hand == 2:
                         # red = int(self.hand_colorList[self.hand_colorL][0] * brightness)
                         # green = int(self.hand_colorList[self.hand_colorL][1] * brightness)
                         # blue = int(self.hand_colorList[self.hand_colorL][2] * brightness)
                         red, green, blue = [int(c * brightness) for c in self.hand_colorList[self.hand_colorL]]
 
-                    self.ledstrip.strip.setPixelColor(note_position, Color(red, green, blue))
+                    self._output_strip.setPixelColor(note_position, Color(red, green, blue))
         if notes:
-            self.ledstrip.strip.show()
+            self._output_strip.show()
 
     def handle_wrong_notes(self, wrong_notes, hand_hint_notesL, hand_hint_notesR):
-
-        if self.show_wrong_notes != 1:
-            return
 
         brightness = 0.05
         # loop through wrong_notes and light them up
         for msg in wrong_notes:
-            note = int(find_between(str(msg), "note=", " "))
-
-            if "note_off" in str(msg):
-                velocity = 0
-            else:
-                velocity = int(find_between(str(msg), "velocity=", " "))
+            note, velocity = _extract_midi_note_velocity(msg)
 
             note_position = get_note_position(note, self.ledstrip, self.ledsettings)
             if velocity > 0:
-                self.ledstrip.strip.setPixelColor(note_position, Color(255, 0, 0))
                 self.mistakes_count += 1
-                if self.is_led_activeL == 0:
+                if self.show_wrong_notes:
+                    self._output_strip.setPixelColor(note_position, Color(255, 0, 0))
+                if self.show_wrong_notes and self.is_led_activeL == 0:
                     for expected_note in hand_hint_notesL:
                         red, green, blue = [int(c * brightness) for c in self.hand_colorList[self.prev_hand_colorL]]
-                        self.ledstrip.strip.setPixelColor(expected_note, Color(red, green, blue))
-                if self.is_led_activeR == 0:
+                        self._output_strip.setPixelColor(expected_note, Color(red, green, blue))
+                if self.show_wrong_notes and self.is_led_activeR == 0:
                     for expected_note in hand_hint_notesR:
                         red, green, blue = [int(c * brightness) for c in self.hand_colorList[self.prev_hand_colorR]]
-                        self.ledstrip.strip.setPixelColor(expected_note, Color(red, green, blue))
+                        self._output_strip.setPixelColor(expected_note, Color(red, green, blue))
                  
                 # Wrong note penalty
                 self.score_manager.penalize_for_wrong_note()
@@ -491,18 +494,26 @@ class LearnMIDI:
                     "multiplier": self.score_manager.get_multiplier(),
                     "last_update": self.score_manager.get_last_score_update()
                 }))
-            else:
-                self.ledstrip.strip.setPixelColor(note_position, Color(0, 0, 0))
+            elif self.show_wrong_notes:
+                if callable(getattr(type(self._output_strip), "clearPixel", None)):
+                    self._output_strip.clearPixel(note_position)
+                else:
+                    self._output_strip.setPixelColor(note_position, Color(0, 0, 0))
 
         if self.mistakes_count > self.number_of_mistakes > 0:
             self.mistakes_count = 0
             self.restart_loop()
 
-        self.ledstrip.strip.show()
+        if self.show_wrong_notes and wrong_notes:
+            self._output_strip.show()
 
     def learn_midi(self):
         with self._state_lock:
             owner = getattr(self, "_learning_thread", None)
+            silencing = getattr(self.midiports, "is_silencing_output", None)
+            if callable(silencing) and silencing():
+                logger.warning("Learning start deferred: previous output cleanup is still pending")
+                return
             if (self.is_started_midi or self._load_initializing or getattr(self, "_stop_cleanups", 0)
                     or (owner is not None and owner.is_alive())):
                 return
@@ -516,6 +527,9 @@ class LearnMIDI:
             self.learning_state = "starting"
             logger.info("learning_midi transition=starting")
         try:
+            strip = self.ledstrip.strip
+            if callable(getattr(type(strip), "priority_view", None)):
+                self._learning_strip = strip.priority_view()
             self._run_learning()
         except Exception:
             self.learning_state = "error"
@@ -526,14 +540,200 @@ class LearnMIDI:
                 if self.learning_state != "stopping":
                     self.stop_learning()
             finally:
-                with self._state_lock:
-                    self.is_started_midi = False
-                    self.learning_state = final_state
-                    self._learning_thread = None
+                view = self._learning_strip
+                self._learning_strip = None
+                try:
+                    if view is not None:
+                        view.close()
+                finally:
+                    with self._state_lock:
+                        self.is_started_midi = False
+                        self.learning_state = final_state
+                        self._learning_thread = None
                 logger.info("learning_midi transition=%s", final_state)
 
+    def _publish_score(self):
+        self.socket_send.append(json.dumps({
+            "type": "score_update", "score": self.score_manager.get_score(),
+            "combo": self.score_manager.get_combo(),
+            "multiplier": self.score_manager.get_multiplier(),
+            "last_update": self.score_manager.get_last_score_update(),
+        }))
+
+    def _await_learning_chord(self, targets, left_hints, right_hints, next_index, end_index):
+        """Match pitches while keeping input-channel releases independent.
+
+        Each physical pitch earns points once per expected chord. Timing uses
+        the input's perf_counter timestamp, independent of queue delay or UTC.
+        """
+        pressed = set()
+        scored = set()
+        self.next_note_time = min(target["due"] for target in targets.values())
+        self.next_note_delay = 0
+        while self.is_started_midi and not self.awaiting_restart_loop:
+            wrong = []
+            for message, timestamp in self.input_adapter.drain_note_events():
+                note, velocity = _extract_midi_note_velocity(message)
+                event_time = (float(timestamp) if isinstance(timestamp, (int, float))
+                              and math.isfinite(timestamp) else time.perf_counter())
+                if event_time < self.next_note_time:
+                    continue  # Input left over from before this chord was shown.
+                key = (getattr(message, "channel", 0), note)
+                if velocity == 0:
+                    pressed.discard(key)
+                    if note not in targets:
+                        wrong.append(message)
+                    continue
+                if key in pressed:
+                    continue
+                pressed.add(key)
+                if note not in targets:
+                    wrong.append(message)
+                    nearest = min(targets, key=lambda expected: abs(expected - note))
+                    target = targets[nearest]
+                    for hand in target["hands"]:
+                        mistakes = self.right_hand_mistakes if hand == 1 else self.left_hand_mistakes
+                        mistakes.append(target["position"])
+                elif note not in scored:
+                    scored.add(note)
+                    target = targets[note]
+                    delay = event_time - target["due"]
+                    self.score_manager.add_score_for_correct_note(delay)
+                    for hand in target["hands"]:
+                        timing = self.right_hand_timing if hand == 1 else self.left_hand_timing
+                        timing.append((target["position"], delay))
+                        if abs(delay) >= self.score_manager.max_delay:
+                            if hand == 1:
+                                self.delay_countR += 1
+                            else:
+                                self.delay_countL += 1
+                    self._publish_score()
+            self.handle_wrong_notes(wrong, left_hints, right_hints)
+            if self.awaiting_restart_loop:
+                return False
+            if set(targets).issubset(note for _channel, note in pressed):
+                due = time.perf_counter()
+                for message in self.pending_software_notes:
+                    if self._wait_or_stopped(0):
+                        return False
+                    self.midiports.schedule_rtp_message(message, due_time=due, source="learning")
+                self.pending_software_notes.clear()
+                return True
+            if self._wait_or_stopped(0.001):
+                break
+            self.predict_future_notes(next_index, end_index, targets)
+        return False
+
+    def _render_learning_note(self, message, hand, left_hints, right_hints, active):
+        if message.type not in ("note_on", "note_off") or hand not in (1, 2):
+            return
+        key = (message.channel, message.note)
+        if message.type == "note_on" and message.velocity > 0:
+            active[key] = hand
+        else:
+            active.pop(key, None)
+        remaining = next((role for (_channel, note), role in active.items()
+                          if note == message.note), None)
+        position = get_note_position(message.note, self.ledstrip, self.ledsettings)
+        if remaining is None:
+            release = getattr(type(self._output_strip), "clearPixel", None)
+            if callable(release):
+                self._output_strip.clearPixel(position)
+            else:
+                self._output_strip.setPixelColor(position, Color(0, 0, 0))
+        else:
+            color_index = self.hand_colorR if remaining == 1 else self.hand_colorL
+            self._output_strip.setPixelColor(position, Color(*(int(c * 0.5)
+                                             for c in self.hand_colorList[color_index])))
+        hints = right_hints if hand == 1 else left_hints
+        enabled = self.is_led_activeR if hand == 1 else self.is_led_activeL
+        if enabled == 0:
+            if remaining is not None and position not in hints:
+                hints.append(position)
+            elif remaining is None and position in hints:
+                hints.remove(position)
+
+    def _play_section(self):
+        """Play same-tick groups, including meta events, on one musical clock."""
+        start = int(self.start_point * len(self.song_tracks) / 100)
+        end = int(self.end_point * len(self.song_tracks) / 100)
+        self.current_idx = sum(not msg.is_meta for msg in self.song_tracks[:start])
+        tempo, position = 500000, 0.0
+        for message in self.song_tracks[:start]:
+            position += mido.tick2second(message.time, self.ticks_per_beat, tempo)
+            if message.type == "set_tempo":
+                tempo = message.tempo
+        groups, group = [], []
+        for index in range(start, end):
+            message = self.song_tracks[index]
+            if message.time > 0 and group:
+                groups.append(group)
+                group = []
+            group.append((index, message))
+        if group:
+            groups.append(group)
+
+        fastColorWipe(self._output_strip, True, self.ledsettings)
+        due = time.perf_counter()
+        targets, active = {}, {}
+        left_hints, right_hints = [], []
+        for group in groups:
+            if not self.is_started_midi:
+                break
+            delta = mido.tick2second(group[0][1].time, self.ticks_per_beat, tempo)
+            delay = delta * 100 / self.set_tempo
+            if targets:
+                self._await_learning_chord(targets, left_hints, right_hints, group[0][0], end)
+                targets.clear()
+                fastColorWipe(self._output_strip, True, self.ledsettings)
+                due = max(due, time.perf_counter() - delay)
+                left_hints.clear()
+                right_hints.clear()
+            if self.awaiting_restart_loop:
+                self.awaiting_restart_loop = False
+                return True
+            due += delay
+            if self._wait_or_stopped(max(0, due - time.perf_counter())):
+                break
+            position += delta
+            self.midiports.last_activity = time.time()
+            software = []
+            for index, message in group:
+                if message.is_meta:
+                    if message.type == "set_tempo":
+                        tempo = message.tempo
+                    continue
+                if self.current_idx < len(self.notes_time):
+                    self.socket_send.append(self.notes_time[self.current_idx])
+                self.current_idx += 1
+                hand = self._hand_for(index, message)
+                self._render_learning_note(message, hand, left_hints, right_hints, active)
+                selected = hand in (1, 2) and (self.hands == 0 or self.hands == hand)
+                if (self.practice == 0 and selected and message.type == "note_on"
+                        and message.velocity > 0):
+                    target = targets.setdefault(message.note, {"hands": set(), "due": due,
+                                                               "position": position})
+                    target["hands"].add(hand)
+                if (self.practice == 2 or hand == 0
+                        or (self.hands == 1 and hand == 2 and self.mute_hand != 2)
+                        or (self.hands == 2 and hand == 1 and self.mute_hand != 1)):
+                    software.append(message)
+            self._output_strip.show()
+            if targets:
+                self.pending_software_notes.extend(software)
+            else:
+                for message in software:
+                    if self._wait_or_stopped(0):
+                        break
+                    self.midiports.schedule_rtp_message(message, due_time=due, source="learning")
+        if targets and self.is_started_midi:
+            self._await_learning_chord(targets, left_hints, right_hints, end, end)
+        if self.awaiting_restart_loop:
+            self.awaiting_restart_loop = False
+            return True
+        return False
+
     def _run_learning(self):
-        loops_count = 0
         if self.loading == 0:
             self.menu.render_message("Load song to start", "", 1500)
             self.is_started_midi = False
@@ -549,6 +749,7 @@ class LearnMIDI:
             logger.info("learning_midi transition=running")
             # Reset the score when starting a new learning session
             self.score_manager.reset()
+            self.mistakes_count = 0
             self.right_hand_timing.clear()
             self.left_hand_timing.clear()
             self.right_hand_mistakes.clear()
@@ -573,9 +774,6 @@ class LearnMIDI:
             return
 
         self.t = threading.current_thread()
-        hand_hint_notesL = []
-        hand_hint_notesR = []
-
         keep_looping = True
         while keep_looping:
             if self._wait_or_stopped(1):
@@ -597,259 +795,9 @@ class LearnMIDI:
                 "multiplier": self.score_manager.get_multiplier(),
                 "last_update": 0
             }))
+            restart_requested = False
             try:
-                fastColorWipe(self.ledstrip.strip, True, self.ledsettings)
-                event_due_perf = time.perf_counter()
-                notes_to_press = []
-
-                start_idx = int(self.start_point * len(self.song_tracks) / 100)
-                end_idx = int(self.end_point * len(self.song_tracks) / 100)
-
-                # self.current_idx does not count meta messages (used for sheet music sync in web interface)
-                # absolute_idx counts all messages (used for predicting messages)
-
-                self.current_idx = sum(not message.is_meta for message in islice(self.song_tracks, start_idx))
-                # A section inherits the tempo at its start; tempo changes take
-                # effect after their own delta, as required by MIDI files.
-                tempo = 500000
-                for message in islice(self.song_tracks, start_idx):
-                    if message.type == 'set_tempo':
-                        tempo = message.tempo
-                track_range = islice(self.song_tracks, start_idx, end_idx)
-                messages_with_lookahead = pairwise(chain(track_range, (None,)))
-
-                for absolute_idx, (msg, next_msg) in enumerate(
-                        messages_with_lookahead, start=start_idx):
-                    self.midiports.last_activity = time.time()
-                    # Exit thread if learning is stopped
-                    if not self.is_started_midi:
-                        break
-
-                    # Get time delay
-                    tDelay = mido.tick2second(msg.time, self.ticks_per_beat, tempo * 100 / self.set_tempo)
-
-                    # Check notes to press
-                    if not msg.is_meta:
-                        try:
-                            self.socket_send.append(self.notes_time[self.current_idx])
-                        except Exception as e:
-                            logger.warning(e)
-
-                        self.current_idx += 1
-
-                        if tDelay > 0 and (
-                                msg.type == 'note_on' or msg.type == 'note_off') and notes_to_press and self.practice == 0:
-                            notes_pressed = []
-                            wrong_notes = []
-                            self.predict_future_notes(absolute_idx, end_idx, notes_to_press)
-
-                            # Store timing information for next note
-                            self.next_note_time = time.time() + tDelay
-                            self.next_note_delay = tDelay
-                            midi_time += tDelay
-
-                            while not set(notes_to_press).issubset(notes_pressed) and self.is_started_midi:
-                                if self.awaiting_restart_loop:
-                                    break
-                                for msg_in, msg_timestamp in self.input_adapter.drain_note_events():
-                                    note, velocity = _extract_midi_note_velocity(msg_in)
-
-                                    # check if note is NOT in the list of notes to press
-                                    if note not in notes_to_press:
-                                        wrong_notes.append(msg_in)
-                                        # Clear pending software notes if wrong key is pressed
-                                        if velocity > 0:
-                                            if msg.channel == 1:
-                                                self.right_hand_mistakes.append(midi_time)
-                                                score_logger.debug("right hand mistakes: %s", self.right_hand_mistakes)
-                                            if msg.channel == 2:
-                                                self.left_hand_mistakes.append(midi_time)
-                                                score_logger.debug("left hand mistakes: %s", self.left_hand_mistakes)
-                                            self.pending_software_notes.clear()
-                                        continue
-                                    
-                                    # check if note is in the list of notes to press
-                                    if velocity > 0:
-                                        if note not in notes_pressed:
-                                            notes_pressed.append(note)
- 
-                                            # Calculate delay from ideal hit time
-                                            current_time = time.time()
-                                            if self.next_note_time:
-                                                # Get delay in seconds
-                                                delay = current_time - self.next_note_time
-                                                
-                                                # Add score for correct note
-                                                self.score_manager.add_score_for_correct_note(delay)
-
-                                                note_timing = (midi_time, delay)
-                                               
-                                                score_logger.debug("midi_time" +str(midi_time))
-                                                if msg.channel == 1: 
-                                                    score_logger.debug("channel 1")
-                                                    score_logger.debug("right hand timing note timimg: %s", self.right_hand_timing)
-                                                    self.right_hand_timing.append(note_timing)
-                                                    if delay >= self.score_manager.max_delay:
-                                                        self.delay_countR += 1
-                                                if msg.channel == 2:
-                                                    score_logger.debug("channel- 2")
-                                                    score_logger.debug("left hand timing note timimg: %s", self.left_hand_timing)
-                                                    self.left_hand_timing.append(note_timing)
-                                                    if delay >= self.score_manager.max_delay:
-                                                        self.delay_countL += 1
-
-                                                # send score update to frontend
-                                                self.socket_send.append(json.dumps({
-                                                    "type": "score_update",
-                                                    "score": self.score_manager.get_score(),
-                                                    "combo": self.score_manager.get_combo(),
-                                                    "multiplier": self.score_manager.get_multiplier(),
-                                                    "last_update": self.score_manager.get_last_score_update()
-                                                }))
-
-
-
-                                    else:
-                                        try:
-                                            notes_pressed.remove(note)
-                                        except ValueError:
-                                            pass  # do nothing
-
-                                self.handle_wrong_notes(wrong_notes, hand_hint_notesL, hand_hint_notesR)
-                                wrong_notes.clear()
-
-                                # Yield CPU to allow the mido callback thread to
-                                # enqueue incoming MIDI messages (they share the
-                                # same RLock).  Without this sleep the tight spin
-                                # loop can starve the callback thread under GIL
-                                # pressure, causing message loss.
-                                if self._wait_or_stopped(0.001):
-                                    break
-
-                                # light up predicted future notes again in case the future note was pressed
-                                # and color was overwritten
-                                self.predict_future_notes(absolute_idx, end_idx, notes_to_press)
-                            
-                            hand_hint_notesL = []
-                            hand_hint_notesR = []
-                            # Play any pending software notes only after all required notes have been pressed
-                            if set(notes_to_press).issubset(notes_pressed) and self.pending_software_notes:
-                                due_time = time.perf_counter()
-                                for software_note in self.pending_software_notes:
-                                    if self._wait_or_stopped(0):
-                                        break
-                                    self.midiports.schedule_rtp_message(
-                                        software_note,
-                                        due_time=due_time,
-                                        source="learning",
-                                    )
-                                self.pending_software_notes.clear()
-
-                            # Turn off the pressed LEDs
-                            fastColorWipe(self.ledstrip.strip, True,
-                                          self.ledsettings)  # ideally clear only pressed notes!
-                            notes_to_press.clear()
-                            # Melody mode deliberately pauses musical time while
-                            # waiting for the player. Resume from this group.
-                            event_due_perf = max(event_due_perf, time.perf_counter() - tDelay)
-
-                    # Realize time delay, consider also the time lost during computation
-                    event_due_perf += tDelay
-                    delay = max(0, event_due_perf - time.perf_counter())
-                    if self._wait_or_stopped(delay):
-                        break
-                    if msg.type == 'set_tempo':
-                        tempo = msg.tempo
-
-                    # Light-up LEDs with the notes to press
-                    if not msg.is_meta:
-                        # Calculate note position on the strip and display
-                        if msg.type == 'note_on' or msg.type == 'note_off':
-                            note_position = get_note_position(msg.note, self.ledstrip, self.ledsettings)
-                            if msg.type == 'note_off' or msg.velocity == 0:
-                                brightness = 0
-                            else:
-                                brightness = 0.5
-
-                            red, green, blue = [0, 0, 0]
-                            if msg.channel == 1:
-                                red, green, blue = [int(c * brightness) for c in self.hand_colorList[self.hand_colorR]]
-                                if self.is_led_activeR == 0:
-                                    if brightness > 0:
-                                        hand_hint_notesR.append(note_position)
-                                    else:
-                                        try:
-                                            hand_hint_notesR.remove(note_position)
-                                        except ValueError:
-                                            pass  # do nothing
-                            if msg.channel == 2:
-                                red, green, blue = [int(c * brightness) for c in self.hand_colorList[self.hand_colorL]]
-                                if self.is_led_activeL == 0:
-                                    if brightness > 0:
-                                        hand_hint_notesL.append(note_position)
-                                    else:
-                                        try:
-                                            hand_hint_notesL.remove(note_position)
-                                        except ValueError:
-                                            pass  # do nothing
-                            self.ledstrip.strip.setPixelColor(note_position, Color(red, green, blue))
-                        # Save notes to press
-                        if msg.type == 'note_on' and msg.velocity > 0 and (
-                                msg.channel == self.hands or self.hands == 0):
-                            notes_to_press.append(msg.note)
-
-                        # Handle software's notes
-                        if ((
-                                self.hands == 1 and self.mute_hand != 2 and msg.channel == 2) or
-                                # Left hand notes
-                                (
-                                        self.hands == 2 and self.mute_hand != 1 and msg.channel == 1) or
-                                # Right hand notes
-                                self.practice == 2):  # Listen mode
-                            if self.practice == 2:
-                                self.midiports.schedule_rtp_message(msg, due_time=event_due_perf, source="learning")
-                            else:
-                                # Check if there are any user notes to press at this moment
-                                if notes_to_press:
-                                    # If there are user notes to press, store this software note to play when user presses their key
-                                    self.pending_software_notes.append(msg)
-                                else:
-                                    self.midiports.schedule_rtp_message(
-                                        msg,
-                                        due_time=event_due_perf,
-                                        source="learning",
-                                    )
-
-                        next_delay = None
-                        if next_msg is not None:
-                            next_delay = mido.tick2second(
-                                next_msg.time,
-                                self.ticks_per_beat,
-                                tempo * 100 / self.set_tempo,
-                            )
-                        if next_msg is None or next_delay > 0:
-                            self.ledstrip.strip.show()
-
-                    # If we have pending software notes but no user notes to press,
-                    # and we've reached the next note's time, play and clear the pending notes
-                    if (self.pending_software_notes and not notes_to_press and
-                            self.next_note_time and time.time() >= self.next_note_time):
-                        due_time = time.perf_counter()
-                        for software_note in self.pending_software_notes:
-                            if self._wait_or_stopped(0):
-                                break
-                            self.midiports.schedule_rtp_message(
-                                software_note,
-                                due_time=due_time,
-                                source="learning",
-                            )
-                        self.pending_software_notes.clear()
-                        self.next_note_time = None
-                        self.next_note_delay = None
-
-                    if self.awaiting_restart_loop:
-                        self.awaiting_restart_loop = False
-                        break
+                restart_requested = self._play_section()
 
 
             except Exception as e:
@@ -858,7 +806,7 @@ class LearnMIDI:
                 self.learning_state = "error"
                 logger.info("learning_midi transition=error")
 
-            if not self.is_loop_active or self.is_started_midi is False:
+            if not (self.is_loop_active or restart_requested) or self.is_started_midi is False:
                 keep_looping = False
 
             # Update profile highscore

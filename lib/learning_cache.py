@@ -13,7 +13,7 @@ from pathlib import Path
 import mido
 from mido.midifiles.meta import UnknownMetaMessage
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 MAX_CACHE_BYTES = 64 * 1024 * 1024
 
 
@@ -87,8 +87,16 @@ def _decode_data(data):
         previous = value
     if len(times) != sum(not message.is_meta for message in messages):
         raise ValueError("Learning cache note timestamps do not match messages")
-    return {"song_tempo": tempo, "ticks_per_beat": ticks,
-            "notes_time": times, "song_tracks": messages}
+    result = {"song_tempo": tempo, "ticks_per_beat": ticks,
+              "notes_time": times, "song_tracks": messages}
+    if "song_hands" in data:
+        hands = data["song_hands"]
+        if not isinstance(hands, list) or len(hands) != len(messages):
+            raise ValueError("Learning hand roles do not match messages")
+        for hand in hands:
+            _integer(hand, 0, 2)
+        result["song_hands"] = hands
+    return result
 
 
 def load_learning_cache(song_name, source_path):
@@ -118,6 +126,8 @@ def save_learning_cache(song_name, source_path, cache_data):
             "notes_time": list(cache_data["notes_time"]),
             "song_tracks": [{"meta": message.is_meta, "message": message.dict()}
                             for message in cache_data["song_tracks"]]}
+    if "song_hands" in cache_data:
+        data["song_hands"] = list(cache_data["song_hands"])
     _decode_data(data)
     document = {"version": CACHE_VERSION, "source": _identity(source), "data": data}
     encoded = json.dumps(document, ensure_ascii=True, allow_nan=False).encode("utf-8")

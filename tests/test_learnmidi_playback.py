@@ -5,45 +5,12 @@ import os
 import pickle
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import mido
 import pytest
 
 from lib import learnmidi
-from lib.midi_queues import MidiQueues
-
-
-@pytest.fixture
-def player(monkeypatch):
-    values = {
-        "hand_colorList": "[[255, 0, 0], [0, 0, 255]]",
-        "end_point": "100", "set_tempo": "100", "practice": "2",
-    }
-    settings = SimpleNamespace(get_setting_value=lambda key: values.get(key, "0"))
-    sent = []
-    ports = SimpleNamespace(
-        queues=MidiQueues(),
-        schedule_rtp_message=lambda msg, **kw: sent.append((msg.copy(), kw["due_time"])),
-        send_all_notes_off=Mock(),
-    )
-    learning = learnmidi.LearnMIDI(settings, Mock(), ports, SimpleNamespace(strip=Mock()))
-    learning.loading = 4
-    learning.ticks_per_beat = 480
-    learning.sent = sent
-    learning.socket_send = []
-    learning.clock = SimpleNamespace(now=0.0)
-    monkeypatch.setattr(learnmidi.time, "perf_counter", lambda: learning.clock.now)
-    monkeypatch.setattr(learnmidi, "fastColorWipe", lambda *args: None)
-    monkeypatch.setattr(learnmidi, "get_note_position", lambda *args: 20)
-
-    def wait(delay):
-        learning.clock.now += max(0, delay)
-        return learning.stop_event.is_set() or not learning.is_started_midi
-
-    monkeypatch.setattr(learning, "_wait_or_stopped", wait)
-    return learning
 
 
 def play(player, messages):
@@ -210,15 +177,6 @@ def save_song(path, note):
     song.save(path)
 
 
-@pytest.fixture
-def song_path(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "Songs").mkdir()
-    path = tmp_path / "Songs" / "study.mid"
-    save_song(path, 60)
-    return path
-
-
 def test_loader_ignores_executable_legacy_cache(player, song_path):
     marker = song_path.parent / "executed"
 
@@ -233,7 +191,7 @@ def test_loader_ignores_executable_legacy_cache(player, song_path):
     player.load_midi("study.mid")
     assert player.loading == 4
     assert not marker.exists()
-    assert json.loads(cache.read_text())["version"] == 1
+    assert json.loads(cache.read_text())["version"] == 2
 
 
 def test_loader_reloads_a_replaced_song_and_reuses_valid_json_cache(player, song_path, monkeypatch):
