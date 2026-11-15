@@ -4,6 +4,12 @@ The figures below describe dated tests, not a guarantee for every Pi or network.
 Physical key-to-light or key-to-sound latency has not been measured. Do not add
 percentiles measured across different boundaries.
 
+Historical MIDI benchmark runs used a source thread in the application process.
+That source could slow down during stalls, reducing offered load. Those results
+describe the emitted stream and cannot bound latency for independently arriving
+MIDI. The current benchmark uses a separate source process and planned emission
+times; use the same harness and configuration for new comparisons.
+
 ## Which boundary is measured?
 
 | Measurement | Includes | Excludes |
@@ -104,15 +110,93 @@ runner=/home/Piano-LED-Visualizer/.venv/bin/python
 if [ ! -x "$runner" ]; then
     runner=/usr/bin/python3
 fi
-"$runner" scripts/benchmark_pipeline.py
+nice -n -10 "$runner" scripts/benchmark_pipeline.py
 SH
 ```
 
 The benchmark uses an instrumented MIDI output to avoid playing the piano.
-Test settings remain in memory. `PLV_BENCHMARK_CHORDS` and
-`PLV_BENCHMARK_INTERVAL_MS` adjust the workload; `PLV_BENCHMARK_PROFILE` enables
-cProfile. Do not directly compare latencies collected with and without
-profiling.
+Test settings remain in memory. RGB and sustain checks run before measurement;
+warm-up events are excluded from measured counts. The default 2,000-chord run
+therefore measures 52,000 events, compared with 52,052 in the historical protocol.
+Web and platform/LCD mode are enabled by default. Their threads run, but the
+benchmark does not generate browser or WebSocket client traffic.
+
+The source opens its own ALSA output in a separate process on another allowed
+CPU. The runtime pins itself automatically on the Pi Zero 2 W. On other boards,
+select a runtime CPU with `PLV_MIDI_CPU_AFFINITY`. Launch with at least one more
+allowed CPU so the source can run outside the runtime's affinity; the benchmark
+fails explicitly when none is available. Both processes inherit the launch
+priority and report their actual affinity and nice values. `nice -n -10` matches
+the service's nice setting, but does not reproduce every systemd property.
+
+The source follows absolute deadlines and retains overdue events. Reported
+latency starts at the intended emission time and includes source scheduling
+lateness, which is also reported separately. Counts and hashes are checked
+against actual source emissions as well as reception, processing and forwarding.
+A missing final event fails validation even when every received event was handled.
+
+| Environment variable | Default | Purpose |
+| --- | --- | --- |
+| `PLV_BENCHMARK_WORKLOAD` | `chords` | Choose `chords`, `poisson` or `isolated`. |
+| `PLV_BENCHMARK_CHORDS` | `2000` | Number of 12-note chords with pedal events; 26 events per chord. |
+| `PLV_BENCHMARK_INTERVAL_MS` | `20` | Absolute target period between chords. |
+| `PLV_BENCHMARK_RATE` | `100` | Individual events/s for the Poisson profile. |
+| `PLV_BENCHMARK_DURATION` | `30` | Duration in seconds for Poisson or isolated notes. |
+| `PLV_BENCHMARK_SEED` | `1` | Reproducible Poisson schedule, with at most ten simultaneous notes. |
+| `PLV_BENCHMARK_SOURCE_CPU` | spare allowed CPU | Override source affinity; must be outside the runtime's affinity. |
+| `PLV_BENCHMARK_WEB` | `true` | Set `false` for a controlled comparison without the web interface. |
+| `PLV_BENCHMARK_APPMODE` | `platform` | Set `app` to exclude platform/LCD work. |
+| `PLV_BENCHMARK_STALLS` | `1` | Set `0` to measure without the GC/canary monitor. |
+| `PLV_BENCHMARK_PROFILE` | unset | cProfile output file; profiling changes the measured workload. |
+
+For realistic load, repeat Poisson runs at 25, 100 and 300 events/s. Inside the
+maintenance window above, replace the benchmark command with, for example:
+
+```bash
+PLV_BENCHMARK_WORKLOAD=poisson PLV_BENCHMARK_RATE=100 PLV_BENCHMARK_DURATION=60 nice -n -10 "$runner" scripts/benchmark_pipeline.py
+```
+
+Use `isolated` to measure a note after more than one second of silence following
+release. Read `source_to_receive_by_type.note_on` and
+`source_to_forward_by_type.note_on` for cold notes; releases have separate
+statistics. Keep instrumentation, seed, priority, thermal conditions and other
+load constant across comparisons. Do not directly compare profiled and
+unprofiled runs. Compare with the canary disabled too, to quantify observer cost.
+
+### Rendering and diagnostics
+
+Supported initialized WS281x channels use a bulk copy of native 32-bit pixel
+words. Other bindings retain the public per-pixel setters. The driver continues
+to handle color order, gamma and brightness, and one worker serializes render,
+DMA completion and shutdown blackout. Set `PLV_LED_BULK_UPLOAD=0` to compare
+against the setter path; the report records which path was selected.
+
+Pure `Fading` work targets an 8 ms period when no MIDI was processed. Incoming
+MIDI interrupts the wait, pending MIDI skips sleeping, and fade decay uses elapsed
+time. `PLV_FADE_INTERVAL_MS=0` restores the existing state-based wait for a
+comparison. Other effect modes retain their existing cadence. No new Pi speedup
+or optical latency result has been measured for these changes.
+
+LED diagnostics separate `led_pickup_delay`, `led_pixel_upload`, `led_render`
+and `led_dma_wait`, alongside the existing transmission totals. `led_render`
+measures the backend `show()` call, including any synchronous SPI work; it is
+not an electrical measurement of DMA startup or light. Do not infer a
+position-dependent optical correction from serial bit arrival: the strip also
+has frame-latching/reset behavior and its own PWM timing.
+
+The optional benchmark stall monitor records GC generation, start/end time and
+duration, plus canary wakeups more than 5 ms late on a nominal 1 ms interval.
+It retains at most 1,024 records of each kind and total occurrence counts.
+Records include cumulative main/canary thread `/proc/self/task/<tid>/schedstat`
+counters. Rising `run_delay_ns` supports runnable scheduling delay; blocked GIL
+time need not accrue run delay. A GC overlap is evidence to examine, not an
+automatic attribution.
+
+All monitor timestamps use `perf_counter`, as does the runtime timing field
+`max_recorded_at_perf`. That field dates the recording of a new maximum after
+the measured operation; it provides approximate correlation rather than a
+hardware timestamp. The clock is read only for new maxima. Aggregate historical
+maxima without timestamps cannot establish simultaneous stalls or their cause.
 
 Analyzing a network capture with `scripts/analyze_midi_latency.py` requires
 source and receiver timestamps and validation of message identity and order.

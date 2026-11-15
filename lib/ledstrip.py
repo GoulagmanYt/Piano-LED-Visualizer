@@ -1,8 +1,10 @@
+import os
+
 from lib.functions import *
 import lib.colormaps as cmap
 from lib.rpi_drivers import PixelStrip, ws
 from lib.LED_drivers import PixelStrip_Emu
-from lib.async_strip import AsyncPixelStrip, dma_waiter
+from lib.async_strip import AsyncPixelStrip, dma_waiter, pixel_uploader
 from lib.log_setup import logger
 
 class ActiveIndexList(list):
@@ -121,7 +123,8 @@ class LedStrip:
                 if "releaseGIL" in dir(self.strip):
                     self.strip.releaseGIL()
                 backend = self.strip
-                self.strip = AsyncPixelStrip(backend, wait_for_dma=dma_waiter(ws, backend))
+                upload = None if os.environ.get('PLV_LED_BULK_UPLOAD', '1') == '0' else pixel_uploader(ws, backend)
+                self.strip = AsyncPixelStrip(backend, wait_for_dma=dma_waiter(ws, backend), upload_pixels=upload)
                 self.strip.set_note_mask_provider(self._note_mask)
                 self.strip.set_output_enabled(self.ledsettings.mode != "Disabled")
                 self.change_gamma(self.led_gamma)

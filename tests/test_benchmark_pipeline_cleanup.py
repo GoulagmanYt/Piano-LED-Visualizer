@@ -1,6 +1,8 @@
 """Benchmark failures must release the hardware without requiring a real Pi."""
 
 import importlib.util
+import io
+import json
 import sys
 import threading
 from pathlib import Path
@@ -54,6 +56,7 @@ def configure_benchmark(module, monkeypatch, failure):
     )
     probe = SimpleNamespace(snapshot=lambda: (fail('snapshot') or {'lossless': True}))
     worker = Mock()
+    worker.is_alive.return_value = False
     worker.join.side_effect = lambda *args: events.append('worker.join')
     monkeypatch.setattr(module, 'VisualizerApp', lambda: app)
     monkeypatch.setattr(module, 'MidiPipelineProbe', lambda: probe)
@@ -66,6 +69,7 @@ def configure_benchmark(module, monkeypatch, failure):
     monkeypatch.setattr(module, 'Path', lambda path: SimpleNamespace(
         read_text=lambda: (fail('proc') or 'clients')))
     monkeypatch.delenv('PLV_BENCHMARK_PROFILE', raising=False)
+    monkeypatch.setenv('PLV_BENCHMARK_STALLS', '0')
     return app, output, worker, events
 
 
@@ -169,3 +173,90 @@ def test_profile_write_failure_still_closes_output_and_app(benchmark, monkeypatc
     output.close.assert_called_once()
     app.shutdown.assert_called_once()
     assert app.stop_event.is_set()
+
+
+@pytest.mark.parametrize('drop_last', [False, True])
+def test_external_source_schedule_and_actual_emission_hash_are_both_checked(
+        benchmark, monkeypatch, capsys, drop_last):
+    import mido
+
+    from lib.benchmark_workload import transmit
+    from lib.midi_pipeline_probe import MidiPipelineProbe
+
+    app, output, worker, _events = configure_benchmark(benchmark, monkeypatch, None)
+    monkeypatch.setenv('PLV_BENCHMARK_CHORDS', '1')
+    monkeypatch.setattr(benchmark, 'SOURCE_CPUS', [0, 1])
+    monkeypatch.setattr(benchmark, 'MidiPipelineProbe', MidiPipelineProbe)
+    app.stop_event.wait = Mock(return_value=False)
+    app.ci.ledstrip.strip.numPixels.return_value = 8
+    app.ci.ledstrip.keylist_sustained = [0]
+    processed = [0]
+    app.runtime_diagnostics.reset = lambda: processed.__setitem__(0, 0)
+    app.runtime_diagnostics.snapshot = lambda: {'counters': {'midi_events_processed_total': processed[0]}}
+    callback = [None]
+
+    def open_input(*args, **kwargs):
+        callback[0] = kwargs['callback']
+        return Mock()
+
+    def process(message):
+        processed[0] += 1
+        app.color_mode.MidiEvent(message, None, None)
+        app.ci.midiports.playport.send(message)
+        if message.type == 'note_off':
+            app.ci.ledstrip.keylist_sustained[0] = 1
+        if message.type == 'control_change' and message.value == 0:
+            app.ci.ledstrip.keylist_sustained[0] = 0
+
+    app.ci.midiports.msg_callback = process
+    output.send.side_effect = lambda message: callback[0](message)
+    monkeypatch.setattr(benchmark, 'open_midi_input', open_input)
+
+    class Source:
+        def __init__(self, *args, **kwargs):
+            self.stdin = io.StringIO()
+            self.stdout = io.StringIO('READY\n')
+            self.returncode = None
+            self.result = None
+
+        def communicate(self, input=None, timeout=None):
+            if self.result is None:
+                config = json.loads(self.stdin.getvalue())
+                assert config['cpu'] == 1
+                now = [float(input)]
+                index = [0]
+
+                def deliver(data):
+                    index[0] += 1
+                    if not (drop_last and index[0] == 26):
+                        callback[0](mido.Message.from_bytes(data))
+
+                result = transmit(benchmark.workload(**config['workload']), deliver, now[0],
+                                  clock=lambda: now[0], sleep=lambda seconds: now.__setitem__(0, now[0] + seconds))
+                self.result = json.dumps(result), ''
+                self.returncode = 0
+            return self.result
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(benchmark.subprocess, 'Popen', Source)
+    monkeypatch.setattr(benchmark.select, 'select', lambda readers, *args: (readers, [], []))
+
+    def make_worker(**kwargs):
+        worker.start.side_effect = kwargs['target']
+        return worker
+
+    monkeypatch.setattr(benchmark.threading, 'Thread', make_worker)
+    if drop_last:
+        with pytest.raises(SystemExit, match='1'):
+            benchmark.main()
+    else:
+        benchmark.main()
+    report_line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith('BENCHMARK_JSON='))
+    report = json.loads(report_line.split('=', 1)[1])
+    assert report['sent'] == 26
+    assert report['received'] == (25 if drop_last else 26)
+    assert bool(report['errors']) == drop_last
+    assert report['pipeline']['lossless'] is not drop_last
+    app.shutdown.assert_called_once()

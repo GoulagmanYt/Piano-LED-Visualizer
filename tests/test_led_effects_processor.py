@@ -2,6 +2,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -107,6 +109,21 @@ def test_process_fade_effects_reads_backlight_once_per_pass():
     assert processor.process_fade_effects(1.0) is True
 
     assert settings.backlight_calls == ["Red", "Green", "Blue"]
+
+
+def test_fade_duration_uses_elapsed_time_at_both_loop_cadences():
+    strengths = []
+    for interval in (.002, .008):
+        strip = FakeLedStrip([1000])
+        settings = FakeSettings(mode='Fading')
+        settings.fadingspeed = 200
+        processor = _processor(strip, settings)
+        for _ in range(round(.192 / interval)):
+            processor.process_fade_effects(interval)
+        strengths.append(strip.keylist[0])
+        processor.process_fade_effects(.008)
+        assert strip.keylist[0] == 0
+    assert strengths == pytest.approx([40, 40])
 
 
 def test_process_fade_effects_uses_dynamic_ledstrip_sustain_value():

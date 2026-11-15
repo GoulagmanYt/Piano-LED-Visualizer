@@ -67,3 +67,53 @@ def test_shutdown_reports_release_only_after_all_cleanups_succeed(shutdown_app):
     gpio.cleanup.assert_called_once()
     logger.info.assert_called_once_with('Shutdown complete: LEDs black, DMA and MIDI released')
     logger.warning.assert_not_called()
+
+
+@pytest.mark.parametrize('midi,fade,pending,expected_wait', [
+    (0, True, False, .008), (1, True, False, .002),
+    (0, False, False, .025), (0, True, True, None),
+])
+def test_run_paces_pure_fades_but_drains_midi_without_delay(
+        shutdown_app, monkeypatch, midi, fade, pending, expected_wait):
+    import gc
+
+    app, _, _ = shutdown_app
+    module = sys.modules['visualizer']
+    monkeypatch.setattr(gc, 'set_threshold', Mock())
+    monkeypatch.setattr(module.time, 'perf_counter', lambda: 10.0)
+    monkeypatch.delenv('PLV_FADE_INTERVAL_MS', raising=False)
+    app.runtime_diagnostics = Mock()
+    app._housekeeping_loop = Mock()
+    app.event_loop_stamp = app.last_frame_time = 10.0
+    app._led_frame_dirty = False
+    app.ci.platform = Mock()
+    app.ci.hotspot = Mock()
+    app.ci.ledsettings = SimpleNamespace(mode='Fading')
+    app.ci.learning.is_started_midi = False
+    app.ci.saving = SimpleNamespace(is_playing_midi=False)
+    app.ci.midiports = Mock()
+    activity = app.ci.midiports.queues.activity
+    activity.wait.side_effect = lambda timeout: app.stop_event.set()
+    app.state_manager = Mock()
+    app.state_manager.get_loop_delay.return_value = .002
+    app.midi_event_processor = Mock()
+    app.midi_event_processor.process_midi_events.return_value = midi
+
+    def has_pending():
+        if pending:
+            app.stop_event.set()
+        return pending
+
+    app.midi_event_processor.has_pending_events.side_effect = has_pending
+    app.led_effects_processor = Mock()
+    app.led_effects_processor.process_fade_effects.return_value = fade
+    app.ci.ledstrip.strip.check_health = Mock()
+    app.ci.ledstrip.strip.show = Mock()
+    app.check_activity_backlight = app.check_color_mode = app.update_fps_stats = Mock()
+    app.run()
+    app._housekeeping_thread.join(1)
+    if expected_wait is None:
+        activity.wait.assert_not_called()
+    else:
+        activity.wait.assert_called_once_with(pytest.approx(expected_wait))
+    assert app.ci.ledstrip.strip.show.call_count == int(bool(midi or fade))

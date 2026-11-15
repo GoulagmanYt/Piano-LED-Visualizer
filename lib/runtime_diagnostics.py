@@ -1,5 +1,6 @@
 import os
 import threading
+from time import perf_counter
 
 
 class RuntimeDiagnostics:
@@ -23,7 +24,8 @@ class RuntimeDiagnostics:
             with self._lock:
                 metric = self._timings.setdefault(name, {
                     'lock': threading.Lock(),
-                    'count': 0, 'total_ms': 0.0, 'max_ms': 0.0, 'last_ms': 0.0})
+                    'count': 0, 'total_ms': 0.0, 'max_ms': 0.0, 'last_ms': 0.0,
+                    'max_recorded_at_perf': None})
         # Independent metrics have independent writers. A global lock here
         # caused MIDI, DMA and render threads to form a per-event convoy.
         with metric['lock']:
@@ -32,6 +34,7 @@ class RuntimeDiagnostics:
             metric["last_ms"] = elapsed_ms
             if elapsed_ms > metric["max_ms"]:
                 metric["max_ms"] = elapsed_ms
+                metric['max_recorded_at_perf'] = perf_counter()
 
     def observe_queue(self, name, depth, oldest_age_ms=0.0):
         if not self.enabled:
@@ -103,6 +106,7 @@ class RuntimeDiagnostics:
                     'count': metric['count'],
                     'avg_ms': round(metric['total_ms'] / metric['count'], 4) if metric['count'] else 0.0,
                     'max_ms': round(metric['max_ms'], 4),
+                    'max_recorded_at_perf': metric['max_recorded_at_perf'],
                     'last_ms': round(metric['last_ms'], 4),
                     'total_ms': round(metric['total_ms'], 4),
                 }

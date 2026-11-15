@@ -67,3 +67,18 @@ def test_missing_processing_is_not_hidden_by_lossless_forwarding():
     probe.received(note, 1.001)
     probe.forwarded(note, 1.002)
     assert not probe.snapshot()['lossless']
+
+
+def test_cold_note_on_latency_is_separate_from_warm_release_and_reset():
+    probe = MidiPipelineProbe()
+    for kind, delay in [('note_on', .080), ('note_off', .002)]:
+        message = mido.Message(kind, note=60)
+        probe.sent_bytes(message.bytes(), 10)
+        probe.received(message, 10 + delay)
+        probe.processed(message)
+        probe.forwarded(message, 10 + delay + .001)
+    report = probe.snapshot()
+    assert report['source_to_receive_by_type']['note_on']['max_ms'] == 80
+    assert report['source_to_forward_by_type']['note_off']['max_ms'] == 3
+    probe.reset()
+    assert probe.snapshot()['source_to_forward_by_type'] == {}

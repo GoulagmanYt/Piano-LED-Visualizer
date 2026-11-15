@@ -4,9 +4,12 @@
 Reports software timing, not physical key-to-photon timing. No MIDI is forwarded
 to a piano. Settings are changed only in memory. Always clears LEDs on exit.
 """
+import hashlib
 import json
 import logging
 import os
+import select
+import subprocess
 import sys
 import threading
 import time
@@ -19,10 +22,15 @@ import psutil
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-sys.argv = [str(ROOT / 'visualizer.py'), '-s', '-w', 'false', '-a', 'app']
+SOURCE_CPUS = sorted(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else []
+WEB = os.environ.get('PLV_BENCHMARK_WEB', 'true')
+APPMODE = os.environ.get('PLV_BENCHMARK_APPMODE', 'platform')
+sys.argv = [str(ROOT / 'visualizer.py'), '-s', '-w', WEB, '-a', APPMODE]
+from lib.benchmark_workload import workload
 from lib.buffered_midi_input import open_midi_input
 from lib.midi_pipeline_probe import MidiPipelineProbe
 from lib.midiports import MidiPorts
+from lib.runtime_stalls import RuntimeStallMonitor
 from visualizer import VisualizerApp
 
 logger = logging.getLogger(__name__)
@@ -47,6 +55,8 @@ def stop_worker(app, worker):
     app.stop_event.set()
     app.ci.midiports.queues.activity.set()
     worker.join(3)
+    if worker.is_alive():
+        raise RuntimeError('Benchmark controller did not stop')
 
 
 def finish_profile(profile):
@@ -102,11 +112,32 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
     sent = 0
     samples = []
     errors = []
+    source_report = {}
+    scheduled = None
+    source_epoch = 0.0
+    received_hash = hashlib.sha256()
+    profile = os.environ.get('PLV_BENCHMARK_WORKLOAD', 'chords')
+    workload_config = {'profile': profile, 'chords': chord_count, 'interval': chord_interval,
+                           'rate': float(os.environ.get('PLV_BENCHMARK_RATE', '100')),
+                           'duration': float(os.environ.get('PLV_BENCHMARK_DURATION', '30')),
+                           'seed': int(os.environ.get('PLV_BENCHMARK_SEED', '1'))}
+    # Validate before starting any worker.
+    if next(workload(**workload_config), None) is None:
+        raise ValueError('Benchmark workload contains no events; increase duration')
 
     recv_by_type = {}
     recv_pedal_channels = []
     def receive(message):
         nonlocal received
+        if scheduled is not None:
+            # Reconstruct the independent source's intended timestamp lazily.
+            # Source count/hash below independently detect missing tail events.
+            expected = next(scheduled, None)
+            if expected is not None:
+                offset, data = expected
+                probe.sent_bytes(data, source_epoch + offset)
+            encoded = bytes(message.bytes())
+            received_hash.update(len(encoded).to_bytes(4, 'big') + encoded)
         probe.received(message)
         received += 1
         t = message.type
@@ -140,6 +171,8 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
             raise BenchmarkStopped
 
     def exercise():
+        nonlocal sent, received, scheduled, source_epoch, source_report
+        source = None
         try:
             wait(3)  # Startup animation settles before measurement.
             # Single RGB cycles at low brightness.
@@ -152,7 +185,6 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
             app.runtime_diagnostics.reset()
             app.ci.midiports.reset_runtime_diagnostics()
             process.cpu_percent()
-            measurement_started = time.monotonic()
             # Verify real sustain state, not just transmission of CC64.
             app.ci.ledsettings.mode = 'Pedal'
             send(mido.Message('control_change', control=64, value=127))
@@ -167,37 +199,56 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
             if any(app.ci.ledstrip.keylist_sustained):
                 raise AssertionError('Pedal release left sustained notes')
             app.ci.ledsettings.mode = 'Fading'
-            # Single notes include release fades and wakeup from an empty queue.
-            for note in range(48, 72):
-                send(mido.Message('note_on', note=note, velocity=90))
-                wait(0.02)
-                send(mido.Message('note_off', note=note))
-                wait(0.02)
-            # 12-note chords plus sustain: 1,300 events/sec for ~40 sec.
-            notes_on = [mido.Message('note_on', note=n, velocity=80) for n in range(48, 60)]
-            notes_off = [mido.Message('note_off', note=n) for n in range(48, 60)]
-            deadline = time.monotonic()
-            for chord in range(chord_count):
-                # Pedal and notes belong to the same channel.
-                ch = 0
-                p_on = mido.Message('control_change', channel=ch, control=64, value=127)
-                p_off = mido.Message('control_change', channel=ch, control=64, value=0)
-                send(p_on)
-                for message in notes_on:
-                    send(message)
-                for message in notes_off:
-                    send(message)
-                send(p_off)
-                now = time.monotonic()
-                if deadline < now:
-                    deadline = now + chord_interval
-                else:
-                    deadline += chord_interval
-                wait(max(0.0, deadline - time.monotonic()))
-                if chord % 100 == 0:
-                    samples.append({'chord': chord, 'elapsed_s': time.monotonic() - measurement_started,
-                                    'rss_bytes': process.memory_info().rss,
-                                    'cpu_percent': process.cpu_percent()})
+            wait(.3)
+            if not probe.drained:
+                raise RuntimeError('Warm-up MIDI did not drain')
+            # Exclude warm-up and sustain checks from measured workload counts.
+            probe.reset()
+            sent = received = 0
+            recv_by_type.clear()
+            recv_pedal_channels.clear()
+            app.runtime_diagnostics.reset()
+            app.ci.midiports.reset_runtime_diagnostics()
+            output.close()
+            runtime_cpus = set(os.sched_getaffinity(0))
+            other_cpus = [cpu for cpu in SOURCE_CPUS if cpu not in runtime_cpus]
+            if not other_cpus:
+                raise RuntimeError('No separate source CPU available; expand the launch CPU affinity')
+            source_cpu = int(os.environ.get('PLV_BENCHMARK_SOURCE_CPU', other_cpus[0]))
+            if source_cpu in runtime_cpus or source_cpu not in SOURCE_CPUS:
+                raise ValueError('Source CPU must be allowed and outside the renderer affinity')
+            source = subprocess.Popen([sys.executable, str(ROOT / 'scripts/benchmark_source.py')],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True)
+            source.stdin.write(json.dumps({'port': name, 'cpu': source_cpu, 'workload': workload_config}) + '\n')
+            source.stdin.flush()
+            ready_deadline = time.monotonic() + 10
+            while not select.select([source.stdout], [], [], .25)[0]:
+                if app.stop_event.is_set() or time.monotonic() >= ready_deadline:
+                    raise RuntimeError('Independent MIDI source failed to become ready')
+            if source.stdout.readline().strip() != 'READY':
+                raise RuntimeError('Independent MIDI source failed to become ready')
+            scheduled = iter(workload(**workload_config))
+            source_epoch = time.perf_counter() + .1
+            process.cpu_percent()
+            source_deadline = time.monotonic() + max(chord_count * chord_interval,
+                                                     workload_config['duration']) + 30
+            source_input = str(source_epoch) + '\n'
+            while True:
+                try:
+                    stdout, stderr = source.communicate(input=source_input, timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    source_input = None
+                    samples.append({'elapsed_s': time.perf_counter() - source_epoch,
+                                        'received': received, 'rss_bytes': process.memory_info().rss,
+                                        'cpu_percent': process.cpu_percent()})
+                    if app.stop_event.is_set() or time.monotonic() > source_deadline:
+                        raise RuntimeError('Independent source stopped or exceeded its deadline')
+            if source.returncode:
+                raise RuntimeError('Independent MIDI source failed: ' + stderr[-2000:])
+            source_report = json.loads(stdout)
+            sent = source_report['sent']
             wait(2)
             # A fixed sleep alone can hide a stranded final note or miss a
             # forward backlog. Keep rendering until all three stages drain.
@@ -206,27 +257,60 @@ def run_benchmark(app, probe, chord_count, chord_interval, cleanup):
                 if probe.drained:
                     break
                 wait(0.01)
+            if source_report['hash'] != received_hash.hexdigest() or sent != received:
+                raise AssertionError('Independent source and reception count/hash differ')
         except BenchmarkStopped:
-            pass
+            errors.append('Renderer stopped before benchmark workload completed')
         except Exception as error:
             logger.exception('Benchmark source failed')
             errors.append(repr(error))
         finally:
-            app.stop_event.set()
-            app.ci.midiports.queues.activity.set()
+            try:
+                if source is not None:
+                    if source.poll() is None:
+                        source.terminate()
+                    try:
+                        source.communicate(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        source.kill()
+                        source.communicate(timeout=1)
+            except Exception as error:
+                logger.exception('Benchmark source cleanup failed')
+                errors.append('Source cleanup: ' + repr(error))
+            finally:
+                app.stop_event.set()
+                app.ci.midiports.queues.activity.set()
 
-    worker = threading.Thread(target=exercise, name='benchmark-source', daemon=True)
+    worker = threading.Thread(target=exercise, name='benchmark-controller', daemon=True)
     worker.start()
     cleanup.callback(stop_worker, app, worker)
     if os.environ.get('PLV_BENCHMARK_PROFILE'):
         import cProfile
-        profile = cProfile.Profile()
-        profile.enable()
-        cleanup.callback(finish_profile, profile)
+        cpu_profile = cProfile.Profile()
+        cpu_profile.enable()
+        cleanup.callback(finish_profile, cpu_profile)
+    stalls = RuntimeStallMonitor().start() if os.environ.get('PLV_BENCHMARK_STALLS', '1') != '0' else None
+    if stalls is not None:
+        cleanup.callback(stalls.close)
     app.run()
     worker.join(3)
-    return {'sent': sent, 'received': received, 'recv_by_type': recv_by_type, 'recv_pedals': len(recv_pedal_channels), 'missing_pedals': chord_count + 1 - len(recv_pedal_channels), 'errors': errors, 'samples': samples,
-            'pipeline': probe.snapshot(),
+    if stalls is not None:
+        stalls.close()
+    pipeline = probe.snapshot()
+    if source_report:
+        pipeline['source_count_matches'] = sent == received
+        pipeline['source_hash_matches'] = source_report['hash'] == received_hash.hexdigest()
+        pipeline['lossless'] = (pipeline['lossless'] and pipeline['source_count_matches']
+                                and pipeline['source_hash_matches'])
+    return {'sent': sent, 'received': received, 'recv_by_type': recv_by_type, 'recv_pedals': len(recv_pedal_channels), 'missing_pedals': (chord_count if profile == 'chords' else 0) - len(recv_pedal_channels), 'errors': errors, 'samples': samples,
+            'source': source_report, 'workload': workload_config,
+            'latency_origin': 'absolute planned emission; includes source scheduling lateness',
+            'web_enabled': WEB != 'false', 'appmode': APPMODE,
+            'nice': os.getpriority(os.PRIO_PROCESS, 0) if hasattr(os, 'getpriority') else None,
+            'stalls': stalls.snapshot() if stalls is not None else None,
+            'led_bulk_upload': getattr(app.ci.ledstrip.strip, '_upload_pixels', None) is not None,
+            'fade_interval_ms': float(os.environ.get('PLV_FADE_INTERVAL_MS', '8')),
+            'pipeline': pipeline,
             'chord_interval_ms': chord_interval * 1000,
             'led_count': len(app.ci.ledstrip.keylist),
             'cpu_affinity': sorted(os.sched_getaffinity(0)),

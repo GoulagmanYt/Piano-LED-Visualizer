@@ -6,6 +6,7 @@ import fcntl
 import signal
 import threading
 import time
+import math
 
 from lib.argument_parser import ArgumentParser
 from lib.component_initializer import ComponentInitializer
@@ -270,7 +271,7 @@ class VisualizerApp:
 
     def run(self):
         import gc
-        # Prevent cyclic GC pauses during high-density MIDI bursts on Cortex-A53
+        # Retain the existing burst policy until GC callback measurements justify a change.
         gc.set_threshold(50000, 50, 50)
         gc_idle_cleaned = True
 
@@ -283,6 +284,9 @@ class VisualizerApp:
         ci.ledstrip.strip.diagnostics = self.runtime_diagnostics
         activity = ci.midiports.queues.activity
         min_dma_interval = getattr(self, "_min_dma_frame_interval", 0.0045)
+        fade_interval = float(os.environ.get('PLV_FADE_INTERVAL_MS', '8')) / 1000
+        if not math.isfinite(fade_interval) or fade_interval < 0:
+            raise ValueError('PLV_FADE_INTERVAL_MS must be finite and nonnegative')
 
         while not self.stop_event.is_set():
             # Consume wakeup before draining queues so arrivals during this slice re-arm the event.
@@ -337,7 +341,7 @@ class VisualizerApp:
                 live_active=not (ci.learning.is_started_midi or ci.saving.is_playing_midi),
             )
 
-            # 4. Strict Non-Blocking DMA Frame Pacing: never call strip.show() while DMA is busy
+            # 4. Pace producer submissions; the hardware worker serializes render/DMA.
             if fade_processed or midi_processed:
                 self._led_frame_dirty = True
                 gc_idle_cleaned = False
@@ -355,7 +359,7 @@ class VisualizerApp:
                     self._led_frame_dirty = False
                     self.update_fps_stats()
                 else:
-                    # Hardware DMA is still transmitting previous frame; yield GIL for remaining window
+                    # Yield until the next producer submission window, or MIDI activity.
                     dma_wait_remaining = min_dma_interval - elapsed_since_last_show
             else:
                 now_perf = time.perf_counter()
@@ -377,6 +381,10 @@ class VisualizerApp:
 
             if dma_wait_remaining > 0.0:
                 activity.wait(dma_wait_remaining)
+            elif fade_processed and not midi_processed and ledsettings.mode == 'Fading':
+                # Bound pure fade work to 125 Hz. MIDI arrival still wakes this
+                # wait immediately; effect decay uses actual elapsed time.
+                activity.wait(max(sleep_interval, fade_interval - (time.perf_counter() - loop_start)))
             elif fade_processed or midi_processed:
                 activity.wait(sleep_interval)
             else:

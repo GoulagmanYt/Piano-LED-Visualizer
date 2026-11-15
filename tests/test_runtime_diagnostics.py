@@ -9,6 +9,17 @@ sys.path.append("../")
 from lib.runtime_diagnostics import RuntimeDiagnostics
 
 
+def test_maximum_retains_its_recording_time_without_timing_every_sample(monkeypatch):
+    ticks = iter([10, 20])
+    monkeypatch.setattr('lib.runtime_diagnostics.perf_counter', lambda: next(ticks))
+    diagnostics = RuntimeDiagnostics()
+    diagnostics.record_duration('main_loop', .002)
+    diagnostics.record_duration('main_loop', .001)
+    assert diagnostics.snapshot()['timings']['main_loop']['max_recorded_at_perf'] == 10
+    diagnostics.record_duration('main_loop', .081)
+    assert diagnostics.snapshot()['timings']['main_loop']['max_recorded_at_perf'] == 20
+
+
 class TestRuntimeDiagnostics(unittest.TestCase):
     def test_record_duration_aggregates_count_average_and_max(self):
         diagnostics = RuntimeDiagnostics()

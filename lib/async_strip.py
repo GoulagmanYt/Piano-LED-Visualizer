@@ -1,7 +1,36 @@
 """One hardware owner and reusable latest-frame buffers for WS281x output."""
+import ctypes
 import threading
 import time
-import ctypes
+from array import array
+
+
+def pixel_uploader(ws, backend):
+    """Build a writer for an initialized rpi_ws281x uint32 LED buffer.
+
+    Call only under the hardware owner's lock, before render(), and discard
+    before backend cleanup. Unsupported bindings keep the public setter path.
+    Channel order, gamma and brightness remain the renderer's responsibility.
+    """
+    count = backend.numPixels()
+    if array('I').itemsize != ctypes.sizeof(ctypes.c_uint32):
+        return None
+    try:
+        address = int(ws.ws2811_channel_t_leds_get(backend._channel))
+        channel_count = ws.ws2811_channel_t_count_get(backend._channel)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not address or channel_count != count:
+        return None
+
+    def upload(colors):
+        if len(colors) != count:
+            raise ValueError('LED frame length differs from initialized channel')
+        pixels = array('I', colors)
+        source, length = pixels.buffer_info()
+        ctypes.memmove(address, source, length * pixels.itemsize)
+
+    return upload
 
 
 def dma_waiter(ws, backend):
@@ -26,10 +55,11 @@ def dma_waiter(ws, backend):
 
 
 class AsyncPixelStrip:
-    def __init__(self, backend, diagnostics=None, wait_for_dma=None):
+    def __init__(self, backend, diagnostics=None, wait_for_dma=None, upload_pixels=None):
         self.backend = backend
         self.diagnostics = diagnostics
         self._wait_for_dma = wait_for_dma
+        self._upload_pixels = upload_pixels
         self._count = backend.numPixels()
         self._pixels = [0] * self._count
         self._note_pixels = [0] * self._count
@@ -244,17 +274,29 @@ class AsyncPixelStrip:
                 started = time.perf_counter()
                 with self._hardware_lock:
                     backend = self.backend
-                    set_pixel = backend.setPixelColor
                     backend.setBrightness(brightness)
-                    for i, color in enumerate(transmit):
-                        set_pixel(i, color)
+                    upload_started = time.perf_counter()
+                    if self._upload_pixels is not None:
+                        self._upload_pixels(transmit)
+                    else:
+                        set_pixel = backend.setPixelColor
+                        for i, color in enumerate(transmit):
+                            set_pixel(i, color)
+                    render_started = time.perf_counter()
                     backend.show()
+                    render_returned = time.perf_counter()
                     if self._wait_for_dma is not None:
                         self._wait_for_dma()
+                    completed = time.perf_counter()
                 diagnostics = self.diagnostics
                 if diagnostics is not None:
-                    diagnostics.record_duration("led_transmit_complete", time.perf_counter() - started)
-                    diagnostics.record_duration("frame_queue_to_complete", time.perf_counter() - submitted)
+                    diagnostics.record_duration("led_pickup_delay", started - submitted)
+                    diagnostics.record_duration("led_pixel_upload", render_started - upload_started)
+                    diagnostics.record_duration("led_render", render_returned - render_started)
+                    if self._wait_for_dma is not None:
+                        diagnostics.record_duration("led_dma_wait", completed - render_returned)
+                    diagnostics.record_duration("led_transmit_complete", completed - started)
+                    diagnostics.record_duration("frame_queue_to_complete", completed - submitted)
                     diagnostics.increment_counter("hardware_frames")
                     completed_frames += 1
                     now = time.perf_counter()
