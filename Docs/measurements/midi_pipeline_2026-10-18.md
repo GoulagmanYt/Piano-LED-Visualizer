@@ -1,8 +1,14 @@
 # MIDI pipeline measurements — October 18, 2026
 
+These historical results predate `656ec43` and `bfbf93d`; they do not measure
+the current LED changes. The benchmark protocol below describes the version
+used for this acquisition, including its in-process source and 52,052 events.
+The revised independent-source harness is not directly comparable. See
+[version coverage and the current measurement protocol](README.md).
+
 ## Protocol
 
-`scripts/benchmark_pipeline.py` uses a virtual ALSA input, the production MIDI
+The version of `scripts/benchmark_pipeline.py` used a virtual ALSA input, the production MIDI
 processor and GPIO/DMA renderer, and an instrumented output that does not play
 the piano. The service is stopped for the test and then restarted. Test settings
 remain in memory. The results below exclude cProfile.

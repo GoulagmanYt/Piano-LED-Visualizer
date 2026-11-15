@@ -1,5 +1,10 @@
 # RTP delivery and QoS marking — October 18, 2026
 
+These are historical network delivery tests, not a validation of `656ec43` or
+`bfbf93d`. The configuration and restoration statements describe the tested
+installation on October 18; these tests have not been repeated for the current
+update. See [measurement version coverage](README.md).
+
 ## Controlled comparison
 
 The same service, MIDI ports, OSCMidi and 1 000 synthetic messages are used.

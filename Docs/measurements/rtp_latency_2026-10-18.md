@@ -1,5 +1,10 @@
 # Pi → OSCMidi latency and message interval errors — October 18, 2026
 
+This report and its chart describe October 18 captures, before `656ec43` and
+`bfbf93d`. They are not measurements of the current LED upload or fade changes.
+Configuration and restoration statements apply to that acquisition. See
+[measurement version coverage and chart provenance](README.md).
+
 ## Result
 
 Delay spikes remain reproducible on the Wi-Fi link. None of the additional
@@ -71,7 +76,11 @@ errors rather than just the mean.
 The [structured results and plotted series](rtp_latency_2026-10-18.json) also
 retain rejected tests. They contain no passwords.
 
-![Latency over time and by phase of the four-second cycle](../assets/rtp_latency_2026-10-18.png)
+![Historical October 18, 2026 estimated Wi-Fi latency over time and by phase of the four-second cycle](../assets/rtp_latency_2026-10-18.png)
+
+Chart source: `plot_series` entries `baseline-usb-return` and
+`raw-unique-traffic` in the JSON, with 1,880 observations each. This compares
+full-path traffic with a raw UDP control, not old and new application versions.
 
 The two plotted runs precede the channel tests. Several spikes concentrate
 around the same phase of the Pi clock modulo four seconds, including with raw

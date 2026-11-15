@@ -10,6 +10,12 @@ describe the emitted stream and cannot bound latency for independently arriving
 MIDI. The current benchmark uses a separate source process and planned emission
 times; use the same harness and configuration for new comparisons.
 
+The [November 15 Pi acquisition](measurements/pipeline_2026-11-15.md) covers
+`bfbf93d`, including the changes in `656ec43`, with five interleaved runs per
+bulk/fade setting, separate observer controls and isolated notes. The
+[measurement index](measurements/README.md) records version coverage and chart
+provenance. Earlier reports and the October Wi-Fi chart remain dated results.
+
 ## Which boundary is measured?
 
 | Measurement | Includes | Excludes |
@@ -22,6 +28,11 @@ times; use the same harness and configuration for new comparisons.
 
 ## MIDI pipeline and network results
 
+- [LED bulk upload and fade cadence — November 15, 2026](measurements/pipeline_2026-11-15.md):
+  controlled A/B measurements at `bfbf93d`, including CPU and stall evidence;
+  [JSON data](measurements/pipeline_2026-11-15.json),
+  [compressed stall records](measurements/pipeline_2026-11-15_stalls.json.gz) and
+  [chart](assets/pipeline_2026-11-15.png).
 - [MIDI pipeline and LED rendering — November 14, 2026](measurements/pipeline_2026-11-14.md):
   before/after comparison, a 390,052-event test, memory usage and DMA transmission
   on the Pi; [JSON data](measurements/pipeline_2026-11-14.json).
@@ -166,8 +177,9 @@ release. Read `source_to_receive_by_type.note_on` and
 statistics. Keep instrumentation, seed, priority, thermal conditions and other
 load constant across comparisons. Do not directly compare profiled and
 unprofiled runs. Compare with the canary disabled too, to quantify observer cost.
-The canary adds about 1,000 wakeups/s in the application process and shares its
-GIL and CPU affinity. Keep `PLV_BENCHMARK_STALLS` fixed within each comparison;
+The canary requests a 1 ms interval (up to about 1,000 wakeups/s) in the
+application process and shares its GIL and CPU affinity; stalls delay its actual
+cadence. Keep `PLV_BENCHMARK_STALLS` fixed within each comparison;
 repeat the comparison with `0` separately. For `isolated`, use
 `PLV_BENCHMARK_DURATION=300` for roughly 200 cold `note_on` samples; the default
 30 seconds supplies only about twenty.
@@ -217,8 +229,12 @@ against the setter path; the report records which path was selected.
 Pure `Fading` work targets an 8 ms period when no MIDI was processed. Incoming
 MIDI interrupts the wait, pending MIDI skips sleeping, and fade decay uses elapsed
 time. `PLV_FADE_INTERVAL_MS=0` restores the existing state-based wait for a
-comparison. Other effect modes retain their existing cadence. No new Pi speedup
-or optical latency result has been measured for these changes.
+comparison. Other effect modes retain their existing cadence. In the
+[November 15 chord tests](measurements/pipeline_2026-11-15.md), bulk upload at
+fade 0 lowers the median mean upload time from 0.908 to 0.253 ms/frame (3.6×),
+while process CPU changes from about 97.5% to 96.4% of one core. The expected
+large CPU and loop-count reductions are not demonstrated; no optical latency
+result has been measured.
 
 LED diagnostics separate `led_pickup_delay`, `led_pixel_upload`, `led_render`
 and `led_dma_wait`, alongside the existing transmission totals. `led_render`
