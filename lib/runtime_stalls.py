@@ -51,16 +51,24 @@ class RuntimeStallMonitor:
         self._thread.start()
         return self
 
+    def _sample_schedstat(self, now):
+        return {'observed': now, 'main_schedstat': schedstat(self._main_tid),
+                    'canary_schedstat': schedstat(threading.get_native_id())}
+
     def _run(self):
-        deadline = time.perf_counter() + self.interval
+        previous = self._sample_schedstat(time.perf_counter())
+        deadline = previous['observed'] + self.interval
         while not self._stop.wait(max(0, deadline - time.perf_counter())):
             now = time.perf_counter()
-            if now - deadline > self.threshold:
-                self._stall_count += 1
-                self._stalls.append({'expected': deadline, 'observed': now,
-                                         'lateness_ms': (now - deadline) * 1000,
-                                         'main_schedstat': schedstat(self._main_tid),
-                                         'canary_schedstat': schedstat(threading.get_native_id())})
+            stalled = now - deadline > self.threshold
+            if stalled or now - previous['observed'] >= .05:
+                current = self._sample_schedstat(now)
+                if stalled:
+                    self._stall_count += 1
+                    self._stalls.append({'expected': deadline, **current,
+                                             'lateness_ms': (now - deadline) * 1000,
+                                             'schedstat_previous': previous})
+                previous = current
             deadline = now + self.interval
 
     def close(self):

@@ -128,6 +128,10 @@ allowed CPU so the source can run outside the runtime's affinity; the benchmark
 fails explicitly when none is available. Both processes inherit the launch
 priority and report their actual affinity and nice values. `nice -n -10` matches
 the service's nice setting, but does not reproduce every systemd property.
+The default source CPU is the first spare allowed CPU, which can be CPU 0.
+Source scheduling jitter is included in the reported latency; IRQ activity on
+that CPU can therefore affect the result. Try `PLV_BENCHMARK_SOURCE_CPU=1` if
+CPU 1 is allowed and outside the runtime affinity, and keep it fixed across runs.
 
 The source follows absolute deadlines and retains overdue events. Reported
 latency starts at the intended emission time and includes source scheduling
@@ -162,6 +166,45 @@ release. Read `source_to_receive_by_type.note_on` and
 statistics. Keep instrumentation, seed, priority, thermal conditions and other
 load constant across comparisons. Do not directly compare profiled and
 unprofiled runs. Compare with the canary disabled too, to quantify observer cost.
+The canary adds about 1,000 wakeups/s in the application process and shares its
+GIL and CPU affinity. Keep `PLV_BENCHMARK_STALLS` fixed within each comparison;
+repeat the comparison with `0` separately. For `isolated`, use
+`PLV_BENCHMARK_DURATION=300` for roughly 200 cold `note_on` samples; the default
+30 seconds supplies only about twenty.
+
+### Comparing bulk upload and fade cadence
+
+Run all four configurations with the current harness. The historical November
+14 results cannot isolate these changes: the source process, web/LCD activity,
+priority, canary and measured event count differ. Keep workload, source CPU,
+seed, instrumentation and priority fixed. During the maintenance window above,
+replace the single benchmark invocation with this interleaved comparison:
+
+```bash
+mkdir -p runs
+for run in 1 2 3 4 5; do
+  for cfg in "0 0" "1 0" "0 8" "1 8"; do  # BULK FADE_MS
+    set -- $cfg
+    PLV_LED_BULK_UPLOAD=$1 PLV_FADE_INTERVAL_MS=$2 nice -n -10 "$runner" \
+      scripts/benchmark_pipeline.py > "runs/b${1}_f${2}_${run}.log" 2>&1
+    grep '^BENCHMARK_JSON=' "runs/b${1}_f${2}_${run}.log" \
+      > "runs/b${1}_f${2}_${run}.json"
+  done
+done
+```
+
+The `.json` files retain the `BENCHMARK_JSON=` prefix; remove it before JSON
+parsing. Full logs retain benchmark failures, and `set -e` in the maintenance
+shell stops on a failed run. Interleaving reduces thermal drift bias; also
+record temperature and throttling, and vary configuration order between sets.
+Use separate output directories for different workloads or monitor settings.
+
+Compare `source_to_forward` (p50, p95, p99 and maximum),
+`source_to_receive_by_type.note_on`, mean `led_pixel_upload`,
+`process_fade_effects` and `main_loop`, and CPU samples. Check `stalls.gc` and
+`stalls.stalls` around outliers. An upload time or CPU reduction is a hypothesis
+until measured on the Pi; x86 timings and estimates do not establish a
+production gain.
 
 ### Rendering and diagnostics
 
@@ -187,10 +230,17 @@ has frame-latching/reset behavior and its own PWM timing.
 The optional benchmark stall monitor records GC generation, start/end time and
 duration, plus canary wakeups more than 5 ms late on a nominal 1 ms interval.
 It retains at most 1,024 records of each kind and total occurrence counts.
-Records include cumulative main/canary thread `/proc/self/task/<tid>/schedstat`
-counters. Rising `run_delay_ns` supports runnable scheduling delay; blocked GIL
-time need not accrue run delay. A GC overlap is evidence to examine, not an
-automatic attribution.
+The canary samples cumulative main/canary thread
+`/proc/self/task/<tid>/schedstat` counters at startup, then every 50 ms (on its
+next wakeup), and at each stall. Each stall retains the current counters and
+`schedstat_previous`, including the previous sample's `observed` timestamp.
+Subtract the previous counters from the current ones to examine changes over
+that interval. The interval can include activity before the stall, and sampling
+itself can be delayed; it does not identify an exact preemption duration.
+An increase in `run_delay_ns` supports runnable scheduling delay; blocked GIL
+time need not accrue run delay. Missing counters remain `null`. A GC overlap
+is evidence to examine, not an automatic attribution. This monitor is attached
+only by the benchmark; production stalls are not collected by it.
 
 All monitor timestamps use `perf_counter`, as does the runtime timing field
 `max_recorded_at_perf`. That field dates the recording of a new maximum after
