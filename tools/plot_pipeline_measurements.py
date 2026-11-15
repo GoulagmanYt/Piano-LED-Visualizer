@@ -100,8 +100,9 @@ def plot(data, rows, output):
     matrix = [r for r in rows if r['group'] == 'matrix']
     groups = [[r for r in matrix if (r['bulk'], r['fade']) == config] for config in CONFIGS]
     fig, axes = plt.subplots(2, 3, figsize=(15, 9))
-    fig.suptitle(f"LED bulk upload and fade cadence — {data['measured_at_utc'][:10]}\n"
-                 f"{data['board']} · {data['revision'][:7]} · 5 runs/configuration · 52,000 events/run", fontsize=15)
+    record_revision = data.get('record_revision', data['revision'])[:7]
+    fig.suptitle(f"LED bulk upload and fade cadence — record {record_revision}\n"
+                 f"{data['board']} · measured {data['revision'][:7]} · 5 runs/configuration · 52,000 events/run", fontsize=15)
     metrics = [
         ('MIDI thru p99', lambda r: r['forward']['p99_ms'], 'Planned source → output (ms)'),
         ('MIDI thru maximum', lambda r: r['forward']['max_ms'], 'Planned source → output (ms)'),

@@ -1,4 +1,6 @@
-# MIDI pipeline and LED rendering — November 14, 2026
+# MIDI pipeline and LED rendering — record eccf25b
+
+Acquisition date: November 14, 2026. Record version: `eccf25b`.
 
 This is a historical acquisition, before `656ec43` and `bfbf93d`. It does not
 measure bulk LED upload, the 8 ms fade cadence or the revised stall monitor.
@@ -12,7 +14,7 @@ measurement protocol](README.md).
 Pi Zero 2 W Rev 1.0, Python 3.11.2, kernel `6.12.109+rpt-rpi-v7`, 195 LEDs.
 The baseline runtime is `9aa05ea`; the candidate is `5d2972f`.
 Both use the same instrumented benchmark and probe, identified by SHA-256 in
-the [JSON data](pipeline_2026-11-14.json).
+the [JSON data](pipeline_eccf25b.json).
 
 Virtual ALSA input, production pipeline, real GPIO/DMA, instrumented MIDI output
 without a piano. Each chord contains twelve notes and pedal events. Counts and

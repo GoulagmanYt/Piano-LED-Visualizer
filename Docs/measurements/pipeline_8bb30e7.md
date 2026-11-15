@@ -1,14 +1,18 @@
-# LED bulk upload and fade cadence — November 15, 2026
+# LED bulk upload and fade cadence — record 8bb30e7
 
 ## Acquisition and scope
+
+Record version: `8bb30e7`. This commit publishes the measurements and changes
+only documentation and the plotting tool; its runtime and benchmark sources
+are unchanged from the tested revision below.
 
 Measured on Pi Zero 2 W Rev 1.0 at runtime revision `bfbf93d28009b8fd30cd065f56744f8222129eea`,
 including `656ec43` and the scheduler-sampling correction `bfbf93d`.
 Acquisition: `2026-11-15T09:23:12.798700+00:00` to `2026-11-15T09:49:56.451607+00:00`.
 Kernel `6.12.109+rpt-rpi-v7`, Python 3.11.2, rpi-ws281x 5.0.0, 195 LEDs.
-The [JSON dataset](pipeline_2026-11-15.json) contains per-run benchmark timings,
+The [JSON dataset](pipeline_8bb30e7.json) contains per-run benchmark timings,
 counters, GC records and CPU samples, with instrumentation source hashes.
-The [compressed stall archive](pipeline_2026-11-15_stalls.json.gz) contains all
+The [compressed stall archive](pipeline_8bb30e7_stalls.json.gz) contains all
 retained canary records, indexed by run name, including scheduler samples.
 Port identities and ALSA client listings are omitted; full logs remain local.
 
@@ -98,7 +102,7 @@ applies to pure Fading passes; MIDI still wakes the loop immediately. These
 observations do not establish the effect under another event rate or effect mode.
 Upload speed alone does not imply a proportional MIDI or optical latency gain.
 
-![Measured Pi A/B comparison: per-run MIDI p99 and maxima, upload time, main-thread CPU, fade work and loop activity](../assets/pipeline_2026-11-15.png)
+![Record 8bb30e7: measured Pi A/B comparison of MIDI latency, upload time, main-thread CPU, fade work and loop activity](../assets/pipeline_8bb30e7.png)
 
 Dots are individual runs; bars are medians of those values, with no inferred
 confidence interval. [Generate the chart](../../tools/plot_pipeline_measurements.py)
@@ -107,7 +111,7 @@ published image used Python 3.13 and Matplotlib 3.11.2; Matplotlib is not a Pi
 runtime dependency:
 
 ```bash
-python tools/plot_pipeline_measurements.py Docs/measurements/pipeline_2026-11-15.json --output Docs/assets/pipeline_2026-11-15.png
+python tools/plot_pipeline_measurements.py Docs/measurements/pipeline_8bb30e7.json --output Docs/assets/pipeline_8bb30e7.png
 ```
 
 ## Observer control: GC/canary monitor disabled
@@ -174,7 +178,7 @@ Sampled temperatures before/after runs range from 42.9 to
 thermal trace. The production service is `active` after
 the campaign, and the saved configuration checksum is unchanged.
 
-The [November 14 acquisition](pipeline_2026-11-14.md) used another harness,
+The [earlier acquisition](pipeline_eccf25b.md) used another harness,
 in-process source and different activity/counts. It is preserved as historical
 evidence and is not the baseline for this comparison. The October Wi-Fi chart
 also remains a separately dated network experiment. See the

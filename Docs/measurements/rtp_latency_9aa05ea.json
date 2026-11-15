@@ -1,5 +1,6 @@
 {
   "date": "2026-10-18",
+  "record_revision": "9aa05eaf4f43707a750ac18914bedec5f7295a09",
   "absolute_latency_is_estimated": true,
   "interpretation": "Clock midpoint assumes approximate path symmetry; endpoint uncertainty is in each run. Fitted offset slope includes asymmetric network delay, not only clock drift. Failed exact delivery/order captures have no latency statistics.",
   "runs": {

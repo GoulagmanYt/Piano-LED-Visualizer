@@ -1,4 +1,6 @@
-# Pi → OSCMidi latency and message interval errors — October 18, 2026
+# Pi → OSCMidi latency and message interval errors — record 9aa05ea
+
+Acquisition date: October 18, 2026. Record version: `9aa05ea`.
 
 This report and its chart describe October 18 captures, before `656ec43` and
 `bfbf93d`. They are not measurements of the current LED upload or fade changes.
@@ -11,7 +13,7 @@ Delay spikes remain reproducible on the Wi-Fi link. None of the additional
 settings tested during this investigation provides a sufficiently reliable
 improvement to retain. The original PC, Pi firmware and router settings have
 been restored. The removal of QoS markings previously shown to be harmful
-remains in place: see the [RTP delivery measurements](rtp_delivery_2026-10-18.md).
+remains in place: see the [RTP delivery measurements](rtp_delivery_9aa05ea.md).
 
 In the final long run after restoration, **all 6 250 messages arrived in order**,
 but one note reaches **97.34 ms**. Another long run, before the channel tests,
@@ -73,10 +75,10 @@ The chords have a median arrival spread of 0.022 ms, a p99 of 7.61 ms and a
 maximum of 8.24 ms. These spikes justify examining the distribution and interval
 errors rather than just the mean.
 
-The [structured results and plotted series](rtp_latency_2026-10-18.json) also
+The [structured results and plotted series](rtp_latency_9aa05ea.json) also
 retain rejected tests. They contain no passwords.
 
-![Historical October 18, 2026 estimated Wi-Fi latency over time and by phase of the four-second cycle](../assets/rtp_latency_2026-10-18.png)
+![Historical record 9aa05ea: estimated Wi-Fi latency over time and by phase of the four-second cycle](../assets/rtp_latency_9aa05ea.png)
 
 Chart source: `plot_series` entries `baseline-usb-return` and
 `raw-unique-traffic` in the JSON, with 1,880 observations each. This compares

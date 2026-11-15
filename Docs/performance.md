@@ -10,7 +10,7 @@ describe the emitted stream and cannot bound latency for independently arriving
 MIDI. The current benchmark uses a separate source process and planned emission
 times; use the same harness and configuration for new comparisons.
 
-The [November 15 Pi acquisition](measurements/pipeline_2026-11-15.md) covers
+The [Pi acquisition in record 8bb30e7](measurements/pipeline_8bb30e7.md) covers
 `bfbf93d`, including the changes in `656ec43`, with five interleaved runs per
 bulk/fade setting, separate observer controls and isolated notes. The
 [measurement index](measurements/README.md) records version coverage and chart
@@ -28,22 +28,22 @@ provenance. Earlier reports and the October Wi-Fi chart remain dated results.
 
 ## MIDI pipeline and network results
 
-- [LED bulk upload and fade cadence — November 15, 2026](measurements/pipeline_2026-11-15.md):
+- [LED bulk upload and fade cadence — record 8bb30e7](measurements/pipeline_8bb30e7.md):
   controlled A/B measurements at `bfbf93d`, including CPU and stall evidence;
-  [JSON data](measurements/pipeline_2026-11-15.json),
-  [compressed stall records](measurements/pipeline_2026-11-15_stalls.json.gz) and
-  [chart](assets/pipeline_2026-11-15.png).
-- [MIDI pipeline and LED rendering — November 14, 2026](measurements/pipeline_2026-11-14.md):
+  [JSON data](measurements/pipeline_8bb30e7.json),
+  [compressed stall records](measurements/pipeline_8bb30e7_stalls.json.gz) and
+  [chart](assets/pipeline_8bb30e7.png).
+- [MIDI pipeline and LED rendering — record eccf25b](measurements/pipeline_eccf25b.md):
   before/after comparison, a 390,052-event test, memory usage and DMA transmission
-  on the Pi; [JSON data](measurements/pipeline_2026-11-14.json).
-- [MIDI pipeline — October 18, 2026](measurements/midi_pipeline_2026-10-18.md):
+  on the Pi; [JSON data](measurements/pipeline_eccf25b.json).
+- [MIDI pipeline — record 9aa05ea](measurements/midi_pipeline_9aa05ea.md):
   a 52,052-event protocol, latencies, message order and hashes.
-- [RTP delivery and QoS — October 18, 2026](measurements/rtp_delivery_2026-10-18.md):
+- [RTP delivery and QoS — record 9aa05ea](measurements/rtp_delivery_9aa05ea.md):
   controlled comparisons of network marking and long delivery tests.
-- [Wi-Fi latency and jitter — October 18, 2026](measurements/rtp_latency_2026-10-18.md):
+- [Wi-Fi latency and jitter — record 9aa05ea](measurements/rtp_latency_9aa05ea.md):
   medians, p95/p99, spikes and clock synchronization uncertainty. The
-  [JSON data](measurements/rtp_latency_2026-10-18.json) and
-  [chart](assets/rtp_latency_2026-10-18.png) are retained.
+  [JSON data](measurements/rtp_latency_9aa05ea.json) and
+  [chart](assets/rtp_latency_9aa05ea.png) are retained.
 
 In the October 18 local MIDI test, synthetic source → instrumented output
 averages 7.5080 ms with a p99 of 13.2153 ms at 20 ms per chord. The final long
@@ -96,7 +96,7 @@ control supports attributing the spike to the benchmark's GC; it does not
 validate disabling GC in production. After the three tests: 45.084 °C,
 `throttled=0x0`, load 0.35 / 0.31 / 0.26.
 
-The [JSON results](measurements/software_latency_2026-11-13.json) contain the
+The [JSON results](measurements/software_latency_9aa05ea.json) contain the
 three tests and the GC control. This benchmark opens neither GPIO outputs nor
 hardware MIDI ports and does not measure real WebSocket or RTP transport.
 
@@ -230,7 +230,7 @@ Pure `Fading` work targets an 8 ms period when no MIDI was processed. Incoming
 MIDI interrupts the wait, pending MIDI skips sleeping, and fade decay uses elapsed
 time. `PLV_FADE_INTERVAL_MS=0` restores the existing state-based wait for a
 comparison. Other effect modes retain their existing cadence. In the
-[November 15 chord tests](measurements/pipeline_2026-11-15.md), bulk upload at
+[chord tests in record 8bb30e7](measurements/pipeline_8bb30e7.md), bulk upload at
 fade 0 lowers the median mean upload time from 0.908 to 0.253 ms/frame (3.6×),
 while process CPU changes from about 97.5% to 96.4% of one core. The expected
 large CPU and loop-count reductions are not demonstrated; no optical latency
@@ -267,7 +267,7 @@ maxima without timestamps cannot establish simultaneous stalls or their cause.
 Analyzing a network capture with `scripts/analyze_midi_latency.py` requires
 source and receiver timestamps and validation of message identity and order.
 Published JSON files are summaries; they do not replace these raw captures.
-See the [network protocol](measurements/rtp_latency_2026-10-18.md#measurement).
+See the [network protocol](measurements/rtp_latency_9aa05ea.md#measurement).
 
 ## Preparing a physical measurement
 

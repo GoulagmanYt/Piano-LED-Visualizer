@@ -1,4 +1,6 @@
-# RTP delivery and QoS marking — October 18, 2026
+# RTP delivery and QoS marking — record 9aa05ea
+
+Acquisition date: October 18, 2026. Record version: `9aa05ea`.
 
 These are historical network delivery tests, not a validation of `656ec43` or
 `bfbf93d`. The configuration and restoration statements describe the tested
@@ -62,5 +64,5 @@ for the remaining rare losses.
 
 These tests establish neither an OSCMidi decoder defect nor lossless delivery
 under all circumstances. They exclude the electrical USB path and physical
-key → sound latency. The [long Wi-Fi measurements](rtp_latency_2026-10-18.md)
+key → sound latency. The [long Wi-Fi measurements](rtp_latency_9aa05ea.md)
 also show delay spikes despite a fully received sequence.

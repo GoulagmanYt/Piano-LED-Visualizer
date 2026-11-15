@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "record_revision": "eccf25bb5fab1ec7c7cb0e6206c1bd0a878a2158",
   "measured_at_utc": "2026-11-14T18:47:19.434772+00:00",
   "board": "Raspberry Pi Zero 2 W Rev 1.0",
   "kernel": "6.12.109+rpt-rpi-v7",

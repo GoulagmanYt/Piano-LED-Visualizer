@@ -1,5 +1,6 @@
 {
   "schema_version": 2,
+  "record_revision": "8bb30e7475ff0a8107b771df6a06bb065313fbd5",
   "measured_at_utc": "2026-11-15T09:23:12.798700+00:00",
   "revision": "bfbf93d28009b8fd30cd065f56744f8222129eea",
   "board": "Raspberry Pi Zero 2 W Rev 1.0",
@@ -255,7 +256,7 @@
     ],
     "raw_logs": "retained locally; not published because they contain device/port identities",
     "data": "all per-run timing summaries, CPU samples, counts, hashes and retained GC records",
-    "stall_records_archive": "pipeline_2026-11-15_stalls.json.gz; all retained canary records by run name"
+    "stall_records_archive": "pipeline_8bb30e7_stalls.json.gz; all retained canary records by run name"
   },
   "runs": [
     {
@@ -857,7 +858,7 @@
             "timeslices": 72286
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 0.0,
@@ -1737,7 +1738,7 @@
             "timeslices": 85125
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 0.0,
@@ -2624,7 +2625,7 @@
             "timeslices": 72190
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 8.0,
@@ -3504,7 +3505,7 @@
             "timeslices": 87716
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 8.0,
@@ -4384,7 +4385,7 @@
             "timeslices": 85987
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 0.0,
@@ -5264,7 +5265,7 @@
             "timeslices": 71945
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 8.0,
@@ -6144,7 +6145,7 @@
             "timeslices": 87436
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 8.0,
@@ -7024,7 +7025,7 @@
             "timeslices": 71435
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 0.0,
@@ -7904,7 +7905,7 @@
             "timeslices": 70562
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 8.0,
@@ -8791,7 +8792,7 @@
             "timeslices": 84087
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 8.0,
@@ -9678,7 +9679,7 @@
             "timeslices": 73883
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 0.0,
@@ -10558,7 +10559,7 @@
             "timeslices": 87781
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 0.0,
@@ -11445,7 +11446,7 @@
             "timeslices": 86578
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 8.0,
@@ -12325,7 +12326,7 @@
             "timeslices": 71962
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 0.0,
@@ -13205,7 +13206,7 @@
             "timeslices": 87830
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 0.0,
@@ -14092,7 +14093,7 @@
             "timeslices": 72621
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 8.0,
@@ -14984,7 +14985,7 @@
             "timeslices": 72598
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 0.0,
@@ -15869,7 +15870,7 @@
             "timeslices": 89415
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 0.0,
@@ -16749,7 +16750,7 @@
             "timeslices": 72521
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": false,
         "fade_interval_ms": 8.0,
@@ -17634,7 +17635,7 @@
             "timeslices": 87124
           },
           "retained_stall_records": 1024,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 8.0,
@@ -26124,7 +26125,7 @@
             "timeslices": 67432
           },
           "retained_stall_records": 188,
-          "records_file": "pipeline_2026-11-15_stalls.json.gz"
+          "records_file": "pipeline_8bb30e7_stalls.json.gz"
         },
         "led_bulk_upload": true,
         "fade_interval_ms": 8.0,

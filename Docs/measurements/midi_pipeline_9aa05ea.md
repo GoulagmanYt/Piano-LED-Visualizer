@@ -1,4 +1,6 @@
-# MIDI pipeline measurements — October 18, 2026
+# MIDI pipeline measurements — record 9aa05ea
+
+Acquisition date: October 18, 2026. Record version: `9aa05ea`.
 
 These historical results predate `656ec43` and `bfbf93d`; they do not measure
 the current LED changes. The benchmark protocol below describes the version
@@ -53,7 +55,7 @@ calls, drops from 124.29 to 18.98 µs per call with a slice copy.
 ## Network delivery checks
 
 These tests precede the removal of the QoS markings described in the
-[RTP delivery measurements](rtp_delivery_2026-10-18.md).
+[RTP delivery measurements](rtp_delivery_9aa05ea.md).
 
 | Test | Observation |
 | --- | --- |
