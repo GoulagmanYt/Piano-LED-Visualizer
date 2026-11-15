@@ -25,8 +25,10 @@ above does not remove external nftables QoS rules; inspect existing rules
 separately. See the [controlled RTP delivery measurements](measurements/rtp_delivery_9aa05ea.md)
 for measurements and the configuration corrected on the tested Pi.
 
-The [Wi-Fi latency measurements](measurements/rtp_latency_9aa05ea.md)
-measures exceptional late notes separately from delivery. Its Pi-to-router
+The [current network captures](measurements/rtp_latency_d119af1.md) record full
+RTP delivery failures and a validated direct-UDP delay spike. The
+[historical Wi-Fi measurements](measurements/rtp_latency_9aa05ea.md)
+measure exceptional late notes separately from delivery. Their Pi-to-router
 controls reproduce stalls even with the visualizer stopped. None of the tested
 additional PC, firmware or router settings demonstrated a reliable improvement;
 they were restored. Do not treat a successful delivery test as proof of bounded
@@ -34,7 +36,7 @@ Wi-Fi latency.
 
 ## Expected RTP-MIDI setup with oscMIDI
 
-- `oscMIDI` session name should stay fixed, for example `OSCMidiRobin64!`
+- `oscMIDI` session name should stay fixed, for example `OSCMidiSession`
 - `oscMIDI` should keep RTP control/data on `5004/5005`
 - PLV `play_port` should resolve to the real session port, never `rtpmidid:Network Export` or `rtpmidid:Announcements`
 

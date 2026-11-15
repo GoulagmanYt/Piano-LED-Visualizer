@@ -1,0 +1,532 @@
+{
+  "schema_version": 1,
+  "kind": "rtp_end_to_end_capture",
+  "record_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+  "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+  "measured_at_utc": "2026-11-15T10:17:52.093169+00:00",
+  "finished_at_utc": "2026-11-15T10:25:25.528535+00:00",
+  "capture_archive": "rtp_latency_d119af1_captures.json.gz",
+  "method": {
+    "boundary": "Pi immediately before virtual ALSA send to PC local OSC receive; direct UDP control bypasses MIDI and OSCMidi",
+    "workload": "2500 absolute-deadline groups at 20 ms; one note per group, six-note chord every 20 groups, release after 5 ms; seed 1947",
+    "order": "production-1, raw-1, production-2, raw-2, production-3, raw-3",
+    "source_cpu": 3,
+    "source_nice": 0,
+    "runtime_cpu": 2,
+    "runtime_nice": -10,
+    "receiver": "existing OSCMidi, unchanged settings; local Python UDP recorder",
+    "clocks": "35 UDP exchange attempts before/after each run, narrowest RTT bound at each anchor, linear offset midpoint interpolation",
+    "validity": "exact packet identity/order/hash and complete production counters; no deduplication or realignment",
+    "observer": "no GC/canary monitor or cProfile; receive thread timestamps after recvfrom on PC",
+    "source_scheduling": "latency starts at actual send call, not planned group deadline"
+  },
+  "hardware": {
+    "source": "Raspberry Pi Zero 2 W Rev 1.0",
+    "source_python": "3.11.2",
+    "source_kernel": "6.12.109+rpt-rpi-v7",
+    "receiver_os": "Windows",
+    "receiver_os_version": "10.0.28000",
+    "receiver_python": "3.13.17"
+  },
+  "instrumentation_sha256": {
+    "temporary_source": "597f9cbbc39e7472725436de23e7a6211d8b85d2f12a3a5b87712c8f9b7e6529",
+    "temporary_controller": "ffacd9bf045fd3154874dc6a4936b1c0fae22f3259717a21d557522545ac6071",
+    "lib/midi_latency_analysis.py": "499ab1f901fb51175f97598e5432feff443dfa0c64c2b86f3c1e48ab78946ed7"
+  },
+  "health_after": {
+    "visualizer_service": "active",
+    "rtpmidid_service": "active",
+    "network_peer_ready": true,
+    "queues_drained": true,
+    "production_config_unchanged": true,
+    "temperature_c": 45.1,
+    "throttled": "0x0",
+    "cleanup": "three note-off sweeps after capture, excluded from results"
+  },
+  "publication": {
+    "omitted": "credentials, hosts/IP/MAC, port identities, config hashes and private API snapshots",
+    "archive": "synthetic message vectors, timestamps and clock exchanges; all six runs retained"
+  },
+  "runs": [
+    {
+      "label": "production-1",
+      "config": {
+        "route": "production",
+        "groups": 2500,
+        "period_ms": 20,
+        "chord_every": 20,
+        "chord_size": 6
+      },
+      "sent": 6250,
+      "received": 5917,
+      "exact_ordered_match": false,
+      "counts": {
+        "midi_callback_calls": 6250,
+        "midi_events_processed_total": 6250,
+        "rtp_send_calls": 6250
+      },
+      "before_clock": {
+        "pc_ns": 5608123097550.0,
+        "offset_ns": 659279932221549.0,
+        "uncertainty_ns": 2639948.0,
+        "samples": 35,
+        "network_rtt_ms": 5.279896
+      },
+      "after_clock": {
+        "pc_ns": 5660103025150.0,
+        "offset_ns": 659279932226165.5,
+        "uncertainty_ns": 2726965.5,
+        "samples": 35,
+        "network_rtt_ms": 5.453931
+      },
+      "source_hash": "6151224732488efaf3dc50c87c7b4a8f3c38a4f85c2485b6d475095403e0bad9",
+      "receive_hash": "823d007319e8255577c578647b253bab352094e1095f9d51a4caa8a4c7ae7b62",
+      "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+      "source_affinity": [
+        3
+      ],
+      "source_nice": 0,
+      "runtime_affinity": [
+        2
+      ],
+      "runtime_nice": -10,
+      "queue_depths": {
+        "live_input": 0,
+        "learning_input": 0,
+        "midi_file": 0,
+        "websocket_input": 0,
+        "live_forward": 0,
+        "scheduled_forward": 0,
+        "websocket_publish": 0
+      },
+      "latency_valid": false,
+      "clock_uncertainty_ms": 2.7269655,
+      "received_minus_expected": -333,
+      "live_send_errors_delta": 0
+    },
+    {
+      "label": "raw-1",
+      "config": {
+        "route": "raw",
+        "groups": 2500,
+        "period_ms": 20,
+        "chord_every": 20,
+        "chord_size": 6
+      },
+      "sent": 6250,
+      "received": 6251,
+      "exact_ordered_match": false,
+      "counts": {
+        "midi_callback_calls": 0,
+        "midi_events_processed_total": 0,
+        "rtp_send_calls": 0
+      },
+      "before_clock": {
+        "pc_ns": 5791490359750.0,
+        "offset_ns": 659279932868847.5,
+        "uncertainty_ns": 2247313.5,
+        "samples": 35,
+        "network_rtt_ms": 4.494627
+      },
+      "after_clock": {
+        "pc_ns": 5842866002050.0,
+        "offset_ns": 659279931683163.0,
+        "uncertainty_ns": 2707520.0,
+        "samples": 35,
+        "network_rtt_ms": 5.41504
+      },
+      "source_hash": "5da1bb499b8691b5a6adcb58d2ccbc5c5383bba689ab2f890286727b3130c71a",
+      "receive_hash": "7069a06d6d2bedac758c8b2cf7595aeceae0b014e6e9f85a612389e8d8cdeca8",
+      "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+      "source_affinity": [
+        3
+      ],
+      "source_nice": 0,
+      "runtime_affinity": [
+        2
+      ],
+      "runtime_nice": -10,
+      "queue_depths": {
+        "live_input": 0,
+        "learning_input": 0,
+        "midi_file": 0,
+        "websocket_input": 0,
+        "live_forward": 0,
+        "scheduled_forward": 0,
+        "websocket_publish": 0
+      },
+      "latency_valid": false,
+      "clock_uncertainty_ms": 2.70752,
+      "received_minus_expected": 1,
+      "live_send_errors_delta": 0,
+      "udp_identity": {
+        "unique_expected_ids_received": 6250,
+        "missing_ids": 0,
+        "duplicate_packets": 1
+      }
+    },
+    {
+      "label": "production-2",
+      "config": {
+        "route": "production",
+        "groups": 2500,
+        "period_ms": 20,
+        "chord_every": 20,
+        "chord_size": 6
+      },
+      "sent": 6250,
+      "received": 5997,
+      "exact_ordered_match": false,
+      "counts": {
+        "midi_callback_calls": 6250,
+        "midi_events_processed_total": 6250,
+        "rtp_send_calls": 6250
+      },
+      "before_clock": {
+        "pc_ns": 5845393059150.0,
+        "offset_ns": 659279931590886.5,
+        "uncertainty_ns": 2648335.5,
+        "samples": 35,
+        "network_rtt_ms": 5.296671
+      },
+      "after_clock": {
+        "pc_ns": 5897153371600.0,
+        "offset_ns": 659279931455689.0,
+        "uncertainty_ns": 2703617.0,
+        "samples": 35,
+        "network_rtt_ms": 5.407234
+      },
+      "source_hash": "6151224732488efaf3dc50c87c7b4a8f3c38a4f85c2485b6d475095403e0bad9",
+      "receive_hash": "7106d51e300c1e9c0ef51502a51b4b848dc956ac87d494516241a272a6abaf30",
+      "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+      "source_affinity": [
+        3
+      ],
+      "source_nice": 0,
+      "runtime_affinity": [
+        2
+      ],
+      "runtime_nice": -10,
+      "queue_depths": {
+        "live_input": 0,
+        "learning_input": 0,
+        "midi_file": 0,
+        "websocket_input": 0,
+        "live_forward": 0,
+        "scheduled_forward": 0,
+        "websocket_publish": 0
+      },
+      "latency_valid": false,
+      "clock_uncertainty_ms": 2.703617,
+      "received_minus_expected": -253,
+      "live_send_errors_delta": 0
+    },
+    {
+      "label": "raw-2",
+      "config": {
+        "route": "raw",
+        "groups": 2500,
+        "period_ms": 20,
+        "chord_every": 20,
+        "chord_size": 6
+      },
+      "sent": 6250,
+      "received": 6252,
+      "exact_ordered_match": false,
+      "counts": {
+        "midi_callback_calls": 0,
+        "midi_events_processed_total": 0,
+        "rtp_send_calls": 0
+      },
+      "before_clock": {
+        "pc_ns": 5899442591900.0,
+        "offset_ns": 659279931236817.5,
+        "uncertainty_ns": 2654867.5,
+        "samples": 35,
+        "network_rtt_ms": 5.309735
+      },
+      "after_clock": {
+        "pc_ns": 5950827535250.0,
+        "offset_ns": 659279931311028.5,
+        "uncertainty_ns": 2778029.5,
+        "samples": 35,
+        "network_rtt_ms": 5.556059
+      },
+      "source_hash": "5da1bb499b8691b5a6adcb58d2ccbc5c5383bba689ab2f890286727b3130c71a",
+      "receive_hash": "b3591a6350206d58c72c6aa2f09b7abd3539908f99d8d7ccf0906a90e1431312",
+      "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+      "source_affinity": [
+        3
+      ],
+      "source_nice": 0,
+      "runtime_affinity": [
+        2
+      ],
+      "runtime_nice": -10,
+      "queue_depths": {
+        "live_input": 0,
+        "learning_input": 0,
+        "midi_file": 0,
+        "websocket_input": 0,
+        "live_forward": 0,
+        "scheduled_forward": 0,
+        "websocket_publish": 0
+      },
+      "latency_valid": false,
+      "clock_uncertainty_ms": 2.7780295,
+      "received_minus_expected": 2,
+      "live_send_errors_delta": 0,
+      "udp_identity": {
+        "unique_expected_ids_received": 6250,
+        "missing_ids": 0,
+        "duplicate_packets": 2
+      }
+    },
+    {
+      "label": "production-3",
+      "config": {
+        "route": "production",
+        "groups": 2500,
+        "period_ms": 20,
+        "chord_every": 20,
+        "chord_size": 6
+      },
+      "sent": 6250,
+      "received": 6056,
+      "exact_ordered_match": false,
+      "counts": {
+        "midi_callback_calls": 6250,
+        "midi_events_processed_total": 6250,
+        "rtp_send_calls": 6250
+      },
+      "before_clock": {
+        "pc_ns": 5953164316150.0,
+        "offset_ns": 659279931955124.5,
+        "uncertainty_ns": 2024339.5,
+        "samples": 35,
+        "network_rtt_ms": 4.048679
+      },
+      "after_clock": {
+        "pc_ns": 6005120546050.0,
+        "offset_ns": 659279931139106.0,
+        "uncertainty_ns": 2763779.0,
+        "samples": 35,
+        "network_rtt_ms": 5.527558
+      },
+      "source_hash": "6151224732488efaf3dc50c87c7b4a8f3c38a4f85c2485b6d475095403e0bad9",
+      "receive_hash": "84fb79545bf759f214de3c4aeb58be16ab425bd1aef8dd54dda978eac658c881",
+      "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+      "source_affinity": [
+        3
+      ],
+      "source_nice": 0,
+      "runtime_affinity": [
+        2
+      ],
+      "runtime_nice": -10,
+      "queue_depths": {
+        "live_input": 0,
+        "learning_input": 0,
+        "midi_file": 0,
+        "websocket_input": 0,
+        "live_forward": 0,
+        "scheduled_forward": 0,
+        "websocket_publish": 0
+      },
+      "latency_valid": false,
+      "clock_uncertainty_ms": 2.763779,
+      "received_minus_expected": -194,
+      "live_send_errors_delta": 0
+    },
+    {
+      "label": "raw-3",
+      "config": {
+        "route": "raw",
+        "groups": 2500,
+        "period_ms": 20,
+        "chord_every": 20,
+        "chord_size": 6
+      },
+      "sent": 6250,
+      "received": 6250,
+      "exact_ordered_match": true,
+      "counts": {
+        "midi_callback_calls": 0,
+        "midi_events_processed_total": 0,
+        "rtp_send_calls": 0
+      },
+      "before_clock": {
+        "pc_ns": 6007196052650.0,
+        "offset_ns": 659279930983456.5,
+        "uncertainty_ns": 2667030.5,
+        "samples": 35,
+        "network_rtt_ms": 5.334061
+      },
+      "after_clock": {
+        "pc_ns": 6059267367300.0,
+        "offset_ns": 659279930870731.5,
+        "uncertainty_ns": 2766390.5,
+        "samples": 35,
+        "network_rtt_ms": 5.532781
+      },
+      "source_hash": "5da1bb499b8691b5a6adcb58d2ccbc5c5383bba689ab2f890286727b3130c71a",
+      "receive_hash": "5da1bb499b8691b5a6adcb58d2ccbc5c5383bba689ab2f890286727b3130c71a",
+      "runtime_revision": "d119af1d30cffad1e8dfdd4ac590a31e938448d7",
+      "source_affinity": [
+        3
+      ],
+      "source_nice": 0,
+      "runtime_affinity": [
+        2
+      ],
+      "runtime_nice": -10,
+      "queue_depths": {
+        "live_input": 0,
+        "learning_input": 0,
+        "midi_file": 0,
+        "websocket_input": 0,
+        "live_forward": 0,
+        "scheduled_forward": 0,
+        "websocket_publish": 0
+      },
+      "latency_ms": {
+        "count": 6250,
+        "min": 0.166335,
+        "median": 2.928342,
+        "mean": 3.352803,
+        "p95": 5.349475,
+        "p99": 9.611607,
+        "max": 55.802551
+      },
+      "clock_uncertainty_ms": 2.7663905,
+      "fitted_clock_offset_slope_ppm": -2.164819550988617,
+      "interval_error_ms": {
+        "count": 6249,
+        "min": -14.744784,
+        "median": -0.101833,
+        "mean": -0.000128,
+        "p95": 1.876011,
+        "p99": 3.962956,
+        "max": 52.817957
+      },
+      "absolute_interval_error_ms": {
+        "count": 6249,
+        "min": 0.000184,
+        "median": 0.169193,
+        "mean": 0.737955,
+        "p95": 2.941088,
+        "p99": 5.752968,
+        "max": 52.817957
+      },
+      "note_group_interval_error_ms": {
+        "count": 2499,
+        "min": -20.030483,
+        "median": -0.025952,
+        "mean": -0.000314,
+        "p95": 2.104432,
+        "p99": 5.327162,
+        "max": 42.689428
+      },
+      "chord_arrival_spread_ms": {
+        "count": 125,
+        "min": 0.0151,
+        "median": 0.0165,
+        "mean": 0.273132,
+        "p95": 2.77634,
+        "p99": 3.606196,
+        "max": 4.3643
+      },
+      "chord_added_spread_ms": {
+        "count": 125,
+        "min": -0.886975,
+        "median": -0.661771,
+        "mean": -0.421296,
+        "p95": 2.059516,
+        "p99": 2.93664,
+        "max": 3.698356
+      },
+      "late_above_median": {
+        "5": 88,
+        "10": 46,
+        "20": 29,
+        "50": 1
+      },
+      "absolute_above_ms": {
+        "10": 60,
+        "20": 32,
+        "50": 1,
+        "100": 0
+      },
+      "worst_events": [
+        {
+          "index": 3731,
+          "group": 1490,
+          "latency_ms": 55.8026
+        },
+        {
+          "index": 6230,
+          "group": 2490,
+          "latency_ms": 46.1335
+        },
+        {
+          "index": 230,
+          "group": 90,
+          "latency_ms": 44.7323
+        },
+        {
+          "index": 5230,
+          "group": 2090,
+          "latency_ms": 44.0692
+        },
+        {
+          "index": 6231,
+          "group": 2490,
+          "latency_ms": 43.3856
+        },
+        {
+          "index": 4730,
+          "group": 1890,
+          "latency_ms": 43.0738
+        },
+        {
+          "index": 4230,
+          "group": 1690,
+          "latency_ms": 42.4481
+        },
+        {
+          "index": 3231,
+          "group": 1290,
+          "latency_ms": 41.9449
+        },
+        {
+          "index": 3732,
+          "group": 1491,
+          "latency_ms": 41.1171
+        },
+        {
+          "index": 3979,
+          "group": 1589,
+          "latency_ms": 39.8799
+        },
+        {
+          "index": 231,
+          "group": 90,
+          "latency_ms": 39.4499
+        },
+        {
+          "index": 5231,
+          "group": 2090,
+          "latency_ms": 38.789
+        }
+      ],
+      "latency_valid": true,
+      "received_minus_expected": 0,
+      "live_send_errors_delta": 0,
+      "udp_identity": {
+        "unique_expected_ids_received": 6250,
+        "missing_ids": 0,
+        "duplicate_packets": 0
+      }
+    }
+  ]
+}

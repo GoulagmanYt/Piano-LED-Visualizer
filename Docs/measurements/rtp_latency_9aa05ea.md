@@ -2,6 +2,10 @@
 
 Acquisition date: October 18, 2026. Record version: `9aa05ea`.
 
+For fresh measurements, see [record d119af1](rtp_latency_d119af1.md) and its
+[current network chart](../assets/rtp_latency_d119af1.png). The image in this
+historical report still represents the October acquisition.
+
 This report and its chart describe October 18 captures, before `656ec43` and
 `bfbf93d`. They are not measurements of the current LED upload or fade changes.
 Configuration and restoration statements apply to that acquisition. See

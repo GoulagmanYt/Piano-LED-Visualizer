@@ -16,6 +16,12 @@ bulk/fade setting, separate observer controls and isolated notes. The
 [measurement index](measurements/README.md) records version coverage and chart
 provenance. Earlier reports and the October Wi-Fi chart remain dated results.
 
+The [current network acquisition at d119af1](measurements/rtp_latency_d119af1.md)
+adds three pairs of production RTP/OSCMidi and direct UDP captures. All three
+RTP captures fail delivery validation; the one exact UDP capture reaches
+55.803 ms with ±2.766 ms clock-anchor uncertainty. These are actual-emission
+network timings, distinct from the planned-emission MIDI benchmark above.
+
 ## Which boundary is measured?
 
 | Measurement | Includes | Excludes |
@@ -28,6 +34,11 @@ provenance. Earlier reports and the October Wi-Fi chart remain dated results.
 
 ## MIDI pipeline and network results
 
+- [Pi → RTP → OSCMidi and direct UDP — record d119af1](measurements/rtp_latency_d119af1.md):
+  fresh delivery checks, rejected duplicate/incomplete sequences and a validated
+  UDP timing series; [JSON](measurements/rtp_latency_d119af1.json),
+  [capture archive](measurements/rtp_latency_d119af1_captures.json.gz) and
+  [chart](assets/rtp_latency_d119af1.png).
 - [LED bulk upload and fade cadence — record 8bb30e7](measurements/pipeline_8bb30e7.md):
   controlled A/B measurements at `bfbf93d`, including CPU and stall evidence;
   [JSON data](measurements/pipeline_8bb30e7.json),
@@ -46,8 +57,8 @@ provenance. Earlier reports and the October Wi-Fi chart remain dated results.
   [chart](assets/rtp_latency_9aa05ea.png) are retained.
 
 In the October 18 local MIDI test, synthetic source → instrumented output
-averages 7.5080 ms with a p99 of 13.2153 ms at 20 ms per chord. The final long
-Wi-Fi test delivers 6,250/6,250 messages in order but reaches 97.34 ms. A shorter
+averages 7.5080 ms with a p99 of 13.2153 ms at 20 ms per chord. The historical
+October long Wi-Fi test delivers 6,250/6,250 messages in order but reaches 97.34 ms. A shorter
 lossless test therefore does not prove bounded latency.
 
 ## LED transmission — September 23, 2026
